@@ -7,7 +7,7 @@ use crate::state::InsurancePolicy;
 
 /// Submit an insurance claim for an active policy.
 /// Only the policy holder can submit.
-pub fn handler(
+pub fn submit_claim_handler(
     ctx: Context<SubmitClaim>,
     trigger_type: u8,
     trigger_tx_signature: Vec<u8>,

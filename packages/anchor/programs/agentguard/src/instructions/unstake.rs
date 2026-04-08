@@ -36,6 +36,7 @@ pub fn request_unstake_handler(ctx: Context<RequestUnstake>) -> Result<()> {
 /// Phase 2: Execute unstake — transfers USDC + rewards after cooldown.
 pub fn execute_unstake_handler(ctx: Context<ExecuteUnstake>) -> Result<()> {
     let staker_position = &mut ctx.accounts.staker_position;
+    let vault_info = ctx.accounts.vault.to_account_info();
     let vault = &mut ctx.accounts.vault;
     let clock = Clock::get()?;
     let now = clock.unix_timestamp;
@@ -72,7 +73,7 @@ pub fn execute_unstake_handler(ctx: Context<ExecuteUnstake>) -> Result<()> {
         Transfer {
             from: ctx.accounts.vault_token_account.to_account_info(),
             to: ctx.accounts.staker_token_account.to_account_info(),
-            authority: ctx.accounts.vault.to_account_info(),
+            authority: vault_info.clone(),
         },
         signer_seeds,
     );

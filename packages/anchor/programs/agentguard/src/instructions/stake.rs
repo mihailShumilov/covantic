@@ -1,13 +1,13 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 
-use crate::constants::*;
+use crate::constants::{CONFIG_SEED, STAKER_SEED, VAULT_SEED};
 use crate::errors::AgentGuardError;
 use crate::events::Staked;
 use crate::state::{InsuranceVault, ProtocolConfig, StakerPosition};
 
 /// Stake USDC into the insurance pool.
-pub fn handler(ctx: Context<Stake>, amount: u64) -> Result<()> {
+pub fn stake_handler(ctx: Context<Stake>, amount: u64) -> Result<()> {
     let config = &ctx.accounts.config;
     let vault = &mut ctx.accounts.vault;
     let staker_position = &mut ctx.accounts.staker_position;

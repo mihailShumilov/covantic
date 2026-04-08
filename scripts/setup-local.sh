@@ -35,6 +35,11 @@ else
   echo -e "${GREEN}.env already exists${NC}"
 fi
 
+# Load .env so subsequent steps can use the values
+set -a
+source .env
+set +a
+
 # 4. Generate Solana keypairs
 echo -e "\n${YELLOW}[4/8] Generating Solana keypairs...${NC}"
 mkdir -p keys
@@ -61,18 +66,21 @@ echo -e "${GREEN}Shared package built${NC}"
 
 # 7. Run migrations
 echo -e "\n${YELLOW}[7/8] Running database migrations...${NC}"
-pnpm --filter api run db:push 2>/dev/null || echo -e "${YELLOW}Migrations skipped (run manually after API build)${NC}"
+cd packages/api && npx drizzle-kit push --force 2>/dev/null && cd ../.. || { cd ../.. 2>/dev/null; echo -e "${YELLOW}Migrations skipped (run manually after API build)${NC}"; }
 echo -e "${GREEN}Migrations step complete${NC}"
 
 # 8. Build Anchor program (if available)
 echo -e "\n${YELLOW}[8/8] Building Anchor program...${NC}"
 if command -v anchor >/dev/null 2>&1; then
-  cd packages/anchor
-  anchor build
-  echo -e "${GREEN}Anchor program built${NC}"
-  cd ../..
+  if command -v cargo-build-sbf >/dev/null 2>&1 || command -v solana >/dev/null 2>&1; then
+    cd packages/anchor
+    anchor build --no-idl && echo -e "${GREEN}Anchor program built${NC}" || echo -e "${YELLOW}Anchor build failed. Check Solana CLI and Anchor versions.${NC}"
+    cd ../..
+  else
+    echo -e "${YELLOW}Solana CLI not found (cargo-build-sbf required). Install: sh -c \"\$(curl -sSfL https://release.anza.xyz/stable/install)\"${NC}"
+  fi
 else
-  echo -e "${YELLOW}Anchor CLI not found. Skipping program build.${NC}"
+  echo -e "${YELLOW}Anchor CLI not found. Install: cargo install --git https://github.com/coral-xyz/anchor avm && avm install 0.30.1 && avm use 0.30.1${NC}"
 fi
 
 echo -e "\n${GREEN}=========================================${NC}"

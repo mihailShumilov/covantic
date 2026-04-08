@@ -7,7 +7,7 @@ use crate::state::{InsurancePolicy, InsuranceVault};
 
 /// Mark an expired policy as Expired.
 /// Permissionless crank — anyone can call this.
-pub fn handler(ctx: Context<ExpirePolicy>) -> Result<()> {
+pub fn expire_policy_handler(ctx: Context<ExpirePolicy>) -> Result<()> {
     let policy = &mut ctx.accounts.policy;
     let vault = &mut ctx.accounts.vault;
     let clock = Clock::get()?;

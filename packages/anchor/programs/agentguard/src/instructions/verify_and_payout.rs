@@ -8,9 +8,10 @@ use crate::state::{InsurancePolicy, InsuranceVault, ProtocolConfig};
 
 /// Verify a pending claim and execute payout.
 /// Only the oracle authority can call this instruction.
-pub fn handler(ctx: Context<VerifyAndPayout>, payout_amount: u64) -> Result<()> {
+pub fn verify_and_payout_handler(ctx: Context<VerifyAndPayout>, payout_amount: u64) -> Result<()> {
     let config = &ctx.accounts.config;
     let policy = &mut ctx.accounts.policy;
+    let vault_info = ctx.accounts.vault.to_account_info();
     let vault = &mut ctx.accounts.vault;
     let clock = Clock::get()?;
     let now = clock.unix_timestamp;
@@ -64,7 +65,7 @@ pub fn handler(ctx: Context<VerifyAndPayout>, payout_amount: u64) -> Result<()> 
         Transfer {
             from: ctx.accounts.vault_token_account.to_account_info(),
             to: ctx.accounts.holder_token_account.to_account_info(),
-            authority: ctx.accounts.vault.to_account_info(),
+            authority: vault_info.clone(),
         },
         signer_seeds,
     );

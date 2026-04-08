@@ -7,7 +7,7 @@ use crate::events::RewardsClaimed;
 use crate::state::{InsuranceVault, StakerPosition};
 
 /// Claim accumulated staker rewards.
-pub fn handler(ctx: Context<ClaimRewards>) -> Result<()> {
+pub fn claim_rewards_handler(ctx: Context<ClaimRewards>) -> Result<()> {
     let staker_position = &mut ctx.accounts.staker_position;
     let vault = &mut ctx.accounts.vault;
 

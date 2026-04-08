@@ -7,8 +7,9 @@ use crate::events::PolicyCancelled;
 use crate::state::{InsurancePolicy, InsuranceVault};
 
 /// Cancel an active policy with partial refund (20% penalty).
-pub fn handler(ctx: Context<CancelPolicy>) -> Result<()> {
+pub fn cancel_policy_handler(ctx: Context<CancelPolicy>) -> Result<()> {
     let policy = &mut ctx.accounts.policy;
+    let vault_info = ctx.accounts.vault.to_account_info();
     let vault = &mut ctx.accounts.vault;
     let clock = Clock::get()?;
     let now = clock.unix_timestamp;
@@ -64,7 +65,7 @@ pub fn handler(ctx: Context<CancelPolicy>) -> Result<()> {
             Transfer {
                 from: ctx.accounts.vault_token_account.to_account_info(),
                 to: ctx.accounts.holder_token_account.to_account_info(),
-                authority: ctx.accounts.vault.to_account_info(),
+                authority: vault_info.clone(),
             },
             signer_seeds,
         );

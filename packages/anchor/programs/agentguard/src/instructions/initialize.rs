@@ -7,7 +7,7 @@ use crate::state::{InsuranceVault, ProtocolConfig};
 
 /// Initialize the protocol: creates config PDA, vault PDA, and vault token account.
 /// Called ONCE at deployment.
-pub fn handler(ctx: Context<Initialize>, oracle_authority: Pubkey) -> Result<()> {
+pub fn initialize_handler(ctx: Context<Initialize>, oracle_authority: Pubkey) -> Result<()> {
     // Initialize ProtocolConfig
     let config = &mut ctx.accounts.config;
     config.admin = ctx.accounts.admin.key();
@@ -19,8 +19,9 @@ pub fn handler(ctx: Context<Initialize>, oracle_authority: Pubkey) -> Result<()>
     config.bump = ctx.bumps.config;
 
     // Initialize InsuranceVault
+    let vault_key = ctx.accounts.vault.key();
     let vault = &mut ctx.accounts.vault;
-    vault.authority = ctx.accounts.vault.key();
+    vault.authority = vault_key;
     vault.total_staked = 0;
     vault.total_coverage = 0;
     vault.total_premiums_collected = 0;

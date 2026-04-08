@@ -8,7 +8,7 @@ use crate::state::{InsurancePolicy, InsuranceVault, ProtocolConfig};
 
 /// Create a new insurance policy.
 /// Holder pays premium in USDC which is transferred to the vault.
-pub fn handler(
+pub fn create_policy_handler(
     ctx: Context<CreatePolicy>,
     coverage_amount: u64,
     duration_seconds: i64,

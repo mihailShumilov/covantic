@@ -19,7 +19,7 @@ pub mod agentguard {
     /// Initialize protocol: creates config + vault.
     /// Called ONCE at deployment.
     pub fn initialize(ctx: Context<Initialize>, oracle_authority: Pubkey) -> Result<()> {
-        instructions::initialize::handler(ctx, oracle_authority)
+        initialize_handler(ctx, oracle_authority)
     }
 
     /// Create an insurance policy.
@@ -31,12 +31,12 @@ pub mod agentguard {
         risk_tier: u8,
         agent_address: Pubkey,
     ) -> Result<()> {
-        instructions::create_policy::handler(ctx, coverage_amount, duration_seconds, risk_tier, agent_address)
+        create_policy_handler(ctx, coverage_amount, duration_seconds, risk_tier, agent_address)
     }
 
     /// Cancel a policy with partial refund.
     pub fn cancel_policy(ctx: Context<CancelPolicy>) -> Result<()> {
-        instructions::cancel_policy::handler(ctx)
+        cancel_policy_handler(ctx)
     }
 
     /// Submit an insurance claim.
@@ -45,36 +45,36 @@ pub mod agentguard {
         trigger_type: u8,
         trigger_tx_signature: Vec<u8>,
     ) -> Result<()> {
-        instructions::submit_claim::handler(ctx, trigger_type, trigger_tx_signature)
+        submit_claim_handler(ctx, trigger_type, trigger_tx_signature)
     }
 
     /// Verify a claim and execute payout (oracle only).
     pub fn verify_and_payout(ctx: Context<VerifyAndPayout>, payout_amount: u64) -> Result<()> {
-        instructions::verify_and_payout::handler(ctx, payout_amount)
+        verify_and_payout_handler(ctx, payout_amount)
     }
 
     /// Mark expired policies (permissionless crank).
     pub fn expire_policy(ctx: Context<ExpirePolicy>) -> Result<()> {
-        instructions::expire_policy::handler(ctx)
+        expire_policy_handler(ctx)
     }
 
     /// Stake USDC into the insurance pool.
     pub fn stake(ctx: Context<Stake>, amount: u64) -> Result<()> {
-        instructions::stake::handler(ctx, amount)
+        stake_handler(ctx, amount)
     }
 
     /// Request unstake (starts 48h cooldown).
     pub fn request_unstake(ctx: Context<RequestUnstake>) -> Result<()> {
-        instructions::unstake::request_unstake_handler(ctx)
+        request_unstake_handler(ctx)
     }
 
     /// Execute unstake after cooldown.
     pub fn execute_unstake(ctx: Context<ExecuteUnstake>) -> Result<()> {
-        instructions::unstake::execute_unstake_handler(ctx)
+        execute_unstake_handler(ctx)
     }
 
     /// Claim accumulated staker rewards.
     pub fn claim_rewards(ctx: Context<ClaimRewards>) -> Result<()> {
-        instructions::claim_rewards::handler(ctx)
+        claim_rewards_handler(ctx)
     }
 }

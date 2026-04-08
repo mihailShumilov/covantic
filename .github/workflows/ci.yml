@@ -65,8 +65,8 @@ jobs:
       - name: Install Anchor CLI
         run: npm i -g @coral-xyz/anchor-cli@0.31.1
       - run: solana --version && anchor --version && rustc --version
-      - run: cd packages/anchor && anchor build
-      - run: cd packages/anchor && anchor test
+      - run: cd packages/anchor && anchor build --no-idl
+      - run: cd packages/anchor && anchor test --skip-build
 
   test-web:
     runs-on: ubuntu-latest
