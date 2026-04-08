@@ -1,0 +1,16 @@
+FROM node:22-alpine AS base
+RUN corepack enable && corepack prepare pnpm@9 --activate
+WORKDIR /app
+
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml tsconfig.base.json ./
+COPY packages/api/package.json ./packages/api/
+COPY packages/shared/package.json ./packages/shared/
+
+RUN pnpm install --frozen-lockfile
+
+COPY packages/api/ ./packages/api/
+COPY packages/shared/ ./packages/shared/
+
+RUN pnpm --filter shared build && pnpm --filter api build
+
+CMD ["pnpm", "--filter", "api", "run", "monitor"]

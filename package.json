@@ -1,0 +1,30 @@
+{
+  "name": "agentguard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI Agent Insurance Protocol on Solana",
+  "author": "Michael <info@trade-assistance.com>",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "test:anchor": "cd packages/anchor && anchor test",
+    "lint": "turbo run lint",
+    "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
+    "db:migrate": "pnpm --filter api run db:migrate",
+    "db:seed": "pnpm --filter api run db:seed",
+    "docker:up": "docker compose -f docker/docker-compose.yml up -d",
+    "docker:down": "docker compose -f docker/docker-compose.yml down",
+    "docker:logs": "docker compose -f docker/docker-compose.yml logs -f",
+    "setup": "bash scripts/setup-local.sh",
+    "deploy:devnet": "bash scripts/deploy-devnet.sh",
+    "demo": "tsx scripts/run-demo.ts",
+    "clean": "turbo run clean && rm -rf node_modules"
+  }
+}

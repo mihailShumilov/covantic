@@ -1,0 +1,25 @@
+[toolchain]
+anchor_version = "1.0.0"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.devnet]
+agentguard = "REPLACE_WITH_PROGRAM_ID"
+
+[programs.localnet]
+agentguard = "REPLACE_WITH_PROGRAM_ID"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "devnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "pnpm exec vitest run"
+
+[test]
+startup_wait = 5000

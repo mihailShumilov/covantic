@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.next/
+target/
+.env
+.env.local
+*.log
+.turbo
+.anchor
+keys/
+test-ledger/
+pgdata/
+redisdata/
