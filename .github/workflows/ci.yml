@@ -64,8 +64,6 @@ jobs:
           echo "$HOME/solana-release/bin" >> $GITHUB_PATH
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: 1.82.0
       - name: Install Anchor CLI
         run: npm i -g @coral-xyz/anchor-cli@0.30.1
       - run: solana --version && anchor --version && rustc --version
