@@ -67,7 +67,7 @@ export class HeliusClient {
         body: JSON.stringify({ transactions: [signature] }),
       });
       if (!res.ok) throw new Error(`Helius API error: ${res.status}`);
-      const data = await res.json();
+      const data = (await res.json()) as any[];
       return data[0] ?? null;
     } catch (error) {
       logger.error({ error, signature }, 'Failed to fetch parsed transaction');

@@ -23,9 +23,10 @@ export function registerErrorHandler(app: FastifyInstance) {
     );
 
     // Generic error response
-    const statusCode = error.statusCode ?? 500;
+    const err = error as Error & { statusCode?: number };
+    const statusCode = err.statusCode ?? 500;
     return reply.status(statusCode).send({
-      error: statusCode >= 500 ? 'Internal server error' : error.message,
+      error: statusCode >= 500 ? 'Internal server error' : err.message,
     });
   });
 }

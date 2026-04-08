@@ -1,4 +1,4 @@
-import { type RiskAssessment, type Policy, calculatePremium, RiskTier } from '@agentguard/shared';
+import { type RiskAssessment, type Policy, RiskTier } from '@agentguard/shared';
 import type { AgentGuardConfig } from './types.js';
 
 /**
@@ -9,13 +9,11 @@ export class AgentGuardPlugin {
   name = 'agentguard';
   description = 'AI Agent Insurance Protocol — buy coverage, submit claims, check risk';
 
-  private programId: string;
   private apiUrl: string;
   private defaultCoverage: number;
   private defaultDuration: number;
 
   constructor(config: AgentGuardConfig) {
-    this.programId = config.programId;
     this.apiUrl = config.apiUrl ?? 'https://api.agentguard.xyz';
     this.defaultCoverage = config.defaultCoverage ?? 100_000_000; // 100 USDC
     this.defaultDuration = config.defaultDuration ?? 86400; // 24h

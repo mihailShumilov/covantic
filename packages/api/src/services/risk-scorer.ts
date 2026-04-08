@@ -32,7 +32,7 @@ export async function assessRisk(
     helius.getAccountInfo(agentAddress),
   ]);
 
-  const factors = calculateFactors(transactions, balances, accountInfo);
+  const factors = calculateFactors(transactions as any[], balances as any, accountInfo as any);
 
   const score =
     factors.failedRatio * WEIGHTS.failedRatio +
