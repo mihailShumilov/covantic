@@ -89,7 +89,9 @@ export default function DemoPage() {
 
           {/* Demo Agent Info */}
           <Card title="Demo Agent: RiskyBot">
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-md)' }}>
+            <div
+              style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-md)' }}
+            >
               <div>
                 <p style={{ color: 'var(--color-text-muted)', fontSize: '0.75rem' }}>Risk Tier</p>
                 <Badge variant="danger">HIGH</Badge>
@@ -103,11 +105,21 @@ export default function DemoPage() {
                 <p style={{ fontWeight: 600 }}>$0.55 USDC</p>
               </div>
               <div>
-                <p style={{ color: 'var(--color-text-muted)', fontSize: '0.75rem' }}>Policy Duration</p>
+                <p style={{ color: 'var(--color-text-muted)', fontSize: '0.75rem' }}>
+                  Policy Duration
+                </p>
                 <p style={{ fontWeight: 600 }}>24 hours</p>
               </div>
             </div>
-            <div style={{ marginTop: 'var(--space-md)', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--color-text-muted)', wordBreak: 'break-all' }}>
+            <div
+              style={{
+                marginTop: 'var(--space-md)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '0.75rem',
+                color: 'var(--color-text-muted)',
+                wordBreak: 'break-all',
+              }}
+            >
               {DEMO_AGENT}
             </div>
           </Card>
@@ -115,10 +127,25 @@ export default function DemoPage() {
           {/* Simulation Log */}
           {simulationLog.length > 0 && (
             <Card title="Event Log">
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8125rem', display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '0.8125rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 4,
+                }}
+              >
                 {simulationLog.map((log, i) => (
-                  <div key={i} className="animate-fadeIn" style={{ color: 'var(--color-text-secondary)' }}>
-                    <span style={{ color: 'var(--color-text-muted)' }}>[{new Date().toLocaleTimeString()}]</span> {log}
+                  <div
+                    key={i}
+                    className="animate-fadeIn"
+                    style={{ color: 'var(--color-text-secondary)' }}
+                  >
+                    <span style={{ color: 'var(--color-text-muted)' }}>
+                      [{new Date().toLocaleTimeString()}]
+                    </span>{' '}
+                    {log}
                   </div>
                 ))}
               </div>
@@ -132,11 +159,20 @@ export default function DemoPage() {
             <ClaimVerificationPipeline
               autoPlay={true}
               onComplete={() => {
-                setSimulationLog((prev) => [...prev, 'Payout completed! USDC transferred to agent owner.']);
+                setSimulationLog((prev) => [
+                  ...prev,
+                  'Payout completed! USDC transferred to agent owner.',
+                ]);
               }}
             />
           ) : (
-            <div style={{ textAlign: 'center', padding: 'var(--space-2xl)', color: 'var(--color-text-muted)' }}>
+            <div
+              style={{
+                textAlign: 'center',
+                padding: 'var(--space-2xl)',
+                color: 'var(--color-text-muted)',
+              }}
+            >
               <p>Select a simulation to start the verification pipeline</p>
             </div>
           )}

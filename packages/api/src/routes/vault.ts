@@ -31,9 +31,7 @@ export async function vaultRoutes(app: FastifyInstance) {
 
   /** GET /api/vault/history — Vault snapshot history */
   app.get('/api/vault/history', async (request, reply) => {
-    const { limit } = z
-      .object({ limit: z.coerce.number().default(30) })
-      .parse(request.query);
+    const { limit } = z.object({ limit: z.coerce.number().default(30) }).parse(request.query);
 
     const history = await app.db
       .select()

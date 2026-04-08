@@ -24,13 +24,25 @@ export async function verifyClaim(
     case TriggerType.Exploit:
       return verifyExploit(triggerTxSignature, agentAddress, coverageAmount, helius);
     case TriggerType.OracleManipulation:
-      return verifyOracleManipulation(triggerTxSignature, agentAddress, coverageAmount, helius, pyth);
+      return verifyOracleManipulation(
+        triggerTxSignature,
+        agentAddress,
+        coverageAmount,
+        helius,
+        pyth,
+      );
     case TriggerType.AgentError:
       return verifyAgentError(triggerTxSignature, agentAddress, coverageAmount, helius);
     case TriggerType.GovernanceAttack:
       return verifyGovernanceAttack(triggerTxSignature, agentAddress, coverageAmount, helius);
     default:
-      return { verified: false, lossAmount: 0, confidence: 0, details: { error: 'Unknown trigger type' }, lockPeriod: 0 };
+      return {
+        verified: false,
+        lossAmount: 0,
+        confidence: 0,
+        details: { error: 'Unknown trigger type' },
+        lockPeriod: 0,
+      };
   }
 }
 
@@ -49,14 +61,18 @@ async function verifyExploit(
 
   const tx = await helius.getParsedTransaction(txSignature);
   if (!tx) {
-    return { verified: false, lossAmount: 0, confidence: 0, details: { error: 'Transaction not found' }, lockPeriod: 0 };
+    return {
+      verified: false,
+      lossAmount: 0,
+      confidence: 0,
+      details: { error: 'Transaction not found' },
+      lockPeriod: 0,
+    };
   }
 
   // Check for significant balance drop
   const tokenTransfers = tx.tokenTransfers ?? [];
-  const outgoing = tokenTransfers.filter(
-    (t: any) => t.fromUserAccount === agentAddress,
-  );
+  const outgoing = tokenTransfers.filter((t: any) => t.fromUserAccount === agentAddress);
 
   let totalLoss = 0;
   for (const transfer of outgoing) {
@@ -99,7 +115,13 @@ async function verifyOracleManipulation(
 
   const tx = await helius.getParsedTransaction(txSignature);
   if (!tx) {
-    return { verified: false, lossAmount: 0, confidence: 0, details: { error: 'Transaction not found' }, lockPeriod: 0 };
+    return {
+      verified: false,
+      lossAmount: 0,
+      confidence: 0,
+      details: { error: 'Transaction not found' },
+      lockPeriod: 0,
+    };
   }
 
   // Get current price and TWAP
@@ -107,14 +129,22 @@ async function verifyOracleManipulation(
   const twap = await pyth.getTwap('SOL/USD', 300); // 5-min TWAP
 
   if (!currentPrice || !twap) {
-    return { verified: false, lossAmount: 0, confidence: 0, details: { error: 'Price data unavailable' }, lockPeriod: 0 };
+    return {
+      verified: false,
+      lossAmount: 0,
+      confidence: 0,
+      details: { error: 'Price data unavailable' },
+      lockPeriod: 0,
+    };
   }
 
   const deviation = Math.abs(currentPrice.price - twap) / twap;
   const verified = deviation > 0.05; // > 5% deviation
 
   // Calculate loss = position * deviation
-  const lossAmount = verified ? Math.min(Math.round(coverageAmount * deviation), coverageAmount) : 0;
+  const lossAmount = verified
+    ? Math.min(Math.round(coverageAmount * deviation), coverageAmount)
+    : 0;
 
   return {
     verified,
@@ -146,24 +176,31 @@ async function verifyAgentError(
 
   const tx = await helius.getParsedTransaction(txSignature);
   if (!tx) {
-    return { verified: false, lossAmount: 0, confidence: 0, details: { error: 'Transaction not found' }, lockPeriod: 0 };
+    return {
+      verified: false,
+      lossAmount: 0,
+      confidence: 0,
+      details: { error: 'Transaction not found' },
+      lockPeriod: 0,
+    };
   }
 
   // Check for abnormally large transfer
   const tokenTransfers = tx.tokenTransfers ?? [];
-  const outgoing = tokenTransfers.filter(
-    (t: any) => t.fromUserAccount === agentAddress,
-  );
+  const outgoing = tokenTransfers.filter((t: any) => t.fromUserAccount === agentAddress);
 
   // Get historical average (from recent transactions)
   const history = await helius.getEnhancedTransactions(agentAddress, { limit: 50 });
   const historicalAmounts = (Array.isArray(history) ? history : [])
-    .flatMap((h: any) => (h.tokenTransfers ?? []).filter((t: any) => t.fromUserAccount === agentAddress))
+    .flatMap((h: any) =>
+      (h.tokenTransfers ?? []).filter((t: any) => t.fromUserAccount === agentAddress),
+    )
     .map((t: any) => t.tokenAmount ?? 0);
 
-  const avgAmount = historicalAmounts.length > 0
-    ? historicalAmounts.reduce((a: number, b: number) => a + b, 0) / historicalAmounts.length
-    : 0;
+  const avgAmount =
+    historicalAmounts.length > 0
+      ? historicalAmounts.reduce((a: number, b: number) => a + b, 0) / historicalAmounts.length
+      : 0;
 
   const currentAmount = outgoing.reduce((sum: number, t: any) => sum + (t.tokenAmount ?? 0), 0);
 
@@ -201,20 +238,22 @@ async function verifyGovernanceAttack(
 
   const tx = await helius.getParsedTransaction(txSignature);
   if (!tx) {
-    return { verified: false, lossAmount: 0, confidence: 0, details: { error: 'Transaction not found' }, lockPeriod: 0 };
+    return {
+      verified: false,
+      lossAmount: 0,
+      confidence: 0,
+      details: { error: 'Transaction not found' },
+      lockPeriod: 0,
+    };
   }
 
   // Check for authority changes in the transaction
   const accountChanges = tx.accountData ?? [];
-  const hasAuthorityChange = accountChanges.some(
-    (change: any) => change.nativeBalanceChange < 0,
-  );
+  const hasAuthorityChange = accountChanges.some((change: any) => change.nativeBalanceChange < 0);
 
   // Simplified: check for large outgoing transfers that indicate drain
   const tokenTransfers = tx.tokenTransfers ?? [];
-  const outgoing = tokenTransfers.filter(
-    (t: any) => t.fromUserAccount === agentAddress,
-  );
+  const outgoing = tokenTransfers.filter((t: any) => t.fromUserAccount === agentAddress);
   const totalLoss = outgoing.reduce((sum: number, t: any) => sum + (t.tokenAmount ?? 0), 0);
 
   const verified = hasAuthorityChange || totalLoss > 0;

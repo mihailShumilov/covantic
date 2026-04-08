@@ -13,9 +13,13 @@ export function startAnalyticsAggregator(db: Database, redis: Redis) {
   const queue = new Queue(QUEUE_NAME, { connection: redis });
 
   // Schedule recurring job every hour
-  queue.upsertJobScheduler('aggregate-analytics', { every: 3_600_000 }, {
-    name: 'create-vault-snapshot',
-  });
+  queue.upsertJobScheduler(
+    'aggregate-analytics',
+    { every: 3_600_000 },
+    {
+      name: 'create-vault-snapshot',
+    },
+  );
 
   const worker = new Worker(
     QUEUE_NAME,

@@ -34,7 +34,7 @@ export class PythClient {
   }
 
   /** Calculate TWAP over a time window */
-  async getTwap(feedId: string, windowSeconds: number): Promise<number | null> {
+  async getTwap(feedId: string, _windowSeconds: number): Promise<number | null> {
     try {
       // In production, query historical price data
       const price = await this.getPrice(feedId);

@@ -33,7 +33,11 @@ export function Button({
 
   const variants: Record<string, React.CSSProperties> = {
     primary: { background: 'var(--color-primary)', color: '#fff' },
-    secondary: { background: 'var(--color-surface)', color: 'var(--color-text)', border: '1px solid var(--color-border)' },
+    secondary: {
+      background: 'var(--color-surface)',
+      color: 'var(--color-text)',
+      border: '1px solid var(--color-border)',
+    },
     danger: { background: 'var(--color-danger)', color: '#fff' },
     ghost: { background: 'transparent', color: 'var(--color-text-secondary)' },
   };
@@ -50,7 +54,19 @@ export function Button({
       disabled={disabled || loading}
       {...props}
     >
-      {loading && <span className="animate-spin" style={{ width: 16, height: 16, border: '2px solid transparent', borderTopColor: 'currentColor', borderRadius: '50%', display: 'inline-block' }} />}
+      {loading && (
+        <span
+          className="animate-spin"
+          style={{
+            width: 16,
+            height: 16,
+            border: '2px solid transparent',
+            borderTopColor: 'currentColor',
+            borderRadius: '50%',
+            display: 'inline-block',
+          }}
+        />
+      )}
       {children}
     </button>
   );

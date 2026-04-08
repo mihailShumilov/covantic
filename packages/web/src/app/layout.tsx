@@ -7,7 +7,8 @@ import '@/styles/globals.css';
 
 export const metadata: Metadata = {
   title: 'AgentGuard — AI Agent Insurance on Solana',
-  description: 'First parametric insurance protocol for AI agents on Solana. Protect your agents against DeFi exploits, oracle manipulation, and more.',
+  description:
+    'First parametric insurance protocol for AI agents on Solana. Protect your agents against DeFi exploits, oracle manipulation, and more.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

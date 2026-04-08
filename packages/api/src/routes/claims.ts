@@ -33,11 +33,7 @@ export async function claimRoutes(app: FastifyInstance) {
   app.get('/api/claims/:id', async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
 
-    const result = await app.db
-      .select()
-      .from(claims)
-      .where(eq(claims.id, id))
-      .limit(1);
+    const result = await app.db.select().from(claims).where(eq(claims.id, id)).limit(1);
 
     if (result.length === 0) {
       return reply.status(404).send({ error: 'Claim not found' });

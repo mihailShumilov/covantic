@@ -5,14 +5,18 @@
 AgentGuard is a parametric insurance protocol for AI agents on Solana. The system consists of five main components:
 
 ### 1. Solana Program (Anchor)
+
 On-chain smart contract managing:
+
 - Protocol configuration and vault state
 - Insurance policy lifecycle (create, cancel, expire)
 - Claim submission and oracle-verified payouts
 - USDC staking pool with reward distribution
 
 ### 2. Backend API (Fastify)
+
 Off-chain service providing:
+
 - AI risk scoring engine (7-factor weighted model)
 - Claim verification oracle (4 trigger types)
 - Transaction monitoring via Helius webhooks
@@ -20,7 +24,9 @@ Off-chain service providing:
 - Background workers (expiry crank, solvency checker, analytics)
 
 ### 3. Frontend (Next.js)
+
 Dashboard application with:
+
 - Agent risk assessment interface
 - Policy management (buy, view, cancel)
 - Staking pool management
@@ -28,13 +34,16 @@ Dashboard application with:
 - Demo mode for hackathon presentation
 
 ### 4. SDK Plugin
+
 Solana Agent Kit integration enabling AI agents to:
+
 - Check risk scores programmatically
 - Purchase insurance before DeFi operations
 - Submit claims automatically
 - Query active policies
 
 ### 5. Shared Package
+
 Cross-package types, constants, and utility functions ensuring type safety across the entire stack.
 
 ## Data Flow

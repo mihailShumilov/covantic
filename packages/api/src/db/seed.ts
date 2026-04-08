@@ -16,34 +16,37 @@ async function seed() {
   logger.info('Seeding database...');
 
   // Create test agents
-  await db.insert(schema.agents).values([
-    {
-      walletAddress: '7nYBm3hXGDFQGfTXvbVwHJCmKxXJEATBGVK7FvCGVzDr',
-      ownerAddress: 'DemoOwner111111111111111111111111111111111',
-      name: 'SafeTrader',
-      description: 'Conservative DeFi trading agent with low risk profile',
-      riskScore: 0.15,
-      riskTier: 0,
-      riskScoredAt: new Date(),
-      totalTransactions: 1250,
-      failedTransactions: 12,
-      protocolsUsed: 5,
-      walletAge: 180,
-    },
-    {
-      walletAddress: '3kTzqDN8uEZwFEhQKvPXDvMkZxvPcFpHgEL9mJQfYWxC',
-      ownerAddress: 'DemoOwner111111111111111111111111111111111',
-      name: 'RiskyBot',
-      description: 'Aggressive DeFi arbitrage agent with high risk tolerance',
-      riskScore: 0.72,
-      riskTier: 2,
-      riskScoredAt: new Date(),
-      totalTransactions: 8500,
-      failedTransactions: 850,
-      protocolsUsed: 12,
-      walletAge: 45,
-    },
-  ]).onConflictDoNothing();
+  await db
+    .insert(schema.agents)
+    .values([
+      {
+        walletAddress: '7nYBm3hXGDFQGfTXvbVwHJCmKxXJEATBGVK7FvCGVzDr',
+        ownerAddress: 'DemoOwner111111111111111111111111111111111',
+        name: 'SafeTrader',
+        description: 'Conservative DeFi trading agent with low risk profile',
+        riskScore: 0.15,
+        riskTier: 0,
+        riskScoredAt: new Date(),
+        totalTransactions: 1250,
+        failedTransactions: 12,
+        protocolsUsed: 5,
+        walletAge: 180,
+      },
+      {
+        walletAddress: '3kTzqDN8uEZwFEhQKvPXDvMkZxvPcFpHgEL9mJQfYWxC',
+        ownerAddress: 'DemoOwner111111111111111111111111111111111',
+        name: 'RiskyBot',
+        description: 'Aggressive DeFi arbitrage agent with high risk tolerance',
+        riskScore: 0.72,
+        riskTier: 2,
+        riskScoredAt: new Date(),
+        totalTransactions: 8500,
+        failedTransactions: 850,
+        protocolsUsed: 12,
+        walletAge: 45,
+      },
+    ])
+    .onConflictDoNothing();
 
   // Create initial vault snapshot
   await db.insert(schema.vaultSnapshots).values({

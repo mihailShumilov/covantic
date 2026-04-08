@@ -62,16 +62,11 @@ export class NotificationService {
 
   /** Set up Redis pub/sub for cross-process broadcasting */
   private setupRedisSubscription(): void {
-    this.subscriber.subscribe(
-      'claims:feed',
-      'vault:stats',
-      'monitoring:alerts',
-      (err) => {
-        if (err) {
-          logger.error({ error: err }, 'Failed to subscribe to Redis channels');
-        }
-      },
-    );
+    this.subscriber.subscribe('claims:feed', 'vault:stats', 'monitoring:alerts', (err) => {
+      if (err) {
+        logger.error({ error: err }, 'Failed to subscribe to Redis channels');
+      }
+    });
 
     this.subscriber.on('message', (channel, message) => {
       try {

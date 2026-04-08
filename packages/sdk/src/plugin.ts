@@ -35,7 +35,8 @@ export class AgentGuardPlugin {
     return [
       {
         name: 'agentguard_get_risk_score',
-        description: 'Get the risk score and insurance premium quote for an AI agent wallet address',
+        description:
+          'Get the risk score and insurance premium quote for an AI agent wallet address',
         parameters: {
           type: 'object',
           properties: {
@@ -47,7 +48,8 @@ export class AgentGuardPlugin {
       },
       {
         name: 'agentguard_buy_insurance',
-        description: 'Purchase an insurance policy to protect against DeFi losses. Pays premium in USDC.',
+        description:
+          'Purchase an insurance policy to protect against DeFi losses. Pays premium in USDC.',
         parameters: {
           type: 'object',
           properties: {
@@ -78,7 +80,10 @@ export class AgentGuardPlugin {
           type: 'object',
           properties: {
             policyId: { type: 'number', description: 'Policy ID' },
-            triggerType: { type: 'number', description: '1=Exploit, 2=Oracle, 3=AgentError, 4=Governance' },
+            triggerType: {
+              type: 'number',
+              description: '1=Exploit, 2=Oracle, 3=AgentError, 4=Governance',
+            },
             txSignature: { type: 'string', description: 'Transaction signature of the incident' },
           },
           required: ['policyId', 'triggerType', 'txSignature'],

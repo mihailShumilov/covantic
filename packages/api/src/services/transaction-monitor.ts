@@ -39,7 +39,6 @@ export class TransactionMonitor {
   /** Analyze a single transaction for anomalies */
   private async processTransaction(tx: any): Promise<void> {
     const signature = tx.signature;
-    const accounts = tx.accountData ?? [];
     const tokenTransfers = tx.tokenTransfers ?? [];
 
     // Find involved agent addresses (check against active policies)
@@ -51,9 +50,7 @@ export class TransactionMonitor {
       const activePolicies = await this.db
         .select()
         .from(policies)
-        .where(
-          and(eq(policies.agentAddress, agentAddress), eq(policies.state, 0)),
-        );
+        .where(and(eq(policies.agentAddress, agentAddress), eq(policies.state, 0)));
 
       if (activePolicies.length === 0) continue;
 
@@ -98,17 +95,13 @@ export class TransactionMonitor {
     tx: any,
     agentAddress: string,
   ): Array<{ type: string; severity: string; details: Record<string, unknown> }> {
-    const anomalies: Array<{ type: string; severity: string; details: Record<string, unknown> }> = [];
+    const anomalies: Array<{ type: string; severity: string; details: Record<string, unknown> }> =
+      [];
     const tokenTransfers = tx.tokenTransfers ?? [];
 
     // Check for large balance drops
-    const outgoing = tokenTransfers.filter(
-      (t: any) => t.fromUserAccount === agentAddress,
-    );
-    const totalOutgoing = outgoing.reduce(
-      (sum: number, t: any) => sum + (t.tokenAmount ?? 0),
-      0,
-    );
+    const outgoing = tokenTransfers.filter((t: any) => t.fromUserAccount === agentAddress);
+    const totalOutgoing = outgoing.reduce((sum: number, t: any) => sum + (t.tokenAmount ?? 0), 0);
 
     if (totalOutgoing > 1000) {
       // > 1000 token units

@@ -11,9 +11,13 @@ export function startSolvencyChecker(db: Database, redis: Redis) {
   const queue = new Queue(QUEUE_NAME, { connection: redis });
 
   // Schedule recurring job every 5 minutes
-  queue.upsertJobScheduler('check-solvency', { every: 300_000 }, {
-    name: 'check-vault-solvency',
-  });
+  queue.upsertJobScheduler(
+    'check-solvency',
+    { every: 300_000 },
+    {
+      name: 'check-vault-solvency',
+    },
+  );
 
   const worker = new Worker(
     QUEUE_NAME,

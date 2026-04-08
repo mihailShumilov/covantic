@@ -58,11 +58,7 @@ export async function assessRisk(
 }
 
 /** Calculate all 7 risk factors from on-chain data. All normalized 0-1, higher = riskier. */
-function calculateFactors(
-  transactions: any[],
-  balances: any,
-  accountInfo: any,
-): RiskFactors {
+function calculateFactors(transactions: any[], balances: any, accountInfo: any): RiskFactors {
   const txs = Array.isArray(transactions) ? transactions : [];
 
   // 1. Failed transaction ratio
@@ -159,9 +155,13 @@ function scoreToTier(score: number): RiskTier {
 
 function tierToPremiumBps(tier: RiskTier): number {
   switch (tier) {
-    case RiskTier.LOW: return PREMIUM_BPS.LOW;
-    case RiskTier.MEDIUM: return PREMIUM_BPS.MEDIUM;
-    case RiskTier.HIGH: return PREMIUM_BPS.HIGH;
-    case RiskTier.EXTREME: return -1;
+    case RiskTier.LOW:
+      return PREMIUM_BPS.LOW;
+    case RiskTier.MEDIUM:
+      return PREMIUM_BPS.MEDIUM;
+    case RiskTier.HIGH:
+      return PREMIUM_BPS.HIGH;
+    case RiskTier.EXTREME:
+      return -1;
   }
 }

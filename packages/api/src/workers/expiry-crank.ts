@@ -13,9 +13,13 @@ export function startExpiryCrank(db: Database, redis: Redis) {
   const queue = new Queue(QUEUE_NAME, { connection: redis });
 
   // Schedule recurring job every 60 seconds
-  queue.upsertJobScheduler('check-expired', { every: 60_000 }, {
-    name: 'check-expired-policies',
-  });
+  queue.upsertJobScheduler(
+    'check-expired',
+    { every: 60_000 },
+    {
+      name: 'check-expired-policies',
+    },
+  );
 
   const worker = new Worker(
     QUEUE_NAME,

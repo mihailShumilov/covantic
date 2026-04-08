@@ -18,7 +18,9 @@ import { sql } from 'drizzle-orm';
 export const agents = pgTable(
   'agents',
   {
-    id: uuid('id').default(sql`gen_random_uuid()`).primaryKey(),
+    id: uuid('id')
+      .default(sql`gen_random_uuid()`)
+      .primaryKey(),
     walletAddress: varchar('wallet_address', { length: 44 }).notNull().unique(),
     ownerAddress: varchar('owner_address', { length: 44 }).notNull(),
     name: varchar('name', { length: 128 }),
@@ -50,7 +52,9 @@ export const agents = pgTable(
 export const policies = pgTable(
   'policies',
   {
-    id: uuid('id').default(sql`gen_random_uuid()`).primaryKey(),
+    id: uuid('id')
+      .default(sql`gen_random_uuid()`)
+      .primaryKey(),
     policyId: bigint('policy_id', { mode: 'number' }).notNull().unique(),
     holderAddress: varchar('holder_address', { length: 44 }).notNull(),
     agentAddress: varchar('agent_address', { length: 44 }).notNull(),
@@ -86,7 +90,9 @@ export const policies = pgTable(
 export const claims = pgTable(
   'claims',
   {
-    id: uuid('id').default(sql`gen_random_uuid()`).primaryKey(),
+    id: uuid('id')
+      .default(sql`gen_random_uuid()`)
+      .primaryKey(),
     policyId: bigint('policy_id', { mode: 'number' }).notNull(),
     holderAddress: varchar('holder_address', { length: 44 }).notNull(),
     agentAddress: varchar('agent_address', { length: 44 }).notNull(),
@@ -119,7 +125,9 @@ export const claims = pgTable(
 export const monitoringEvents = pgTable(
   'monitoring_events',
   {
-    id: uuid('id').default(sql`gen_random_uuid()`).primaryKey(),
+    id: uuid('id')
+      .default(sql`gen_random_uuid()`)
+      .primaryKey(),
     agentAddress: varchar('agent_address', { length: 44 }).notNull(),
     eventType: varchar('event_type', { length: 64 }).notNull(),
     severity: varchar('severity', { length: 16 }).notNull(),
@@ -139,7 +147,9 @@ export const monitoringEvents = pgTable(
 export const vaultSnapshots = pgTable(
   'vault_snapshots',
   {
-    id: uuid('id').default(sql`gen_random_uuid()`).primaryKey(),
+    id: uuid('id')
+      .default(sql`gen_random_uuid()`)
+      .primaryKey(),
     totalStaked: bigint('total_staked', { mode: 'number' }).notNull(),
     totalCoverage: bigint('total_coverage', { mode: 'number' }).notNull(),
     totalPremiums: bigint('total_premiums', { mode: 'number' }).notNull(),

@@ -16,7 +16,9 @@ export function Modal({ open, onClose, title, children }: ModalProps) {
     } else {
       document.body.style.overflow = '';
     }
-    return () => { document.body.style.overflow = ''; };
+    return () => {
+      document.body.style.overflow = '';
+    };
   }, [open]);
 
   if (!open) return null;
@@ -49,11 +51,24 @@ export function Modal({ open, onClose, title, children }: ModalProps) {
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-lg)' }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 'var(--space-lg)',
+          }}
+        >
           <h2 style={{ fontSize: '1.25rem', fontWeight: 700 }}>{title}</h2>
           <button
             onClick={onClose}
-            style={{ background: 'none', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer', fontSize: '1.5rem' }}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--color-text-muted)',
+              cursor: 'pointer',
+              fontSize: '1.5rem',
+            }}
           >
             &times;
           </button>
