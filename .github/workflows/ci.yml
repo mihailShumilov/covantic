@@ -53,9 +53,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: coral-xyz/setup-anchor@v1
+      - uses: metaDAOproject/setup-anchor@v3
         with:
           anchor-version: '0.30.1'
+          solana-cli-version: '1.18.26'
+          node-version: '22'
       - run: cd packages/anchor && anchor build
       - run: cd packages/anchor && anchor test
 
