@@ -58,6 +58,13 @@ jobs:
           anchor-version: '0.30.1'
           solana-cli-version: '1.18.26'
           node-version: '24'
+      - name: Install Solana platform tools
+        run: |
+          solana-install init 1.18.26
+          export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+          solana --version
+          cargo build-sbf --version || true
       - run: cd packages/anchor && anchor build
       - run: cd packages/anchor && anchor test
 
