@@ -8,7 +8,7 @@ pub mod state;
 
 use instructions::*;
 
-declare_id!("REPLACE_WITH_PROGRAM_ID");
+declare_id!("52KrSMg3rsbtRw3FchxJ9jRwRzQmWcDzg1AiiHHHXz1D");
 
 /// AgentGuard — AI Agent Insurance Protocol on Solana.
 /// Parametric insurance for AI agents performing DeFi operations.

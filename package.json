@@ -6,7 +6,7 @@
   "author": "Michael <info@trade-assistance.com>",
   "license": "MIT",
   "engines": {
-    "node": ">=22.0.0",
+    "node": ">=24.0.0",
     "pnpm": ">=9.0.0"
   },
   "packageManager": "pnpm@9.15.0",
@@ -26,5 +26,8 @@
     "deploy:devnet": "bash scripts/deploy-devnet.sh",
     "demo": "tsx scripts/run-demo.ts",
     "clean": "turbo run clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "turbo": "^2.9.5"
   }
 }
