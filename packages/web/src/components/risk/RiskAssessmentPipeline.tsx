@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Badge } from '@/components/ui/Badge';
 
 type FactorDetail = {
@@ -129,20 +129,9 @@ type StepState = 'pending' | 'scanning' | 'done';
 export function RiskAssessmentPipeline({ result, onComplete }: Props) {
   const [stepStates, setStepStates] = useState<StepState[]>(SCAN_STEPS.map(() => 'pending'));
   const [phaseIndex, setPhaseIndex] = useState<number[]>(SCAN_STEPS.map(() => 0));
-  const [currentStep, setCurrentStep] = useState(0);
   const [showSummary, setShowSummary] = useState(false);
   const [progressBars, setProgressBars] = useState<number[]>(SCAN_STEPS.map(() => 0));
   const animating = useRef(true);
-
-  const getFactorDetail = useCallback(
-    (factorKey: string): FactorDetail | undefined => {
-      if (!result) return undefined;
-      const step = SCAN_STEPS.find((s) => s.factorKey === factorKey);
-      if (!step) return undefined;
-      return result.factorDetails.find((d) => d.label === step.title || d.label === SCAN_STEPS.find((s) => s.factorKey === factorKey)?.title);
-    },
-    [result],
-  );
 
   // Map factorKeys to factorDetail labels (they may differ slightly)
   const factorDetailMap = useRef<Map<string, FactorDetail>>(new Map());
@@ -175,7 +164,6 @@ export function RiskAssessmentPipeline({ result, onComplete }: Props) {
       }
 
       // Mark step as scanning
-      setCurrentStep(step);
       setStepStates((prev) => prev.map((s, i) => (i === step ? 'scanning' : s)));
 
       const phases = SCAN_STEPS[step].scanPhases;
@@ -227,7 +215,7 @@ export function RiskAssessmentPipeline({ result, onComplete }: Props) {
     return () => {
       animating.current = false;
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div style={{ marginTop: 'var(--space-md)' }}>
