@@ -5,7 +5,7 @@ export { PolicyState, RiskTier, TriggerType } from './types/policy.js';
 export type { VaultStats, VaultSnapshot } from './types/vault.js';
 export { SolvencyStatus } from './types/vault.js';
 
-export type { RiskFactors, RiskAssessment, Agent } from './types/risk.js';
+export type { RiskFactors, FactorDetail, RiskAssessment, Agent } from './types/risk.js';
 
 export type { Claim, SubmitClaimParams, PipelineStep } from './types/claims.js';
 export { ClaimStatus, VerificationStep, StepStatus } from './types/claims.js';

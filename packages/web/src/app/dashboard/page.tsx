@@ -6,6 +6,7 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
+import { RiskAssessmentPipeline } from '@/components/risk/RiskAssessmentPipeline';
 import { apiGet, apiPost } from '@/lib/api-client';
 import { formatUsdc, type Policy } from '@agentguard/shared';
 
@@ -18,7 +19,9 @@ export default function DashboardPage() {
   const { publicKey } = useWallet();
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [showBuyModal, setShowBuyModal] = useState(false);
-  const [riskScore, setRiskScore] = useState<any>(null);
+  const [riskResult, setRiskResult] = useState<any>(null);
+  const [isAssessing, setIsAssessing] = useState(false);
+  const [pipelineKey, setPipelineKey] = useState(0);
   const [agentAddress, setAgentAddress] = useState('');
 
   useEffect(() => {
@@ -30,13 +33,24 @@ export default function DashboardPage() {
   }, [publicKey]);
 
   const handleGetRisk = async () => {
-    if (!agentAddress) return;
+    if (!agentAddress || isAssessing) return;
+
+    // 1. Clear previous results and start pipeline animation
+    setRiskResult(null);
+    setIsAssessing(true);
+    setPipelineKey((k) => k + 1);
+
+    // 2. Fire API call in background — pipeline animation is already running
     try {
-      const score = await apiGet(`/api/risk/${agentAddress}`);
-      setRiskScore(score);
+      const result = await apiGet(`/api/risk/${agentAddress}`);
+      setRiskResult(result);
     } catch {
-      // Handle error
+      setRiskResult(null);
     }
+  };
+
+  const handlePipelineComplete = () => {
+    setIsAssessing(false);
   };
 
   return (
@@ -71,6 +85,7 @@ export default function DashboardPage() {
               value={agentAddress}
               onChange={(e) => setAgentAddress(e.target.value)}
               placeholder="Enter agent wallet address..."
+              disabled={isAssessing}
               style={{
                 width: '100%',
                 padding: '0.5rem 0.75rem',
@@ -80,38 +95,22 @@ export default function DashboardPage() {
                 color: 'var(--color-text)',
                 fontFamily: 'var(--font-mono)',
                 fontSize: '0.875rem',
+                opacity: isAssessing ? 0.6 : 1,
               }}
             />
           </div>
-          <Button onClick={handleGetRisk} size="md">
-            Assess Risk
+          <Button onClick={handleGetRisk} size="md" disabled={isAssessing}>
+            {isAssessing ? 'Scanning...' : 'Assess Risk'}
           </Button>
         </div>
-        {riskScore && (
-          <div
-            style={{
-              marginTop: 'var(--space-md)',
-              display: 'flex',
-              gap: 'var(--space-lg)',
-              alignItems: 'center',
-            }}
-          >
-            <div>
-              <span style={{ color: 'var(--color-text-muted)', fontSize: '0.8125rem' }}>
-                Score:{' '}
-              </span>
-              <span style={{ fontWeight: 700, fontSize: '1.25rem' }}>{riskScore.score}</span>
-            </div>
-            <Badge variant={tierBadgeVariants[riskScore.tier]}>{tierLabels[riskScore.tier]}</Badge>
-            <div>
-              <span style={{ color: 'var(--color-text-muted)', fontSize: '0.8125rem' }}>
-                Premium:{' '}
-              </span>
-              <span>
-                {riskScore.premiumBps > 0 ? `${riskScore.premiumBps / 100}%` : 'Not insurable'}
-              </span>
-            </div>
-          </div>
+
+        {/* Animated pipeline — stays visible after completion */}
+        {pipelineKey > 0 && (
+          <RiskAssessmentPipeline
+            key={pipelineKey}
+            result={riskResult}
+            onComplete={handlePipelineComplete}
+          />
         )}
       </Card>
 

@@ -11,12 +11,23 @@ export interface RiskFactors {
   txVolume: number;
 }
 
+/** Human-readable description of a single risk factor */
+export interface FactorDetail {
+  label: string;
+  value: number;
+  rating: 'low' | 'moderate' | 'elevated' | 'high';
+  description: string;
+}
+
 /** Complete risk assessment result */
 export interface RiskAssessment {
   score: number;
   tier: RiskTier;
   premiumBps: number;
   factors: RiskFactors;
+  factorDetails: FactorDetail[];
+  summary: string;
+  recommendation: string;
   assessedAt: Date;
 }
 

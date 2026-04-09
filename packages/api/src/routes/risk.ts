@@ -22,13 +22,9 @@ export async function riskRoutes(app: FastifyInstance) {
       .limit(1);
 
     if (existing.length > 0 && existing[0]!.riskScore != null) {
-      return reply.send({
-        agentAddress,
-        score: existing[0]!.riskScore,
-        tier: existing[0]!.riskTier,
-        scoredAt: existing[0]!.riskScoredAt,
-        cached: true,
-      });
+      // Re-assess to get full details (descriptions, recommendation)
+      const assessment = await assessRisk(agentAddress, helius);
+      return reply.send({ ...assessment, agentAddress, cached: true });
     }
 
     // Compute fresh score

@@ -1,4 +1,9 @@
+import { config as loadDotenv } from 'dotenv';
+import { resolve } from 'node:path';
 import { z } from 'zod';
+
+// Load .env from monorepo root (src/config -> src -> api -> packages -> root)
+loadDotenv({ path: resolve(import.meta.dirname, '../../../../.env') });
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -16,7 +21,10 @@ const envSchema = z.object({
   HELIUS_API_KEY: z.string().min(10),
   HELIUS_WEBHOOK_SECRET: z.string().optional(),
 
-  USDC_MINT: z.string().min(32).optional(),
+  USDC_MINT: z.preprocess(
+    (v) => (typeof v === 'string' && v.length >= 32 ? v : undefined),
+    z.string().min(32).optional(),
+  ),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;

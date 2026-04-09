@@ -1,5 +1,11 @@
-import { RiskTier, type RiskAssessment, type RiskFactors } from '@agentguard/shared';
-import { RISK_SCORE_BOUNDARIES, PREMIUM_BPS } from '@agentguard/shared';
+import {
+  RiskTier,
+  type RiskAssessment,
+  type RiskFactors,
+  type FactorDetail,
+  RISK_SCORE_BOUNDARIES,
+  PREMIUM_BPS,
+} from '@agentguard/shared';
 import { HeliusClient } from '../utils/helius.js';
 import { logger } from '../utils/logger.js';
 
@@ -43,16 +49,23 @@ export async function assessRisk(
     factors.tokenConcentration * WEIGHTS.tokenConcentration +
     factors.txVolume * WEIGHTS.txVolume;
 
+  const roundedScore = Math.round(score * 1000) / 1000;
   const tier = scoreToTier(score);
   const premiumBps = tierToPremiumBps(tier);
+  const factorDetails = buildFactorDetails(factors);
+  const summary = buildSummary(roundedScore, tier, factors);
+  const recommendation = buildRecommendation(tier, factors);
 
   logger.info({ agentAddress, score, tier, premiumBps }, 'Risk assessment completed');
 
   return {
-    score: Math.round(score * 1000) / 1000,
+    score: roundedScore,
     tier,
     premiumBps,
     factors,
+    factorDetails,
+    summary,
+    recommendation,
     assessedAt: new Date(),
   };
 }
@@ -163,5 +176,187 @@ function tierToPremiumBps(tier: RiskTier): number {
       return PREMIUM_BPS.HIGH;
     case RiskTier.EXTREME:
       return -1;
+  }
+}
+
+function valueToRating(value: number): FactorDetail['rating'] {
+  if (value <= 0.25) return 'low';
+  if (value <= 0.5) return 'moderate';
+  if (value <= 0.75) return 'elevated';
+  return 'high';
+}
+
+function pct(value: number): string {
+  return `${Math.round(value * 100)}%`;
+}
+
+function buildFactorDetails(factors: RiskFactors): FactorDetail[] {
+  return [
+    {
+      label: 'Transaction Failure Rate',
+      value: factors.failedRatio,
+      rating: valueToRating(factors.failedRatio),
+      description:
+        factors.failedRatio < 0.1
+          ? 'Very few failed transactions — agent executes reliably.'
+          : factors.failedRatio < 0.3
+            ? 'Some transactions fail, which is normal for DeFi operations.'
+            : factors.failedRatio < 0.6
+              ? `${pct(factors.failedRatio)} of recent transactions failed — may indicate poor error handling or risky operations.`
+              : `${pct(factors.failedRatio)} failure rate is unusually high — agent may be malfunctioning or interacting with unstable protocols.`,
+    },
+    {
+      label: 'Swap Slippage',
+      value: factors.avgSlippage,
+      rating: valueToRating(factors.avgSlippage),
+      description:
+        factors.avgSlippage < 0.15
+          ? 'Low slippage on swaps — agent uses reasonable trade sizes and liquid pools.'
+          : factors.avgSlippage < 0.4
+            ? 'Moderate slippage detected — some trades may be oversized for available liquidity.'
+            : `High average slippage (${pct(factors.avgSlippage)}) — agent may be trading in illiquid pools or using excessive size.`,
+    },
+    {
+      label: 'Protocol Diversity',
+      value: factors.protocolDiversity,
+      rating: valueToRating(factors.protocolDiversity),
+      description:
+        factors.protocolDiversity < 0.3
+          ? 'Agent interacts with many protocols — well-diversified activity reduces single-protocol risk.'
+          : factors.protocolDiversity < 0.6
+            ? 'Moderate protocol diversity — agent uses a few different protocols.'
+            : 'Agent concentrates activity in very few protocols — a vulnerability in one protocol could cause significant losses.',
+    },
+    {
+      label: 'Wallet Age',
+      value: factors.walletAge,
+      rating: valueToRating(factors.walletAge),
+      description:
+        factors.walletAge < 0.2
+          ? 'Well-established wallet with a long on-chain history — strong track record.'
+          : factors.walletAge < 0.5
+            ? 'Wallet has been active for several months — reasonable history.'
+            : factors.walletAge < 0.8
+              ? 'Relatively new wallet — limited track record makes risk harder to assess.'
+              : 'Very new wallet with almost no history — high uncertainty about agent behavior.',
+    },
+    {
+      label: 'Reputation Score',
+      value: factors.registryScore,
+      rating: valueToRating(factors.registryScore),
+      description:
+        factors.registryScore < 0.3
+          ? 'Agent is registered in known agent registries with a good reputation.'
+          : factors.registryScore < 0.6
+            ? 'No reputation data available — agent is not registered in any known registry.'
+            : 'Agent has negative reputation signals or is flagged in monitoring systems.',
+    },
+    {
+      label: 'Token Concentration',
+      value: factors.tokenConcentration,
+      rating: valueToRating(factors.tokenConcentration),
+      description:
+        factors.tokenConcentration < 0.3
+          ? 'Holdings are spread across multiple tokens — well-diversified portfolio.'
+          : factors.tokenConcentration < 0.6
+            ? 'Holdings are somewhat concentrated — moderate exposure to single-token volatility.'
+            : `${pct(factors.tokenConcentration)} of holdings in a single token — high exposure to price swings or depegs.`,
+    },
+    {
+      label: 'Transaction Volume',
+      value: factors.txVolume,
+      rating: valueToRating(factors.txVolume),
+      description:
+        factors.txVolume < 0.2
+          ? 'Low transaction volume — minimal on-chain activity reduces exposure to errors.'
+          : factors.txVolume < 0.5
+            ? 'Moderate transaction volume — normal operational activity.'
+            : factors.txVolume < 0.8
+              ? 'High transaction volume — frequent operations increase the probability of encountering issues.'
+              : 'Very high transaction volume — aggressive activity pattern increases risk of errors and losses.',
+    },
+  ];
+}
+
+const TIER_LABELS: Record<RiskTier, string> = {
+  [RiskTier.LOW]: 'LOW',
+  [RiskTier.MEDIUM]: 'MEDIUM',
+  [RiskTier.HIGH]: 'HIGH',
+  [RiskTier.EXTREME]: 'EXTREME',
+};
+
+function buildSummary(score: number, tier: RiskTier, factors: RiskFactors): string {
+  const topRisks = Object.entries(factors)
+    .filter(([, v]) => v > 0.5)
+    .sort(([, a], [, b]) => b - a)
+    .map(([k]) => k);
+
+  const strengths = Object.entries(factors)
+    .filter(([, v]) => v < 0.25)
+    .map(([k]) => k);
+
+  const factorNames: Record<string, string> = {
+    failedRatio: 'transaction failure rate',
+    avgSlippage: 'swap slippage',
+    protocolDiversity: 'protocol concentration',
+    walletAge: 'wallet newness',
+    registryScore: 'unknown reputation',
+    tokenConcentration: 'token concentration',
+    txVolume: 'high transaction volume',
+  };
+
+  const strengthNames: Record<string, string> = {
+    failedRatio: 'reliable transaction execution',
+    avgSlippage: 'low swap slippage',
+    protocolDiversity: 'good protocol diversity',
+    walletAge: 'established wallet history',
+    registryScore: 'positive reputation',
+    tokenConcentration: 'diversified holdings',
+    txVolume: 'conservative activity level',
+  };
+
+  let summary = `Overall risk score: ${score} (${TIER_LABELS[tier]}).`;
+
+  if (topRisks.length > 0) {
+    const riskParts = topRisks.slice(0, 3).map((k) => factorNames[k] ?? k);
+    summary += ` Primary risk drivers: ${riskParts.join(', ')}.`;
+  }
+
+  if (strengths.length > 0) {
+    const strengthParts = strengths.slice(0, 3).map((k) => strengthNames[k] ?? k);
+    summary += ` Strengths: ${strengthParts.join(', ')}.`;
+  }
+
+  if (topRisks.length === 0 && strengths.length > 0) {
+    summary += ' No significant risk factors detected.';
+  }
+
+  return summary;
+}
+
+function buildRecommendation(tier: RiskTier, factors: RiskFactors): string {
+  switch (tier) {
+    case RiskTier.LOW:
+      return 'This agent shows a healthy risk profile and qualifies for the lowest premium tier (1% annual). Recommended for insurance coverage up to the maximum limit.';
+    case RiskTier.MEDIUM: {
+      const concerns: string[] = [];
+      if (factors.failedRatio > 0.3) concerns.push('reducing failed transactions');
+      if (factors.protocolDiversity > 0.5) concerns.push('diversifying protocol usage');
+      if (factors.walletAge > 0.5) concerns.push('building a longer track record');
+      if (factors.tokenConcentration > 0.5) concerns.push('diversifying token holdings');
+      const advice = concerns.length > 0 ? ` To lower premiums, consider ${concerns.join(' and ')}.` : '';
+      return `This agent has a moderate risk profile and qualifies for insurance at 2.5% annual premium.${advice}`;
+    }
+    case RiskTier.HIGH: {
+      const issues: string[] = [];
+      if (factors.failedRatio > 0.5) issues.push('high transaction failure rate');
+      if (factors.avgSlippage > 0.5) issues.push('excessive swap slippage');
+      if (factors.txVolume > 0.7) issues.push('very high activity level');
+      if (factors.protocolDiversity > 0.7) issues.push('heavy protocol concentration');
+      const detail = issues.length > 0 ? ` Key concerns: ${issues.join(', ')}.` : '';
+      return `This agent has an elevated risk profile. Insurance is available at 5% annual premium, reflecting the higher likelihood of loss events.${detail}`;
+    }
+    case RiskTier.EXTREME:
+      return 'This agent exceeds acceptable risk thresholds and is currently not eligible for insurance coverage. The risk profile suggests a very high probability of loss events. The agent should reduce failed transactions, improve protocol diversity, and establish a longer history before reapplying.';
   }
 }
