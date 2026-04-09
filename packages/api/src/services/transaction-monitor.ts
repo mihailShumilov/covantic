@@ -4,6 +4,10 @@ import { policies, monitoringEvents } from '../db/schema.js';
 import { logger } from '../utils/logger.js';
 import type Redis from 'ioredis';
 
+/** Anomaly detection thresholds (USDC token units, 6 decimals) */
+const LARGE_TRANSFER_THRESHOLD = 1000_000_000; // 1,000 USDC — triggers warning
+const CRITICAL_TRANSFER_THRESHOLD = 10_000_000_000; // 10,000 USDC — triggers critical
+
 /**
  * Transaction monitor service.
  * Processes Helius webhooks for real-time agent transaction monitoring.
@@ -13,10 +17,8 @@ import type Redis from 'ioredis';
  * 2. Parse Enhanced Transaction
  * 3. Check: is this an agent with an active policy?
  * 4. Analyze for anomalies:
- *    - balance_drop > 50%
- *    - oracle deviation > 5%
- *    - transfer > 100x normal
- *    - governance change
+ *    - large outgoing transfer (> 1,000 USDC warning, > 10,000 USDC critical)
+ *    - failed transaction
  * 5. If anomaly -> create monitoring_event -> WebSocket notification
  */
 export class TransactionMonitor {
@@ -41,7 +43,6 @@ export class TransactionMonitor {
     const signature = tx.signature;
     const tokenTransfers = tx.tokenTransfers ?? [];
 
-    // Find involved agent addresses (check against active policies)
     for (const transfer of tokenTransfers) {
       const agentAddress = transfer.fromUserAccount;
       if (!agentAddress) continue;
@@ -54,11 +55,9 @@ export class TransactionMonitor {
 
       if (activePolicies.length === 0) continue;
 
-      // Analyze for anomalies
       const anomalies = this.detectAnomalies(tx, agentAddress);
 
       for (const anomaly of anomalies) {
-        // Store monitoring event
         await this.db.insert(monitoringEvents).values({
           agentAddress,
           eventType: anomaly.type,
@@ -67,7 +66,6 @@ export class TransactionMonitor {
           details: anomaly.details,
         });
 
-        // Publish to Redis for WebSocket broadcast
         await this.redis.publish(
           'monitoring:alerts',
           JSON.stringify({
@@ -103,11 +101,10 @@ export class TransactionMonitor {
     const outgoing = tokenTransfers.filter((t: any) => t.fromUserAccount === agentAddress);
     const totalOutgoing = outgoing.reduce((sum: number, t: any) => sum + (t.tokenAmount ?? 0), 0);
 
-    if (totalOutgoing > 1000) {
-      // > 1000 token units
+    if (totalOutgoing > LARGE_TRANSFER_THRESHOLD) {
       anomalies.push({
         type: 'large_transfer',
-        severity: totalOutgoing > 10000 ? 'critical' : 'warning',
+        severity: totalOutgoing > CRITICAL_TRANSFER_THRESHOLD ? 'critical' : 'warning',
         details: { amount: totalOutgoing, transfers: outgoing.length },
       });
     }

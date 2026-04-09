@@ -114,8 +114,12 @@ pub struct VerifyAndPayout<'info> {
     )]
     pub config: Account<'info, ProtocolConfig>,
 
-    /// The policy with a pending claim
-    #[account(mut)]
+    /// The policy with a pending claim (validated via PDA seeds)
+    #[account(
+        mut,
+        seeds = [POLICY_SEED, policy.holder.as_ref(), &policy.policy_id.to_le_bytes()],
+        bump = policy.bump,
+    )]
     pub policy: Account<'info, InsurancePolicy>,
 
     /// Insurance vault
@@ -126,12 +130,20 @@ pub struct VerifyAndPayout<'info> {
     )]
     pub vault: Account<'info, InsuranceVault>,
 
-    /// Vault USDC token account
-    #[account(mut)]
+    /// Vault USDC token account (must belong to vault and be USDC mint)
+    #[account(
+        mut,
+        constraint = vault_token_account.owner == vault.key() @ AgentGuardError::InvalidTokenAccount,
+        constraint = vault_token_account.mint == config.usdc_mint @ AgentGuardError::InvalidTokenAccount,
+    )]
     pub vault_token_account: Account<'info, TokenAccount>,
 
-    /// Holder USDC token account (payout destination)
-    #[account(mut)]
+    /// Holder USDC token account (must belong to policy holder and be USDC mint)
+    #[account(
+        mut,
+        constraint = holder_token_account.owner == policy.holder @ AgentGuardError::InvalidTokenAccount,
+        constraint = holder_token_account.mint == config.usdc_mint @ AgentGuardError::InvalidTokenAccount,
+    )]
     pub holder_token_account: Account<'info, TokenAccount>,
 
     pub token_program: Program<'info, Token>,

@@ -1,6 +1,7 @@
 import { logger } from './logger.js';
 
-/** Helius API client for Enhanced Transactions and other features */
+/** Helius API client for Enhanced Transactions and other features.
+ * Uses Authorization header instead of query params to avoid key leakage in logs. */
 export class HeliusClient {
   private apiKey: string;
   private baseUrl: string;
@@ -8,6 +9,13 @@ export class HeliusClient {
   constructor(apiKey: string) {
     this.apiKey = apiKey;
     this.baseUrl = 'https://api.helius.xyz/v0';
+  }
+
+  private headers(): Record<string, string> {
+    return {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${this.apiKey}`,
+    };
   }
 
   /** Get enhanced transaction history for an address */

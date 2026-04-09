@@ -2,23 +2,10 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { Badge } from '@/components/ui/Badge';
+import { TIER_LABELS, TIER_BADGE_VARIANTS } from '@/lib/risk-labels';
+import type { FactorDetail, RiskAssessment } from '@agentguard/shared';
 
-type FactorDetail = {
-  label: string;
-  value: number;
-  rating: 'low' | 'moderate' | 'elevated' | 'high';
-  description: string;
-};
-
-type RiskResult = {
-  score: number;
-  tier: number;
-  premiumBps: number;
-  factors: Record<string, number>;
-  factorDetails: FactorDetail[];
-  summary: string;
-  recommendation: string;
-  assessedAt: string;
+type RiskResult = RiskAssessment & {
   agentAddress: string;
   cached?: boolean;
 };
@@ -101,8 +88,6 @@ const SCAN_STEPS = [
   },
 ];
 
-const TIER_LABELS = ['LOW', 'MEDIUM', 'HIGH', 'EXTREME'];
-const TIER_BADGE_VARIANTS = ['success', 'warning', 'danger', 'danger'] as const;
 
 function ratingColor(rating: string): string {
   switch (rating) {

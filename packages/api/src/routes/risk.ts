@@ -7,6 +7,33 @@ import { HeliusClient } from '../utils/helius.js';
 
 const addressParam = z.object({ agentAddress: z.string().min(32).max(44) });
 
+async function upsertAgentRisk(
+  db: FastifyInstance['db'],
+  agentAddress: string,
+  assessment: Awaited<ReturnType<typeof assessRisk>>,
+) {
+  await db
+    .insert(agents)
+    .values({
+      walletAddress: agentAddress,
+      ownerAddress: agentAddress,
+      riskScore: assessment.score,
+      riskTier: assessment.tier,
+      riskScoredAt: assessment.assessedAt,
+      riskData: assessment.factors as any,
+    })
+    .onConflictDoUpdate({
+      target: agents.walletAddress,
+      set: {
+        riskScore: assessment.score,
+        riskTier: assessment.tier,
+        riskScoredAt: assessment.assessedAt,
+        riskData: assessment.factors as any,
+        updatedAt: new Date(),
+      },
+    });
+}
+
 export async function riskRoutes(app: FastifyInstance) {
   const helius = new HeliusClient(app.config.HELIUS_API_KEY);
 
@@ -22,35 +49,15 @@ export async function riskRoutes(app: FastifyInstance) {
       .limit(1);
 
     if (existing.length > 0 && existing[0]!.riskScore != null) {
-      // Re-assess to get full details (descriptions, recommendation)
+      // Full re-assessment needed to generate factorDetails/summary/recommendation
+      // which are not stored in DB. Helius data may be cached upstream.
       const assessment = await assessRisk(agentAddress, helius);
       return reply.send({ ...assessment, agentAddress, cached: true });
     }
 
     // Compute fresh score
     const assessment = await assessRisk(agentAddress, helius);
-
-    // Upsert agent record
-    await app.db
-      .insert(agents)
-      .values({
-        walletAddress: agentAddress,
-        ownerAddress: agentAddress, // Default; updated by caller
-        riskScore: assessment.score,
-        riskTier: assessment.tier,
-        riskScoredAt: assessment.assessedAt,
-        riskData: assessment.factors as any,
-      })
-      .onConflictDoUpdate({
-        target: agents.walletAddress,
-        set: {
-          riskScore: assessment.score,
-          riskTier: assessment.tier,
-          riskScoredAt: assessment.assessedAt,
-          riskData: assessment.factors as any,
-          updatedAt: new Date(),
-        },
-      });
+    await upsertAgentRisk(app.db, agentAddress, assessment);
 
     return reply.send({ ...assessment, agentAddress, cached: false });
   });
@@ -60,27 +67,7 @@ export async function riskRoutes(app: FastifyInstance) {
     const { agentAddress } = addressParam.parse(request.params);
 
     const assessment = await assessRisk(agentAddress, helius);
-
-    await app.db
-      .insert(agents)
-      .values({
-        walletAddress: agentAddress,
-        ownerAddress: agentAddress,
-        riskScore: assessment.score,
-        riskTier: assessment.tier,
-        riskScoredAt: assessment.assessedAt,
-        riskData: assessment.factors as any,
-      })
-      .onConflictDoUpdate({
-        target: agents.walletAddress,
-        set: {
-          riskScore: assessment.score,
-          riskTier: assessment.tier,
-          riskScoredAt: assessment.assessedAt,
-          riskData: assessment.factors as any,
-          updatedAt: new Date(),
-        },
-      });
+    await upsertAgentRisk(app.db, agentAddress, assessment);
 
     return reply.send({ ...assessment, agentAddress });
   });

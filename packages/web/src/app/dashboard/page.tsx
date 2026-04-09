@@ -9,11 +9,12 @@ import { Modal } from '@/components/ui/Modal';
 import { RiskAssessmentPipeline } from '@/components/risk/RiskAssessmentPipeline';
 import { apiGet, apiPost } from '@/lib/api-client';
 import { formatUsdc, type Policy } from '@agentguard/shared';
-
-const tierLabels = ['LOW', 'MEDIUM', 'HIGH', 'EXTREME'];
-const tierBadgeVariants = ['success', 'warning', 'danger', 'danger'] as const;
-const stateLabels = ['Active', 'Claim Pending', 'Approved', 'Paid', 'Expired', 'Cancelled'];
-const stateBadgeVariants = ['success', 'warning', 'info', 'success', 'neutral', 'neutral'] as const;
+import {
+  TIER_LABELS,
+  TIER_BADGE_VARIANTS,
+  STATE_LABELS,
+  STATE_BADGE_VARIANTS,
+} from '@/lib/risk-labels';
 
 export default function DashboardPage() {
   const { publicKey } = useWallet();
@@ -152,11 +153,11 @@ export default function DashboardPage() {
                     }}
                   >
                     <span style={{ fontWeight: 600 }}>Policy #{policy.policyId}</span>
-                    <Badge variant={stateBadgeVariants[policy.state]}>
-                      {stateLabels[policy.state]}
+                    <Badge variant={STATE_BADGE_VARIANTS[policy.state]}>
+                      {STATE_LABELS[policy.state]}
                     </Badge>
-                    <Badge variant={tierBadgeVariants[policy.riskTier]}>
-                      {tierLabels[policy.riskTier]}
+                    <Badge variant={TIER_BADGE_VARIANTS[policy.riskTier]}>
+                      {TIER_LABELS[policy.riskTier]}
                     </Badge>
                   </div>
                   <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>

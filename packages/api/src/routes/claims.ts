@@ -1,12 +1,12 @@
 import type { FastifyInstance } from 'fastify';
-import { eq, desc } from 'drizzle-orm';
+import { eq, and, desc, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { claims } from '../db/schema.js';
 
 const claimsQuerySchema = z.object({
   status: z.string().optional(),
   holder: z.string().optional(),
-  limit: z.coerce.number().default(50),
+  limit: z.coerce.number().min(1).max(100).default(50),
   offset: z.coerce.number().default(0),
 });
 
@@ -19,14 +19,23 @@ export async function claimRoutes(app: FastifyInstance) {
     if (query.status) conditions.push(eq(claims.status, query.status));
     if (query.holder) conditions.push(eq(claims.holderAddress, query.holder));
 
-    const result = await app.db
-      .select()
-      .from(claims)
-      .orderBy(desc(claims.createdAt))
-      .limit(query.limit)
-      .offset(query.offset);
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
 
-    return reply.send({ claims: result, total: result.length });
+    const [result, countResult] = await Promise.all([
+      app.db
+        .select()
+        .from(claims)
+        .where(where)
+        .orderBy(desc(claims.createdAt))
+        .limit(query.limit)
+        .offset(query.offset),
+      app.db
+        .select({ count: sql<number>`count(*)` })
+        .from(claims)
+        .where(where),
+    ]);
+
+    return reply.send({ claims: result, total: countResult[0]?.count ?? 0 });
   });
 
   /** GET /api/claims/:id — Get claim details */

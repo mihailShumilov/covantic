@@ -20,7 +20,7 @@ export class AgentGuardPlugin {
   }
 
   /** Register all actions with the Agent Kit */
-  register(agent: any) {
+  register(agent: { registerAction: (name: string, handler: (...args: any[]) => any) => void }) {
     agent.registerAction('getRiskScore', this.getRiskScore.bind(this));
     agent.registerAction('buyInsurance', this.buyInsurance.bind(this));
     agent.registerAction('getActivePolicy', this.getActivePolicy.bind(this));
@@ -110,7 +110,7 @@ export class AgentGuardPlugin {
     return res.json();
   }
 
-  /** Buy insurance for an agent */
+  /** Buy insurance for an agent. Fetches agent's actual risk tier for accurate quoting. */
   async buyInsurance(params: {
     agentAddress: string;
     coverageAmount?: number;
@@ -119,14 +119,24 @@ export class AgentGuardPlugin {
     const coverage = params.coverageAmount ?? this.defaultCoverage;
     const duration = params.durationSeconds ?? this.defaultDuration;
 
-    // First get a quote
+    // Fetch agent's actual risk tier instead of hardcoding
+    const riskAssessment = await this.getRiskScore({ agentAddress: params.agentAddress });
+    const riskTier = riskAssessment.tier;
+
+    if (riskTier === RiskTier.EXTREME) {
+      return {
+        quote: null,
+        message: `Agent ${params.agentAddress} has EXTREME risk (score: ${riskAssessment.score}) and is not eligible for insurance.`,
+      };
+    }
+
     const quoteRes = await fetch(`${this.apiUrl}/api/policies/quote`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         coverageAmount: coverage,
         durationSeconds: duration,
-        riskTier: RiskTier.MEDIUM, // Default
+        riskTier,
       }),
     });
 
@@ -147,21 +157,25 @@ export class AgentGuardPlugin {
     return data.policies?.[0] ?? null;
   }
 
-  /** Submit an insurance claim */
+  /** Submit an insurance claim (requires on-chain transaction) */
   async submitClaim(params: {
     policyId: number;
     triggerType: number;
     txSignature: string;
   }): Promise<{ message: string }> {
-    return {
-      message: `Claim submission requires on-chain transaction. Policy: ${params.policyId}, Trigger: ${params.triggerType}, TX: ${params.txSignature}`,
-    };
+    throw new Error(
+      `Claim submission requires an on-chain transaction. ` +
+        `Policy: ${params.policyId}, Trigger: ${params.triggerType}, TX: ${params.txSignature}. ` +
+        `Use the Anchor SDK to call submit_claim instruction directly.`,
+    );
   }
 
-  /** Cancel an active policy */
+  /** Cancel an active policy (requires on-chain transaction) */
   async cancelPolicy(params: { policyId: number }): Promise<{ message: string }> {
-    return {
-      message: `Policy cancellation requires on-chain transaction. Policy: ${params.policyId}. Refund = remaining time * premium * 80%`,
-    };
+    throw new Error(
+      `Policy cancellation requires an on-chain transaction. ` +
+        `Policy: ${params.policyId}. Refund = remaining time * premium * 80%. ` +
+        `Use the Anchor SDK to call cancel_policy instruction directly.`,
+    );
   }
 }

@@ -141,12 +141,19 @@ pub struct ExecuteUnstake<'info> {
     )]
     pub vault: Account<'info, InsuranceVault>,
 
-    /// Vault USDC token account
-    #[account(mut)]
+    /// Vault USDC token account (must belong to vault)
+    #[account(
+        mut,
+        constraint = vault_token_account.owner == vault.key() @ AgentGuardError::InvalidTokenAccount,
+    )]
     pub vault_token_account: Account<'info, TokenAccount>,
 
-    /// Staker USDC token account
-    #[account(mut)]
+    /// Staker USDC token account (must belong to staker and match mint)
+    #[account(
+        mut,
+        constraint = staker_token_account.owner == staker.key() @ AgentGuardError::InvalidTokenAccount,
+        constraint = staker_token_account.mint == vault_token_account.mint @ AgentGuardError::InvalidTokenAccount,
+    )]
     pub staker_token_account: Account<'info, TokenAccount>,
 
     pub token_program: Program<'info, Token>,

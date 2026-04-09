@@ -8,11 +8,10 @@ import { logger } from '../utils/logger.js';
 const QUEUE_NAME = 'expiry-crank';
 
 /** Start the policy expiry crank worker.
- * Checks for expired policies every minute and updates their state. */
+ * Checks for expired policies every minute and updates their state in batch. */
 export function startExpiryCrank(db: Database, redis: Redis) {
   const queue = new Queue(QUEUE_NAME, { connection: redis });
 
-  // Schedule recurring job every 60 seconds
   queue.upsertJobScheduler(
     'check-expired',
     { every: 60_000 },
@@ -27,27 +26,16 @@ export function startExpiryCrank(db: Database, redis: Redis) {
       const now = new Date();
       logger.debug('Checking for expired policies...');
 
-      // Find active policies past their expiry time
-      const expired = await db
-        .select()
-        .from(policies)
-        .where(and(eq(policies.state, 0), lt(policies.expiryTime, now)));
+      // Batch update all expired policies in a single query
+      const result = await db
+        .update(policies)
+        .set({ state: 4, updatedAt: now })
+        .where(and(eq(policies.state, 0), lt(policies.expiryTime, now)))
+        .returning({ policyId: policies.policyId });
 
-      if (expired.length === 0) {
-        return;
+      if (result.length > 0) {
+        logger.info({ count: result.length }, 'Expired policies processed');
       }
-
-      // Mark them as expired (state = 4)
-      for (const policy of expired) {
-        await db
-          .update(policies)
-          .set({ state: 4, updatedAt: new Date() })
-          .where(eq(policies.policyId, policy.policyId));
-
-        logger.info({ policyId: policy.policyId }, 'Policy expired');
-      }
-
-      logger.info({ count: expired.length }, 'Expired policies processed');
     },
     { connection: redis },
   );

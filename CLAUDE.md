@@ -59,10 +59,10 @@ Filter to single package: `pnpm --filter api dev`, `pnpm --filter web dev`
 
 ## Domain Constants (from shared/constants.ts)
 
-- Coverage: 100–1,000,000 USDC (6 decimals)
-- Duration: 1 hour–365 days
-- Risk tiers: LOW(0), MEDIUM(1), HIGH(2), CRITICAL(3) → 200/500/1200/3000 bps annual
-- Solvency thresholds: CRITICAL<100%, WARNING<150%, HEALTHY≥150%
+- Coverage: 1–1,000,000 USDC (6 decimals)
+- Duration: 1 hour–30 days
+- Risk tiers: LOW(0), MEDIUM(1), HIGH(2), EXTREME(3) → 100/250/500 bps annual
+- Solvency thresholds: Emergency<50%, Critical 50-100%, Caution 100-200%, Healthy≥200%
 - Trigger types: Exploit(1), OracleManipulation(2), AgentError(3), GovernanceAttack(4)
 - Unstake cooldown: 48 hours
 

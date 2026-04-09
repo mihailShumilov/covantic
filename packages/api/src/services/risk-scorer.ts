@@ -3,8 +3,8 @@ import {
   type RiskAssessment,
   type RiskFactors,
   type FactorDetail,
-  RISK_SCORE_BOUNDARIES,
-  PREMIUM_BPS,
+  scoreToTier,
+  tierToPremiumBps,
 } from '@agentguard/shared';
 import { HeliusClient } from '../utils/helius.js';
 import { logger } from '../utils/logger.js';
@@ -87,10 +87,16 @@ function calculateFactors(transactions: any[], balances: any, accountInfo: any):
     const slippages = swapTxs.map((tx: any) => {
       const tokenTransfers = tx.tokenTransfers ?? [];
       if (tokenTransfers.length >= 2) {
-        // Rough heuristic: large token amount differences indicate high slippage
-        return Math.min(Math.random() * 0.1, 1); // Simplified for dev
+        // Estimate slippage from in/out amount ratio deviation from expected
+        const inAmount = Math.abs(tokenTransfers[0]?.tokenAmount ?? 0);
+        const outAmount = Math.abs(tokenTransfers[1]?.tokenAmount ?? 0);
+        if (inAmount > 0 && outAmount > 0) {
+          // Higher ratio of min/max deviation → higher slippage estimate
+          const ratio = Math.min(inAmount, outAmount) / Math.max(inAmount, outAmount);
+          return clamp(1 - ratio); // 0 = perfect ratio, 1 = extreme deviation
+        }
       }
-      return 0.05;
+      return 0.05; // Default low slippage when data is insufficient
     });
     avgSlippage = slippages.reduce((a: number, b: number) => a + b, 0) / slippages.length;
     avgSlippage = Math.min(avgSlippage * 10, 1); // Normalize to 0-1
@@ -157,26 +163,6 @@ function calculateFactors(transactions: any[], balances: any, accountInfo: any):
 
 function clamp(value: number): number {
   return Math.max(0, Math.min(1, value));
-}
-
-function scoreToTier(score: number): RiskTier {
-  if (score <= RISK_SCORE_BOUNDARIES.LOW_MAX) return RiskTier.LOW;
-  if (score <= RISK_SCORE_BOUNDARIES.MEDIUM_MAX) return RiskTier.MEDIUM;
-  if (score <= RISK_SCORE_BOUNDARIES.HIGH_MAX) return RiskTier.HIGH;
-  return RiskTier.EXTREME;
-}
-
-function tierToPremiumBps(tier: RiskTier): number {
-  switch (tier) {
-    case RiskTier.LOW:
-      return PREMIUM_BPS.LOW;
-    case RiskTier.MEDIUM:
-      return PREMIUM_BPS.MEDIUM;
-    case RiskTier.HIGH:
-      return PREMIUM_BPS.HIGH;
-    case RiskTier.EXTREME:
-      return -1;
-  }
 }
 
 function valueToRating(value: number): FactorDetail['rating'] {

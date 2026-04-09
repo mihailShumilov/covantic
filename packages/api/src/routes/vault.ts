@@ -7,7 +7,6 @@ import { eq, sql } from 'drizzle-orm';
 export async function vaultRoutes(app: FastifyInstance) {
   /** GET /api/vault/stats — Current vault statistics */
   app.get('/api/vault/stats', async (_request, reply) => {
-    // Get latest snapshot
     const snapshots = await app.db
       .select()
       .from(vaultSnapshots)
@@ -31,7 +30,9 @@ export async function vaultRoutes(app: FastifyInstance) {
 
   /** GET /api/vault/history — Vault snapshot history */
   app.get('/api/vault/history', async (request, reply) => {
-    const { limit } = z.object({ limit: z.coerce.number().default(30) }).parse(request.query);
+    const { limit } = z
+      .object({ limit: z.coerce.number().min(1).max(100).default(30) })
+      .parse(request.query);
 
     const history = await app.db
       .select()

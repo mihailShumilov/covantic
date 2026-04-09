@@ -11,7 +11,7 @@ export async function monitoringRoutes(app: FastifyInstance) {
   app.get('/api/monitoring/events', async (request, reply) => {
     const { limit, agent } = z
       .object({
-        limit: z.coerce.number().default(50),
+        limit: z.coerce.number().min(1).max(100).default(50),
         agent: z.string().optional(),
       })
       .parse(request.query);
@@ -30,7 +30,6 @@ export async function monitoringRoutes(app: FastifyInstance) {
 
   /** POST /api/monitoring/webhook — Helius webhook endpoint */
   app.post('/api/monitoring/webhook', async (request, reply) => {
-    // Verify webhook secret if configured
     const secret = app.config.HELIUS_WEBHOOK_SECRET;
     if (secret) {
       const authHeader = request.headers.authorization;
@@ -45,8 +44,12 @@ export async function monitoringRoutes(app: FastifyInstance) {
     return reply.status(200).send({ processed: true });
   });
 
-  /** POST /api/demo/simulate-exploit — Simulate an exploit for demo */
+  /** POST /api/demo/simulate-exploit — Simulate an exploit for demo (development only) */
   app.post('/api/demo/simulate-exploit', async (request, reply) => {
+    if (app.config.NODE_ENV === 'production') {
+      return reply.status(404).send({ error: 'Not found' });
+    }
+
     const { agentAddress, type } = z
       .object({
         agentAddress: z.string(),
@@ -54,7 +57,6 @@ export async function monitoringRoutes(app: FastifyInstance) {
       })
       .parse(request.body);
 
-    // Create simulated monitoring event
     await app.db.insert(monitoringEvents).values({
       agentAddress,
       eventType: type,
@@ -67,7 +69,6 @@ export async function monitoringRoutes(app: FastifyInstance) {
       },
     });
 
-    // Broadcast via Redis
     await app.redis.publish(
       'monitoring:alerts',
       JSON.stringify({

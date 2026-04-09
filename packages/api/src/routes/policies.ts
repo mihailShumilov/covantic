@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { policies } from '../db/schema.js';
 import { calculatePremium, RiskTier } from '@agentguard/shared';
@@ -8,7 +8,7 @@ const policyQuerySchema = z.object({
   holder: z.string().optional(),
   agent: z.string().optional(),
   state: z.coerce.number().optional(),
-  limit: z.coerce.number().default(50),
+  limit: z.coerce.number().min(1).max(100).default(50),
   offset: z.coerce.number().default(0),
 });
 
@@ -30,15 +30,21 @@ export async function policyRoutes(app: FastifyInstance) {
 
     const where = conditions.length > 0 ? and(...conditions) : undefined;
 
-    const result = await app.db
-      .select()
-      .from(policies)
-      .where(where)
-      .orderBy(desc(policies.createdAt))
-      .limit(query.limit)
-      .offset(query.offset);
+    const [result, countResult] = await Promise.all([
+      app.db
+        .select()
+        .from(policies)
+        .where(where)
+        .orderBy(desc(policies.createdAt))
+        .limit(query.limit)
+        .offset(query.offset),
+      app.db
+        .select({ count: sql<number>`count(*)` })
+        .from(policies)
+        .where(where),
+    ]);
 
-    return reply.send({ policies: result, total: result.length });
+    return reply.send({ policies: result, total: countResult[0]?.count ?? 0 });
   });
 
   /** GET /api/policies/:policyId — Get policy details */
@@ -77,7 +83,7 @@ export async function policyRoutes(app: FastifyInstance) {
       durationSeconds: body.durationSeconds,
       riskTier: body.riskTier,
       premiumAmount: premium,
-      premiumMultiplier: 10000, // Default, can be adjusted for caution mode
+      premiumMultiplier: 10000,
     });
   });
 }

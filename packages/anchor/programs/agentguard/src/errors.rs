@@ -86,6 +86,10 @@ pub enum AgentGuardError {
     #[msg("Unauthorized: only policy holder can perform this action")]
     UnauthorizedHolder,
 
+    // -- Token Account Errors --
+    #[msg("Invalid token account: wrong owner or mint")]
+    InvalidTokenAccount,
+
     // -- Math Errors --
     #[msg("Arithmetic overflow")]
     MathOverflow,

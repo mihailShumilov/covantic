@@ -45,8 +45,12 @@ pub struct ExpirePolicy<'info> {
     /// Anyone can crank expired policies
     pub cranker: Signer<'info>,
 
-    /// The policy to expire
-    #[account(mut)]
+    /// The policy to expire (validated via PDA seeds)
+    #[account(
+        mut,
+        seeds = [POLICY_SEED, policy.holder.as_ref(), &policy.policy_id.to_le_bytes()],
+        bump = policy.bump,
+    )]
     pub policy: Account<'info, InsurancePolicy>,
 
     /// Insurance vault (to update coverage)
