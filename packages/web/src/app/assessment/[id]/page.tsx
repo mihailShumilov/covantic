@@ -7,8 +7,8 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { apiGet } from '@/lib/api-client';
-import { shortenAddress } from '@agentguard/shared';
-import type { FactorDetail, CategoryRisk } from '@agentguard/shared';
+import { shortenAddress } from '@covantic/shared';
+import type { FactorDetail, CategoryRisk } from '@covantic/shared';
 import { TIER_LABELS, TIER_BADGE_VARIANTS } from '@/lib/risk-labels';
 import { ratingColor, ratingBg } from '@/lib/risk-colors';
 

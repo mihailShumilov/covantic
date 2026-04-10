@@ -3,7 +3,7 @@ import {
   scoreToTier,
   tierToPremiumBps,
   TIER_LABELS,
-} from '@agentguard/shared';
+} from '@covantic/shared';
 import type {
   RiskAssessment,
   RiskFactors,
@@ -12,7 +12,7 @@ import type {
   FactorWeightInfo,
   CategoryRisk,
   DataAvailability,
-} from '@agentguard/shared';
+} from '@covantic/shared';
 import {
   KNOWN_DEX_PROGRAMS,
   KNOWN_BRIDGE_PROGRAMS,

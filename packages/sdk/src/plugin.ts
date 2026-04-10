@@ -1,20 +1,20 @@
-import { type RiskAssessment, type Policy, RiskTier } from '@agentguard/shared';
-import type { AgentGuardConfig } from './types.js';
+import { type RiskAssessment, type Policy, RiskTier } from '@covantic/shared';
+import type { CovanticConfig } from './types.js';
 
 /**
- * AgentGuard Plugin for Solana Agent Kit.
+ * Covantic Plugin for Solana Agent Kit.
  * Provides insurance actions for AI agents performing DeFi operations.
  */
-export class AgentGuardPlugin {
-  name = 'agentguard';
+export class CovanticPlugin {
+  name = 'covantic';
   description = 'AI Agent Insurance Protocol — buy coverage, submit claims, check risk';
 
   private apiUrl: string;
   private defaultCoverage: number;
   private defaultDuration: number;
 
-  constructor(config: AgentGuardConfig) {
-    this.apiUrl = config.apiUrl ?? 'https://api.agentguard.xyz';
+  constructor(config: CovanticConfig) {
+    this.apiUrl = config.apiUrl ?? 'https://api.covantic.xyz';
     this.defaultCoverage = config.defaultCoverage ?? 100_000_000; // 100 USDC
     this.defaultDuration = config.defaultDuration ?? 86400; // 24h
   }
@@ -32,7 +32,7 @@ export class AgentGuardPlugin {
   getTools() {
     return [
       {
-        name: 'agentguard_get_risk_score',
+        name: 'covantic_get_risk_score',
         description:
           'Get the risk score and insurance premium quote for an AI agent wallet address',
         parameters: {
@@ -45,7 +45,7 @@ export class AgentGuardPlugin {
         handler: this.getRiskScore.bind(this),
       },
       {
-        name: 'agentguard_buy_insurance',
+        name: 'covantic_buy_insurance',
         description:
           'Purchase an insurance policy to protect against DeFi losses. Pays premium in USDC.',
         parameters: {
@@ -60,7 +60,7 @@ export class AgentGuardPlugin {
         handler: this.buyInsurance.bind(this),
       },
       {
-        name: 'agentguard_get_active_policy',
+        name: 'covantic_get_active_policy',
         description: 'Check if the agent has an active insurance policy',
         parameters: {
           type: 'object',
@@ -72,7 +72,7 @@ export class AgentGuardPlugin {
         handler: this.getActivePolicy.bind(this),
       },
       {
-        name: 'agentguard_submit_claim',
+        name: 'covantic_submit_claim',
         description: 'Submit an insurance claim after a covered incident',
         parameters: {
           type: 'object',
@@ -89,7 +89,7 @@ export class AgentGuardPlugin {
         handler: this.submitClaim.bind(this),
       },
       {
-        name: 'agentguard_cancel_policy',
+        name: 'covantic_cancel_policy',
         description: 'Cancel an active insurance policy with partial refund',
         parameters: {
           type: 'object',

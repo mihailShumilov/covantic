@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" fill="none">
+  <defs>
+    <linearGradient id="brand-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#22D3EE" />
+      <stop offset="100%" stop-color="#7C3AED" />
+    </linearGradient>
+    <linearGradient id="glow-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#22D3EE" stop-opacity="0.3" />
+      <stop offset="100%" stop-color="#7C3AED" stop-opacity="0.3" />
+    </linearGradient>
+  </defs>
+
+  <!-- Glow halo -->
+  <circle cx="100" cy="100" r="82" stroke="url(#glow-gradient)" stroke-width="16"
+    stroke-dasharray="390 125" stroke-linecap="round"
+    transform="rotate(-35 100 100)" />
+
+  <!-- Main C ring — coverage orbit -->
+  <circle cx="100" cy="100" r="72" stroke="url(#brand-gradient)" stroke-width="8"
+    stroke-dasharray="340 115" stroke-linecap="round"
+    transform="rotate(-35 100 100)" />
+
+  <!-- Inner element — the agent (rounded square) -->
+  <rect x="82" y="82" width="36" height="36" rx="8" fill="url(#brand-gradient)" />
+
+  <!-- Small dot at the gap opening — parametric trigger point -->
+  <circle cx="152" cy="58" r="5" fill="#22D3EE" />
+</svg>

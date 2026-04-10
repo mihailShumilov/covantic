@@ -1,124 +1,70 @@
-# AgentGuard
+# Covantic
 
-**First parametric insurance protocol for AI agents on Solana.**
+**The coverage primitive for autonomous agents.**
 
-AI agents buy insurance before DeFi operations. On trigger (exploit, oracle manipulation, agent error, governance attack), automatic verification and payout via on-chain oracle. No human intervention.
+Covantic is the first parametric insurance protocol for AI agents on Solana. Agents purchase coverage before DeFi operations. When a covered event occurs — exploit, oracle manipulation, critical error — the protocol verifies the claim on-chain and pays out instantly. No human review. No paperwork.
+
+> Built for [Colosseum Frontier Hackathon](https://colosseum.org) — April–May 2026
+
+## How It Works
+
+1. **Assess** — AI Risk Scorer analyzes 15 on-chain signals to assign a risk tier
+2. **Insure** — Agent buys a policy on-chain; premium auto-calculated by tier
+3. **Monitor** — Helius webhooks and Pyth oracles watch transactions 24/7
+4. **Payout** — Trigger fires → claim verified on-chain → USDC transferred instantly
+
+## Quick Start
+
+```bash
+git clone https://github.com/mihailShumilov/ai-agent-insurance.git
+cd ai-agent-insurance
+bash scripts/setup-local.sh
+pnpm dev
+```
+
+This starts PostgreSQL, Redis, Backend API (port 4099), Frontend (port 3099), and background workers.
 
 ## Architecture
 
 ```
-agentguard/
-├── packages/
-│   ├── anchor/     # Solana program (Anchor/Rust)
-│   ├── api/        # Backend API (Fastify + PostgreSQL + Redis)
-│   ├── web/        # Frontend (Next.js + React)
-│   ├── sdk/        # Solana Agent Kit Plugin
-│   └── shared/     # Shared types and utilities
-├── scripts/        # Setup, deploy, and demo scripts
-├── docker/         # Docker infrastructure
-└── docs/           # Documentation
+packages/
+  anchor/   — Solana program (Rust, Anchor 0.30.1)
+  api/      — Backend (Fastify 5, Drizzle ORM, BullMQ)
+  web/      — Frontend (Next.js 16, React 19)
+  sdk/      — Solana Agent Kit plugin (TypeScript)
+  shared/   — Cross-package types, constants, utilities
 ```
-
-## Quick Start
-
-### Prerequisites
-
-- Node.js 22+
-- pnpm 9+
-- Docker 27+
-- Rust (stable)
-- Solana CLI 2.x
-- Anchor CLI
-
-### Setup (2 commands)
-
-```bash
-# 1. Full setup
-bash scripts/setup-local.sh
-
-# 2. Start everything
-pnpm dev
-```
-
-This starts:
-
-- **PostgreSQL 18** on port 5432
-- **Redis 7** on port 6379
-- **Backend API** on port 4000
-- **Frontend** on port 3000
-- **Background workers** (expiry crank, solvency checker, analytics)
-
-### Environment Variables
-
-Copy `.env.example` to `.env` and fill in:
-
-- `HELIUS_API_KEY` — get at https://dev.helius.xyz/
-- `PROGRAM_ID` — generated after `anchor deploy`
-
-## How It Works
-
-### 1. Risk Assessment
-
-AI-powered scoring analyzes agent's on-chain history:
-
-- Failed transaction ratio (20%)
-- Average slippage (15%)
-- Protocol diversity (15%)
-- Transaction volume (20%)
-- Wallet age, registry score, token concentration (30%)
-
-Result: **LOW** (1%), **MEDIUM** (2.5%), **HIGH** (5%), or **EXTREME** (declined)
-
-### 2. Policy Creation
-
-- Agent holder pays premium in USDC
-- Coverage: 1 USDC — 1M USDC
-- Duration: 1 hour — 30 days
-- Premium split: 70% stakers, 20% reserve, 10% protocol
-
-### 3. Claim & Payout
-
-Covered triggers:
-
-- **Exploit** — balance drop >50% in 1 slot → immediate payout
-- **Oracle Manipulation** — price deviation >5% from TWAP → 1h lock
-- **Agent Error** — transfer >100x average → 6h lock
-- **Governance Attack** — admin key change + drain → 2h lock
-
-### 4. Staking
-
-- Stake USDC to earn premiums (70% share)
-- 48-hour unstake cooldown
-- Solvency-based premium multiplier
 
 ## Tech Stack
 
-| Layer          | Technology                                           |
-| -------------- | ---------------------------------------------------- |
-| Smart Contract | Anchor (Rust) on Solana                              |
-| Backend        | Fastify, PostgreSQL 18, Redis 7, Drizzle ORM, BullMQ |
-| Frontend       | Next.js, React, Recharts                             |
-| Monitoring     | Helius Enhanced TX, Pyth Price Feeds                 |
-| Agent SDK      | Solana Agent Kit Plugin                              |
+Solana (Anchor 0.30.1) · Next.js 16 · Fastify 5 · PostgreSQL 18 · Helius · Pyth · Solana Agent Kit
+
+## Coverage Triggers
+
+| Trigger | Condition | Lock Period |
+|---------|-----------|-------------|
+| Smart Contract Exploit | Balance drop >50% in single slot | 0 hours |
+| Oracle Manipulation | Price deviation >5% from TWAP | 1 hour |
+| Critical Agent Error | Transfer >100x agent average | 6 hours |
+| Governance Attack | Admin key change + drain within 30m | 2 hours |
+
+## Risk Tiers
+
+| Tier | Annual Premium | Score Range |
+|------|---------------|-------------|
+| LOW | 1.0% | 0 — 0.25 |
+| MEDIUM | 2.5% | 0.25 — 0.50 |
+| HIGH | 5.0% | 0.50 — 0.75 |
+| EXTREME | Declined | 0.75+ |
 
 ## Development
 
 ```bash
-# Run all tests
-pnpm test
-
-# Anchor tests
-cd packages/anchor && anchor test
-
-# API tests
-pnpm --filter api test
-
-# Deploy to devnet
-bash scripts/deploy-devnet.sh
-
-# Database operations
-pnpm db:migrate
-pnpm db:seed
+pnpm dev              # Start all (docker + api + web)
+pnpm build            # Build all packages
+pnpm test             # Run all tests
+pnpm test:anchor      # Anchor tests only
+pnpm docker:up/down   # Manage Docker services
 ```
 
 ## License

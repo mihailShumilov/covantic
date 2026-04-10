@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 
 use crate::constants::*;
-use crate::errors::AgentGuardError;
+use crate::errors::CovanticError;
 use crate::events::{UnstakeRequested, Unstaked};
 use crate::state::{InsuranceVault, StakerPosition};
 
@@ -13,7 +13,7 @@ pub fn request_unstake_handler(ctx: Context<RequestUnstake>) -> Result<()> {
 
     require!(
         staker_position.amount_staked > 0,
-        AgentGuardError::ZeroStakeAmount
+        CovanticError::ZeroStakeAmount
     );
 
     // Record unstake request timestamp
@@ -22,7 +22,7 @@ pub fn request_unstake_handler(ctx: Context<RequestUnstake>) -> Result<()> {
     let available_at = clock
         .unix_timestamp
         .checked_add(UNSTAKE_COOLDOWN)
-        .ok_or(AgentGuardError::MathOverflow)?;
+        .ok_or(CovanticError::MathOverflow)?;
 
     emit!(UnstakeRequested {
         staker: ctx.accounts.staker.key(),
@@ -44,24 +44,24 @@ pub fn execute_unstake_handler(ctx: Context<ExecuteUnstake>) -> Result<()> {
     // Must have a pending unstake request
     require!(
         staker_position.unstake_requested_at > 0,
-        AgentGuardError::NoUnstakeRequest
+        CovanticError::NoUnstakeRequest
     );
 
     // Must wait for cooldown
     let cooldown_end = staker_position
         .unstake_requested_at
         .checked_add(UNSTAKE_COOLDOWN)
-        .ok_or(AgentGuardError::MathOverflow)?;
+        .ok_or(CovanticError::MathOverflow)?;
     require!(
         now >= cooldown_end,
-        AgentGuardError::UnstakeCooldownNotElapsed
+        CovanticError::UnstakeCooldownNotElapsed
     );
 
     let amount = staker_position.amount_staked;
     let rewards = staker_position.rewards_pending;
     let total_transfer = amount
         .checked_add(rewards)
-        .ok_or(AgentGuardError::MathOverflow)?;
+        .ok_or(CovanticError::MathOverflow)?;
 
     // Transfer USDC + rewards from vault to staker
     let vault_bump = vault.bump;
@@ -90,7 +90,7 @@ pub fn execute_unstake_handler(ctx: Context<ExecuteUnstake>) -> Result<()> {
     staker_position.rewards_claimed = staker_position
         .rewards_claimed
         .checked_add(rewards)
-        .ok_or(AgentGuardError::MathOverflow)?;
+        .ok_or(CovanticError::MathOverflow)?;
     staker_position.rewards_pending = 0;
     staker_position.unstake_requested_at = 0;
 
@@ -144,15 +144,15 @@ pub struct ExecuteUnstake<'info> {
     /// Vault USDC token account (must belong to vault)
     #[account(
         mut,
-        constraint = vault_token_account.owner == vault.key() @ AgentGuardError::InvalidTokenAccount,
+        constraint = vault_token_account.owner == vault.key() @ CovanticError::InvalidTokenAccount,
     )]
     pub vault_token_account: Account<'info, TokenAccount>,
 
     /// Staker USDC token account (must belong to staker and match mint)
     #[account(
         mut,
-        constraint = staker_token_account.owner == staker.key() @ AgentGuardError::InvalidTokenAccount,
-        constraint = staker_token_account.mint == vault_token_account.mint @ AgentGuardError::InvalidTokenAccount,
+        constraint = staker_token_account.owner == staker.key() @ CovanticError::InvalidTokenAccount,
+        constraint = staker_token_account.mint == vault_token_account.mint @ CovanticError::InvalidTokenAccount,
     )]
     pub staker_token_account: Account<'info, TokenAccount>,
 

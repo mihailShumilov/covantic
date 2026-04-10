@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::constants::*;
-use crate::errors::AgentGuardError;
+use crate::errors::CovanticError;
 use crate::events::PolicyExpiredEvent;
 use crate::state::{InsurancePolicy, InsuranceVault};
 
@@ -16,17 +16,17 @@ pub fn expire_policy_handler(ctx: Context<ExpirePolicy>) -> Result<()> {
     // Must be active
     require!(
         policy.state == InsurancePolicy::STATE_ACTIVE,
-        AgentGuardError::PolicyNotActive
+        CovanticError::PolicyNotActive
     );
 
     // Must be past expiry
-    require!(now >= policy.expiry_time, AgentGuardError::PolicyNotExpired);
+    require!(now >= policy.expiry_time, CovanticError::PolicyNotExpired);
 
     // Update vault coverage
     vault.total_coverage = vault
         .total_coverage
         .checked_sub(policy.coverage_amount)
-        .ok_or(AgentGuardError::MathOverflow)?;
+        .ok_or(CovanticError::MathOverflow)?;
     vault.recalculate_solvency();
 
     // Mark as expired

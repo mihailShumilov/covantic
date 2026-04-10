@@ -4,8 +4,8 @@ import { useState } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { useAgentGuardContext } from '@/providers/AgentGuardProvider';
-import { formatUsdc, solvencyStatus, SolvencyStatus } from '@agentguard/shared';
+import { useCovanticContext } from '@/providers/CovanticProvider';
+import { formatUsdc, solvencyStatus, SolvencyStatus } from '@covantic/shared';
 
 const solvencyColors: Record<SolvencyStatus, string> = {
   [SolvencyStatus.Healthy]: 'success',
@@ -15,7 +15,7 @@ const solvencyColors: Record<SolvencyStatus, string> = {
 };
 
 export default function StakingPage() {
-  const { vaultStats } = useAgentGuardContext();
+  const { vaultStats } = useCovanticContext();
   const [stakeAmount, setStakeAmount] = useState('');
 
   const status = vaultStats

@@ -10,10 +10,10 @@ use instructions::*;
 
 declare_id!("52KrSMg3rsbtRw3FchxJ9jRwRzQmWcDzg1AiiHHHXz1D");
 
-/// AgentGuard — AI Agent Insurance Protocol on Solana.
+/// Covantic — AI Agent Insurance Protocol on Solana.
 /// Parametric insurance for AI agents performing DeFi operations.
 #[program]
-pub mod agentguard {
+pub mod covantic {
     use super::*;
 
     /// Initialize protocol: creates config + vault.

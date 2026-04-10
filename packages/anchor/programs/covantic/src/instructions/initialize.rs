@@ -33,7 +33,7 @@ pub fn initialize_handler(ctx: Context<Initialize>, oracle_authority: Pubkey) ->
     vault.protocol_treasury = 0;
     vault.bump = ctx.bumps.vault;
 
-    msg!("AgentGuard protocol initialized");
+    msg!("Covantic protocol initialized");
     msg!("Admin: {}", config.admin);
     msg!("Oracle: {}", oracle_authority);
     msg!("USDC Mint: {}", config.usdc_mint);

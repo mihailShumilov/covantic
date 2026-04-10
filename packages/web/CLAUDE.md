@@ -1,4 +1,4 @@
-# Frontend — AgentGuard
+# Frontend — Covantic
 
 ## Structure
 
@@ -18,7 +18,7 @@ src/
     claims/ClaimVerificationPipeline.tsx — 5-step animated pipeline (key demo component)
   providers/
     WalletProvider.tsx  — Solana wallet adapter (Phantom, Solflare)
-    AgentGuardProvider.tsx — Context: vaultStats, auto-refresh 30s
+    CovanticProvider.tsx — Context: vaultStats, auto-refresh 30s
   styles/
     globals.css         — Dark theme, oklch colors, animations
 ```
@@ -29,7 +29,7 @@ src/
 - Tailwind CSS with CSS custom properties for theming
 - Solana Wallet Adapter for wallet connection
 - API calls to `http://localhost:4000/api/`
-- `@agentguard/shared` for all types and constants
+- `@covantic/shared` for all types and constants
 
 ## Commands
 

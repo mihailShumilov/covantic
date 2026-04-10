@@ -1,4 +1,4 @@
-# Backend API — AgentGuard
+# Backend API — Covantic
 
 ## Structure
 

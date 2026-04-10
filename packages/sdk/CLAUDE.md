@@ -1,4 +1,4 @@
-# SDK Plugin — AgentGuard
+# SDK Plugin — Covantic
 
 Solana Agent Kit integration for AI agents.
 
@@ -6,7 +6,7 @@ Solana Agent Kit integration for AI agents.
 
 ```
 src/
-  plugin.ts   — AgentGuardPlugin class with 5 actions + getTools()
+  plugin.ts   — CovanticPlugin class with 5 actions + getTools()
   index.ts    — Re-export
 ```
 
@@ -22,5 +22,5 @@ src/
 
 ## Dependencies
 
-- `@agentguard/shared` for types
+- `@covantic/shared` for types
 - `@coral-xyz/anchor` + `@solana/web3.js` for on-chain interaction

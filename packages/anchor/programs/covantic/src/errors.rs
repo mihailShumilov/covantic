@@ -1,8 +1,8 @@
 use anchor_lang::prelude::*;
 
-/// Custom error codes for the AgentGuard protocol.
+/// Custom error codes for the Covantic protocol.
 #[error_code]
-pub enum AgentGuardError {
+pub enum CovanticError {
     // -- Policy Errors --
     #[msg("Coverage amount below minimum (1 USDC)")]
     CoverageTooLow,

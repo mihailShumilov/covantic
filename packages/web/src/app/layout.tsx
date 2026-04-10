@@ -2,13 +2,30 @@ import type { Metadata } from 'next';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { WalletProvider } from '@/providers/WalletProvider';
-import { AgentGuardProvider } from '@/providers/AgentGuardProvider';
+import { CovanticProvider } from '@/providers/CovanticProvider';
 import '@/styles/globals.css';
 
 export const metadata: Metadata = {
-  title: 'AgentGuard — AI Agent Insurance on Solana',
+  title: 'Covantic — Parametric Insurance for AI Agents',
   description:
-    'First parametric insurance protocol for AI agents on Solana. Protect your agents against DeFi exploits, oracle manipulation, and more.',
+    'The first programmable coverage protocol for autonomous agents on Solana. Deterministic triggers, instant payouts, zero paperwork.',
+  icons: {
+    icon: '/favicon.svg',
+  },
+  openGraph: {
+    title: 'Covantic',
+    description: 'The coverage primitive for autonomous agents',
+    url: 'https://covantic.org',
+    siteName: 'Covantic',
+    images: [{ url: '/og-image.png', width: 1200, height: 630 }],
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Covantic',
+    description: 'Parametric insurance for AI agents on Solana',
+    images: ['/og-image.png'],
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -16,13 +33,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" data-theme="dark">
       <body>
         <WalletProvider>
-          <AgentGuardProvider>
+          <CovanticProvider>
             <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
               <Header />
               <main style={{ flex: 1 }}>{children}</main>
               <Footer />
             </div>
-          </AgentGuardProvider>
+          </CovanticProvider>
         </WalletProvider>
       </body>
     </html>

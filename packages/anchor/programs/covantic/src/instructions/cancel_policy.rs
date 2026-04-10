@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 
 use crate::constants::*;
-use crate::errors::AgentGuardError;
+use crate::errors::CovanticError;
 use crate::events::PolicyCancelled;
 use crate::state::{InsurancePolicy, InsuranceVault};
 
@@ -17,42 +17,42 @@ pub fn cancel_policy_handler(ctx: Context<CancelPolicy>) -> Result<()> {
     // Must be active
     require!(
         policy.state == InsurancePolicy::STATE_ACTIVE,
-        AgentGuardError::PolicyNotActive
+        CovanticError::PolicyNotActive
     );
 
     // Must not be expired
-    require!(now < policy.expiry_time, AgentGuardError::PolicyExpired);
+    require!(now < policy.expiry_time, CovanticError::PolicyExpired);
 
     // Must be the holder
     require!(
         policy.holder == ctx.accounts.holder.key(),
-        AgentGuardError::UnauthorizedHolder
+        CovanticError::UnauthorizedHolder
     );
 
     // Calculate refund: remaining_fraction * premium * 80%
     let elapsed = now
         .checked_sub(policy.start_time)
-        .ok_or(AgentGuardError::MathOverflow)?;
+        .ok_or(CovanticError::MathOverflow)?;
     let total_duration = policy
         .expiry_time
         .checked_sub(policy.start_time)
-        .ok_or(AgentGuardError::MathOverflow)?;
+        .ok_or(CovanticError::MathOverflow)?;
 
     let remaining_fraction_num = (total_duration
         .checked_sub(elapsed)
-        .ok_or(AgentGuardError::MathOverflow)?) as u128;
+        .ok_or(CovanticError::MathOverflow)?) as u128;
     let remaining_fraction_den = total_duration as u128;
 
     // refund = premium * remaining / total * (10000 - penalty) / 10000
     let refund = (policy.premium_paid as u128)
         .checked_mul(remaining_fraction_num)
-        .ok_or(AgentGuardError::MathOverflow)?
+        .ok_or(CovanticError::MathOverflow)?
         .checked_div(remaining_fraction_den)
-        .ok_or(AgentGuardError::MathOverflow)?
+        .ok_or(CovanticError::MathOverflow)?
         .checked_mul((10000 - CANCEL_PENALTY_BPS) as u128)
-        .ok_or(AgentGuardError::MathOverflow)?
+        .ok_or(CovanticError::MathOverflow)?
         .checked_div(10000)
-        .ok_or(AgentGuardError::MathOverflow)? as u64;
+        .ok_or(CovanticError::MathOverflow)? as u64;
 
     // Transfer refund from vault to holder via PDA signature
     if refund > 0 {
@@ -76,7 +76,7 @@ pub fn cancel_policy_handler(ctx: Context<CancelPolicy>) -> Result<()> {
     vault.total_coverage = vault
         .total_coverage
         .checked_sub(policy.coverage_amount)
-        .ok_or(AgentGuardError::MathOverflow)?;
+        .ok_or(CovanticError::MathOverflow)?;
     vault.recalculate_solvency();
 
     // Update policy state
@@ -100,7 +100,7 @@ pub struct CancelPolicy<'info> {
     /// The policy to cancel
     #[account(
         mut,
-        constraint = policy.holder == holder.key() @ AgentGuardError::UnauthorizedHolder,
+        constraint = policy.holder == holder.key() @ CovanticError::UnauthorizedHolder,
         seeds = [POLICY_SEED, holder.key().as_ref(), &policy.policy_id.to_le_bytes()],
         bump = policy.bump,
     )]

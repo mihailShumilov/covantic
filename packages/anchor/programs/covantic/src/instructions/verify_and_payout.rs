@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 
 use crate::constants::*;
-use crate::errors::AgentGuardError;
+use crate::errors::CovanticError;
 use crate::events::ClaimPaid;
 use crate::state::{InsurancePolicy, InsuranceVault, ProtocolConfig};
 
@@ -19,19 +19,19 @@ pub fn verify_and_payout_handler(ctx: Context<VerifyAndPayout>, payout_amount: u
     // Only oracle authority
     require!(
         ctx.accounts.oracle.key() == config.oracle_authority,
-        AgentGuardError::UnauthorizedOracle
+        CovanticError::UnauthorizedOracle
     );
 
     // Policy must be ClaimPending
     require!(
         policy.state == InsurancePolicy::STATE_CLAIM_PENDING,
-        AgentGuardError::PolicyNotClaimPending
+        CovanticError::PolicyNotClaimPending
     );
 
     // Payout must not exceed coverage
     require!(
         payout_amount <= policy.coverage_amount,
-        AgentGuardError::PayoutExceedsCoverage
+        CovanticError::PayoutExceedsCoverage
     );
 
     // Check lock period for the trigger type
@@ -40,19 +40,19 @@ pub fn verify_and_payout_handler(ctx: Context<VerifyAndPayout>, payout_amount: u
         TRIGGER_ORACLE_MANIPULATION => LOCK_ORACLE_MANIPULATION,
         TRIGGER_AGENT_ERROR => LOCK_AGENT_ERROR,
         TRIGGER_GOVERNANCE_ATTACK => LOCK_GOVERNANCE_ATTACK,
-        _ => return Err(AgentGuardError::InvalidTriggerType.into()),
+        _ => return Err(CovanticError::InvalidTriggerType.into()),
     };
 
     let lock_expires_at = policy
         .claim_submitted_at
         .checked_add(lock_period)
-        .ok_or(AgentGuardError::MathOverflow)?;
-    require!(now >= lock_expires_at, AgentGuardError::LockPeriodNotElapsed);
+        .ok_or(CovanticError::MathOverflow)?;
+    require!(now >= lock_expires_at, CovanticError::LockPeriodNotElapsed);
 
     // Check vault has enough balance
     require!(
         ctx.accounts.vault_token_account.amount >= payout_amount,
-        AgentGuardError::InsufficientVaultBalance
+        CovanticError::InsufficientVaultBalance
     );
 
     // Transfer payout from vault to holder
@@ -75,14 +75,14 @@ pub fn verify_and_payout_handler(ctx: Context<VerifyAndPayout>, payout_amount: u
     vault.total_claims_paid = vault
         .total_claims_paid
         .checked_add(payout_amount)
-        .ok_or(AgentGuardError::MathOverflow)?;
+        .ok_or(CovanticError::MathOverflow)?;
     vault.total_staked = vault
         .total_staked
         .saturating_sub(payout_amount);
     vault.total_coverage = vault
         .total_coverage
         .checked_sub(policy.coverage_amount)
-        .ok_or(AgentGuardError::MathOverflow)?;
+        .ok_or(CovanticError::MathOverflow)?;
     vault.recalculate_solvency();
 
     // Update policy
@@ -110,7 +110,7 @@ pub struct VerifyAndPayout<'info> {
     #[account(
         seeds = [CONFIG_SEED],
         bump = config.bump,
-        constraint = config.oracle_authority == oracle.key() @ AgentGuardError::UnauthorizedOracle,
+        constraint = config.oracle_authority == oracle.key() @ CovanticError::UnauthorizedOracle,
     )]
     pub config: Account<'info, ProtocolConfig>,
 
@@ -133,16 +133,16 @@ pub struct VerifyAndPayout<'info> {
     /// Vault USDC token account (must belong to vault and be USDC mint)
     #[account(
         mut,
-        constraint = vault_token_account.owner == vault.key() @ AgentGuardError::InvalidTokenAccount,
-        constraint = vault_token_account.mint == config.usdc_mint @ AgentGuardError::InvalidTokenAccount,
+        constraint = vault_token_account.owner == vault.key() @ CovanticError::InvalidTokenAccount,
+        constraint = vault_token_account.mint == config.usdc_mint @ CovanticError::InvalidTokenAccount,
     )]
     pub vault_token_account: Account<'info, TokenAccount>,
 
     /// Holder USDC token account (must belong to policy holder and be USDC mint)
     #[account(
         mut,
-        constraint = holder_token_account.owner == policy.holder @ AgentGuardError::InvalidTokenAccount,
-        constraint = holder_token_account.mint == config.usdc_mint @ AgentGuardError::InvalidTokenAccount,
+        constraint = holder_token_account.owner == policy.holder @ CovanticError::InvalidTokenAccount,
+        constraint = holder_token_account.mint == config.usdc_mint @ CovanticError::InvalidTokenAccount,
     )]
     pub holder_token_account: Account<'info, TokenAccount>,
 

@@ -5,7 +5,7 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { ClaimVerificationPipeline } from '@/components/claims/ClaimVerificationPipeline';
 import { apiGet } from '@/lib/api-client';
-import { formatUsdc, type Claim, TriggerType } from '@agentguard/shared';
+import { formatUsdc, type Claim, TriggerType } from '@covantic/shared';
 
 const triggerLabels: Record<number, string> = {
   [TriggerType.Exploit]: 'Exploit',

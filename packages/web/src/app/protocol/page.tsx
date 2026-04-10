@@ -1,11 +1,11 @@
 'use client';
 
 import { Card } from '@/components/ui/Card';
-import { useAgentGuardContext } from '@/providers/AgentGuardProvider';
-import { formatUsdc } from '@agentguard/shared';
+import { useCovanticContext } from '@/providers/CovanticProvider';
+import { formatUsdc } from '@covantic/shared';
 
 export default function ProtocolPage() {
-  const { vaultStats } = useAgentGuardContext();
+  const { vaultStats } = useCovanticContext();
 
   const stats = [
     {

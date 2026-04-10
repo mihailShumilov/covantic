@@ -1,23 +1,23 @@
-# Full development stack for AgentGuard
+# Full development stack for Covantic
 # Usage: docker compose -f docker/docker-compose.yml up -d
 
-name: agentguard-dev
+name: covantic-dev
 
 services:
   # PostgreSQL 18 — primary database
   postgres:
     image: postgres:18
-    container_name: agentguard-postgres
+    container_name: covantic-postgres
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-agentguard}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agentguard_dev_2026}
-      POSTGRES_DB: ${POSTGRES_DB:-agentguard}
+      POSTGRES_USER: ${POSTGRES_USER:-covantic}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-covantic_dev_2026}
+      POSTGRES_DB: ${POSTGRES_DB:-covantic}
     ports:
       - "5499:5432"
     volumes:
       - pgdata:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U agentguard"]
+      test: ["CMD-SHELL", "pg_isready -U covantic"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -26,7 +26,7 @@ services:
   # Redis 7 — cache, pub/sub, job queue
   redis:
     image: redis:7-alpine
-    container_name: agentguard-redis
+    container_name: covantic-redis
     ports:
       - "6399:6379"
     volumes:
@@ -43,10 +43,10 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.api
-    container_name: agentguard-api
+    container_name: covantic-api
     environment:
       NODE_ENV: development
-      DATABASE_URL: postgresql://agentguard:agentguard_dev_2026@postgres:5432/agentguard
+      DATABASE_URL: postgresql://covantic:covantic_dev_2026@postgres:5432/covantic
       REDIS_URL: redis://redis:6379
       SOLANA_RPC_URL: https://devnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}
       HELIUS_API_KEY: ${HELIUS_API_KEY}
@@ -73,10 +73,10 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.monitor
-    container_name: agentguard-monitor
+    container_name: covantic-monitor
     environment:
       NODE_ENV: development
-      DATABASE_URL: postgresql://agentguard:agentguard_dev_2026@postgres:5432/agentguard
+      DATABASE_URL: postgresql://covantic:covantic_dev_2026@postgres:5432/covantic
       REDIS_URL: redis://redis:6379
       SOLANA_RPC_URL: https://devnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}
       HELIUS_API_KEY: ${HELIUS_API_KEY}
@@ -95,7 +95,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.web
-    container_name: agentguard-web
+    container_name: covantic-web
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:4099
       NEXT_PUBLIC_WS_URL: ws://localhost:4099

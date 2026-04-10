@@ -13,11 +13,11 @@ export function lamportsToUsdc(lamports: number): number {
 
 /** PDA seeds */
 export const PDA_SEEDS = {
-  VAULT: 'vault',
-  POLICY: 'policy',
-  STAKER: 'staker',
-  CONFIG: 'config',
-  VAULT_TOKEN: 'vault_token',
+  VAULT: 'covantic_vault',
+  POLICY: 'covantic_policy',
+  STAKER: 'covantic_staker',
+  CONFIG: 'covantic_config',
+  VAULT_TOKEN: 'covantic_vault_token',
 } as const;
 
 /** Coverage limits in USDC lamports */

@@ -1,12 +1,12 @@
 [package]
-name = "agentguard"
+name = "covantic"
 version = "0.1.0"
 description = "AI Agent Insurance Protocol on Solana"
 edition = "2021"
 
 [lib]
 crate-type = ["cdylib", "lib"]
-name = "agentguard"
+name = "covantic"
 
 [features]
 no-entrypoint = []

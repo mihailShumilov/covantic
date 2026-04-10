@@ -11,8 +11,12 @@ export function Header() {
         alignItems: 'center',
         justifyContent: 'space-between',
         padding: 'var(--space-md) var(--space-xl)',
-        borderBottom: '1px solid var(--color-border)',
-        background: 'var(--color-surface)',
+        borderBottom: '1px solid var(--color-border-subtle)',
+        background: 'oklch(0.13 0.02 260 / 0.8)',
+        backdropFilter: 'blur(12px)',
+        position: 'sticky',
+        top: 0,
+        zIndex: 50,
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xl)' }}>
@@ -21,11 +25,15 @@ export function Header() {
           style={{
             fontWeight: 800,
             fontSize: '1.25rem',
-            color: 'var(--color-primary)',
+            color: 'var(--color-text)',
             textDecoration: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--space-sm)',
           }}
         >
-          AgentGuard
+          <img src="/favicon.svg" alt="" width={24} height={24} />
+          Covantic
         </Link>
         <nav style={{ display: 'flex', gap: 'var(--space-lg)' }}>
           <Link
@@ -33,18 +41,6 @@ export function Header() {
             style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}
           >
             Dashboard
-          </Link>
-          <Link
-            href="/staking"
-            style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}
-          >
-            Staking
-          </Link>
-          <Link
-            href="/claims"
-            style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}
-          >
-            Claims
           </Link>
           <Link
             href="/protocol"

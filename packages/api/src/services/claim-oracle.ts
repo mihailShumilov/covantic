@@ -1,4 +1,4 @@
-import { TriggerType, LOCK_PERIODS } from '@agentguard/shared';
+import { TriggerType, LOCK_PERIODS } from '@covantic/shared';
 import { HeliusClient } from '../utils/helius.js';
 import { PythClient } from '../utils/pyth.js';
 import { logger } from '../utils/logger.js';

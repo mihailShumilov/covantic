@@ -1,17 +1,17 @@
 /// Seed for InsuranceVault PDA
-pub const VAULT_SEED: &[u8] = b"vault";
+pub const VAULT_SEED: &[u8] = b"covantic_vault";
 
 /// Seed for InsurancePolicy PDA
-pub const POLICY_SEED: &[u8] = b"policy";
+pub const POLICY_SEED: &[u8] = b"covantic_policy";
 
 /// Seed for StakerPosition PDA
-pub const STAKER_SEED: &[u8] = b"staker";
+pub const STAKER_SEED: &[u8] = b"covantic_staker";
 
 /// Seed for ProtocolConfig PDA
-pub const CONFIG_SEED: &[u8] = b"config";
+pub const CONFIG_SEED: &[u8] = b"covantic_config";
 
 /// Seed for vault token account PDA
-pub const VAULT_TOKEN_SEED: &[u8] = b"vault_token";
+pub const VAULT_TOKEN_SEED: &[u8] = b"covantic_vault_token";
 
 /// Maximum coverage amount in USDC (6 decimals): 1,000,000 USDC
 pub const MAX_COVERAGE_AMOUNT: u64 = 1_000_000_000_000;

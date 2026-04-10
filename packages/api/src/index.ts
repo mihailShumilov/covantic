@@ -43,7 +43,7 @@ async function bootstrap() {
   // 5. Plugins — restrict CORS to known origins
   const allowedOrigins =
     config.NODE_ENV === 'production'
-      ? ['https://agentguard.xyz', 'https://www.agentguard.xyz']
+      ? ['https://covantic.xyz', 'https://www.covantic.xyz']
       : [/^http:\/\/localhost:\d+$/];
   await app.register(fastifyCors, { origin: allowedOrigins });
   await app.register(fastifyWebSocket);
@@ -94,13 +94,13 @@ async function bootstrap() {
 
   // 11. Start server
   await app.listen({ port: config.PORT, host: '0.0.0.0' });
-  logger.info(`AgentGuard API running on port ${config.PORT}`);
+  logger.info(`Covantic API running on port ${config.PORT}`);
   logger.info(`Environment: ${config.NODE_ENV}`);
   logger.info(`Solana network: ${config.SOLANA_NETWORK}`);
   logger.info(`Program ID: ${config.PROGRAM_ID}`);
 }
 
 bootstrap().catch((err) => {
-  logger.error(err, 'Failed to start AgentGuard API');
+  logger.error(err, 'Failed to start Covantic API');
   process.exit(1);
 });

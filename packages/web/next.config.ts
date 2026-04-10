@@ -1,7 +1,7 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-  transpilePackages: ['@agentguard/shared'],
+  transpilePackages: ['@covantic/shared'],
   turbopack: {
     // Solana wallet adapter compatibility — stub out Node.js built-ins
     resolveAlias: {

@@ -1,5 +1,5 @@
 /** Risk tier display labels — re-exported from shared for single source of truth */
-export { TIER_LABELS } from '@agentguard/shared';
+export { TIER_LABELS } from '@covantic/shared';
 
 /** Badge variant for each risk tier */
 export const TIER_BADGE_VARIANTS = ['success', 'warning', 'danger', 'danger'] as const;

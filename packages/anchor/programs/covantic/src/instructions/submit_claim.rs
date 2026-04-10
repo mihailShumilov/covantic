@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::constants::*;
-use crate::errors::AgentGuardError;
+use crate::errors::CovanticError;
 use crate::events::ClaimSubmitted;
 use crate::state::InsurancePolicy;
 
@@ -19,20 +19,20 @@ pub fn submit_claim_handler(
     // Must be active
     require!(
         policy.state == InsurancePolicy::STATE_ACTIVE,
-        AgentGuardError::PolicyNotActive
+        CovanticError::PolicyNotActive
     );
 
     // Must not be expired
-    require!(now < policy.expiry_time, AgentGuardError::PolicyExpired);
+    require!(now < policy.expiry_time, CovanticError::PolicyExpired);
 
     // Validate trigger type (1-4)
     require!(
         trigger_type >= TRIGGER_EXPLOIT && trigger_type <= TRIGGER_GOVERNANCE_ATTACK,
-        AgentGuardError::InvalidTriggerType
+        CovanticError::InvalidTriggerType
     );
 
     // Trigger tx signature is required
-    require!(!trigger_tx_signature.is_empty(), AgentGuardError::TriggerTxRequired);
+    require!(!trigger_tx_signature.is_empty(), CovanticError::TriggerTxRequired);
 
     // Update policy
     policy.state = InsurancePolicy::STATE_CLAIM_PENDING;
@@ -58,7 +58,7 @@ pub struct SubmitClaim<'info> {
     /// The policy to submit a claim for
     #[account(
         mut,
-        constraint = policy.holder == holder.key() @ AgentGuardError::UnauthorizedHolder,
+        constraint = policy.holder == holder.key() @ CovanticError::UnauthorizedHolder,
         seeds = [POLICY_SEED, holder.key().as_ref(), &policy.policy_id.to_le_bytes()],
         bump = policy.bump,
     )]

@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { policies } from '../db/schema.js';
-import { calculatePremium, RiskTier } from '@agentguard/shared';
+import { calculatePremium, RiskTier } from '@covantic/shared';
 
 const policyQuerySchema = z.object({
   holder: z.string().optional(),

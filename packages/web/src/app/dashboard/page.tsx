@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { RiskAssessmentPipeline } from '@/components/risk/RiskAssessmentPipeline';
 import { apiGet, apiPost } from '@/lib/api-client';
-import { formatUsdc, type Policy } from '@agentguard/shared';
+import { formatUsdc, type Policy } from '@covantic/shared';
 import {
   TIER_LABELS,
   TIER_BADGE_VARIANTS,

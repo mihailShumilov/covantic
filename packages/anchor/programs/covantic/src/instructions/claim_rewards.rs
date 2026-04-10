@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 
 use crate::constants::*;
-use crate::errors::AgentGuardError;
+use crate::errors::CovanticError;
 use crate::events::RewardsClaimed;
 use crate::state::{InsuranceVault, StakerPosition};
 
@@ -16,21 +16,21 @@ pub fn claim_rewards_handler(ctx: Context<ClaimRewards>) -> Result<()> {
     if vault.total_staked > 0 {
         let share = (vault.total_staker_rewards as u128)
             .checked_mul(staker_position.amount_staked as u128)
-            .ok_or(AgentGuardError::MathOverflow)?
+            .ok_or(CovanticError::MathOverflow)?
             .checked_div(vault.total_staked as u128)
-            .ok_or(AgentGuardError::MathOverflow)? as u64;
+            .ok_or(CovanticError::MathOverflow)? as u64;
 
         let already_claimed = staker_position.rewards_claimed;
         let total_earned = share;
         if total_earned > already_claimed {
             staker_position.rewards_pending = total_earned
                 .checked_sub(already_claimed)
-                .ok_or(AgentGuardError::MathOverflow)?;
+                .ok_or(CovanticError::MathOverflow)?;
         }
     }
 
     let rewards = staker_position.rewards_pending;
-    require!(rewards > 0, AgentGuardError::NoRewardsToClaim);
+    require!(rewards > 0, CovanticError::NoRewardsToClaim);
 
     // Transfer rewards from vault to staker
     let vault_bump = vault.bump;
@@ -52,7 +52,7 @@ pub fn claim_rewards_handler(ctx: Context<ClaimRewards>) -> Result<()> {
     staker_position.rewards_claimed = staker_position
         .rewards_claimed
         .checked_add(rewards)
-        .ok_or(AgentGuardError::MathOverflow)?;
+        .ok_or(CovanticError::MathOverflow)?;
     staker_position.rewards_pending = 0;
 
     emit!(RewardsClaimed {
@@ -89,15 +89,15 @@ pub struct ClaimRewards<'info> {
     /// Vault USDC token account (must belong to vault)
     #[account(
         mut,
-        constraint = vault_token_account.owner == vault.key() @ AgentGuardError::InvalidTokenAccount,
+        constraint = vault_token_account.owner == vault.key() @ CovanticError::InvalidTokenAccount,
     )]
     pub vault_token_account: Account<'info, TokenAccount>,
 
     /// Staker USDC token account (must belong to staker and match mint)
     #[account(
         mut,
-        constraint = staker_token_account.owner == staker.key() @ AgentGuardError::InvalidTokenAccount,
-        constraint = staker_token_account.mint == vault_token_account.mint @ AgentGuardError::InvalidTokenAccount,
+        constraint = staker_token_account.owner == staker.key() @ CovanticError::InvalidTokenAccount,
+        constraint = staker_token_account.mint == vault_token_account.mint @ CovanticError::InvalidTokenAccount,
     )]
     pub staker_token_account: Account<'info, TokenAccount>,
 

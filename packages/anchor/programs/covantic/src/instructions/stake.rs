@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 
 use crate::constants::{CONFIG_SEED, STAKER_SEED, VAULT_SEED};
-use crate::errors::AgentGuardError;
+use crate::errors::CovanticError;
 use crate::events::Staked;
 use crate::state::{InsuranceVault, ProtocolConfig, StakerPosition};
 
@@ -14,10 +14,10 @@ pub fn stake_handler(ctx: Context<Stake>, amount: u64) -> Result<()> {
     let clock = Clock::get()?;
 
     // Protocol must not be paused
-    require!(!config.paused, AgentGuardError::ProtocolPaused);
+    require!(!config.paused, CovanticError::ProtocolPaused);
 
     // Amount must be positive
-    require!(amount > 0, AgentGuardError::ZeroStakeAmount);
+    require!(amount > 0, CovanticError::ZeroStakeAmount);
 
     // Transfer USDC from staker to vault
     let transfer_ctx = CpiContext::new(
@@ -38,7 +38,7 @@ pub fn stake_handler(ctx: Context<Stake>, amount: u64) -> Result<()> {
     staker_position.amount_staked = staker_position
         .amount_staked
         .checked_add(amount)
-        .ok_or(AgentGuardError::MathOverflow)?;
+        .ok_or(CovanticError::MathOverflow)?;
     if is_new_staker {
         staker_position.deposited_at = clock.unix_timestamp;
     }
@@ -48,12 +48,12 @@ pub fn stake_handler(ctx: Context<Stake>, amount: u64) -> Result<()> {
     vault.total_staked = vault
         .total_staked
         .checked_add(amount)
-        .ok_or(AgentGuardError::MathOverflow)?;
+        .ok_or(CovanticError::MathOverflow)?;
     if is_new_staker {
         vault.staker_count = vault
             .staker_count
             .checked_add(1)
-            .ok_or(AgentGuardError::MathOverflow)?;
+            .ok_or(CovanticError::MathOverflow)?;
     }
     vault.recalculate_solvency();
 
@@ -61,9 +61,9 @@ pub fn stake_handler(ctx: Context<Stake>, amount: u64) -> Result<()> {
     if vault.total_staked > 0 {
         staker_position.share_bps = ((staker_position.amount_staked as u128)
             .checked_mul(10000)
-            .ok_or(AgentGuardError::MathOverflow)?
+            .ok_or(CovanticError::MathOverflow)?
             .checked_div(vault.total_staked as u128)
-            .ok_or(AgentGuardError::MathOverflow)?) as u16;
+            .ok_or(CovanticError::MathOverflow)?) as u16;
     }
 
     emit!(Staked {

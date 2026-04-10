@@ -1,5 +1,5 @@
 {
-  "name": "@agentguard/api",
+  "name": "@covantic/api",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -18,7 +18,7 @@
     "db:seed": "tsx src/db/seed.ts"
   },
   "dependencies": {
-    "@agentguard/shared": "workspace:*",
+    "@covantic/shared": "workspace:*",
     "@coral-xyz/anchor": "^0.30.1",
     "@fastify/cors": "^10.0.0",
     "@fastify/websocket": "^11.0.0",

@@ -1,22 +1,22 @@
 'use client';
 
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
-import type { VaultStats } from '@agentguard/shared';
+import type { VaultStats } from '@covantic/shared';
 import { apiGet } from '@/lib/api-client';
 
-interface AgentGuardContextType {
+interface CovanticContextType {
   vaultStats: VaultStats | null;
   loading: boolean;
   refreshVault: () => Promise<void>;
 }
 
-const AgentGuardContext = createContext<AgentGuardContextType>({
+const CovanticContext = createContext<CovanticContextType>({
   vaultStats: null,
   loading: true,
   refreshVault: async () => {},
 });
 
-export function AgentGuardProvider({ children }: { children: ReactNode }) {
+export function CovanticProvider({ children }: { children: ReactNode }) {
   const [vaultStats, setVaultStats] = useState<VaultStats | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -38,12 +38,12 @@ export function AgentGuardProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AgentGuardContext.Provider value={{ vaultStats, loading, refreshVault }}>
+    <CovanticContext.Provider value={{ vaultStats, loading, refreshVault }}>
       {children}
-    </AgentGuardContext.Provider>
+    </CovanticContext.Provider>
   );
 }
 
-export function useAgentGuardContext() {
-  return useContext(AgentGuardContext);
+export function useCovanticContext() {
+  return useContext(CovanticContext);
 }

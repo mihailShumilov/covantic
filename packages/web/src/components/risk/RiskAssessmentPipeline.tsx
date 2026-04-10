@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { TIER_LABELS, TIER_BADGE_VARIANTS } from '@/lib/risk-labels';
-import type { FactorDetail, RiskAssessment, CategoryRisk } from '@agentguard/shared';
+import type { FactorDetail, RiskAssessment, CategoryRisk } from '@covantic/shared';
 
 type RiskResult = RiskAssessment & {
   agentAddress: string;

@@ -1,4 +1,4 @@
-# Anchor Program — AgentGuard
+# Anchor Program — Covantic
 
 ## Structure
 
@@ -6,7 +6,7 @@
 src/
   lib.rs              — Program entry, declare_id!, 10 instruction handlers
   constants.rs        — All on-chain constants (seeds, limits, BPS values)
-  errors.rs           — AgentGuardError enum (20+ variants)
+  errors.rs           — CovanticError enum (20+ variants)
   events.rs           — 8 event structs (PolicyCreated, ClaimPaid, Staked, etc.)
   state/
     protocol_config.rs  — ProtocolConfig PDA (admin, oracle, usdc_mint, paused)
@@ -43,5 +43,5 @@ anchor deploy         # Deploy to configured cluster
 
 ## Error Handling
 
-All errors use `AgentGuardError` enum with `#[msg("...")]` attributes.
+All errors use `CovanticError` enum with `#[msg("...")]` attributes.
 Key: CoverageTooLow, PolicyNotActive, UnauthorizedOracle, InsufficientVaultBalance, UnstakeCooldownNotMet.

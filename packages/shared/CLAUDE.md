@@ -1,6 +1,6 @@
-# Shared Package — AgentGuard
+# Shared Package — Covantic
 
-Cross-package types, constants, and utilities. Imported as `@agentguard/shared`.
+Cross-package types, constants, and utilities. Imported as `@covantic/shared`.
 
 ## Structure
 
@@ -20,6 +20,6 @@ src/
 ## Rule
 
 This package is the single source of truth for types and constants.
-Never duplicate these definitions in other packages — always import from `@agentguard/shared`.
+Never duplicate these definitions in other packages — always import from `@covantic/shared`.
 
 Must be built before other packages: `pnpm --filter shared build`.

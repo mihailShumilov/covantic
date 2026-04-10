@@ -2,7 +2,7 @@
 
 ## Overview
 
-AgentGuard is a parametric insurance protocol for AI agents on Solana. The system consists of five main components:
+Covantic is a parametric insurance protocol for AI agents on Solana. The system consists of five main components:
 
 ### 1. Solana Program (Anchor)
 

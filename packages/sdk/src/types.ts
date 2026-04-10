@@ -1,4 +1,4 @@
-export interface AgentGuardConfig {
+export interface CovanticConfig {
   programId: string;
   apiUrl?: string;
   defaultCoverage?: number;

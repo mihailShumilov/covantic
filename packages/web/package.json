@@ -1,5 +1,5 @@
 {
-  "name": "@agentguard/web",
+  "name": "@covantic/web",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -11,7 +11,7 @@
     "clean": "rm -rf .next"
   },
   "dependencies": {
-    "@agentguard/shared": "workspace:*",
+    "@covantic/shared": "workspace:*",
     "@coral-xyz/anchor": "^0.30.1",
     "@solana/wallet-adapter-base": "^0.9.23",
     "@solana/wallet-adapter-react": "^0.15.35",

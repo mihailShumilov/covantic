@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { VerificationStep, StepStatus, type PipelineStep } from '@agentguard/shared';
+import { VerificationStep, StepStatus, type PipelineStep } from '@covantic/shared';
 
 interface Props {
   steps?: PipelineStep[];

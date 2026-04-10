@@ -48,7 +48,7 @@ export default function DemoPage() {
       <div style={{ marginBottom: 'var(--space-xl)' }}>
         <Badge variant="warning">DEMO MODE</Badge>
         <h1 style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: 'var(--space-sm)' }}>
-          AgentGuard Demo
+          Covantic Demo
         </h1>
         <p style={{ color: 'var(--color-text-secondary)', marginTop: 'var(--space-xs)' }}>
           Simulate insurance scenarios and watch the full claim-to-payout pipeline in action.

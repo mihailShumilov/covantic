@@ -1,4 +1,4 @@
-# AgentGuard — AI Agent Insurance Protocol on Solana
+# Covantic — AI Agent Insurance Protocol on Solana
 
 ## Project Overview
 
@@ -49,7 +49,7 @@ Filter to single package: `pnpm --filter api dev`, `pnpm --filter web dev`
 ## Key Patterns
 
 - **Imports**: Use `import type { X }` for type-only imports (verbatimModuleSyntax)
-- **Shared types**: Import from `@agentguard/shared` — never duplicate types
+- **Shared types**: Import from `@covantic/shared` — never duplicate types
 - **Env config**: Zod-validated in `packages/api/src/config/env.ts`
 - **DB**: Drizzle ORM, schema in `packages/api/src/db/schema.ts`
 - **Routes**: Fastify route plugins in `packages/api/src/routes/`
