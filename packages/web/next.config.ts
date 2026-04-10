@@ -1,6 +1,7 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
+  output: 'standalone',
   transpilePackages: ['@covantic/shared'],
   turbopack: {
     // Solana wallet adapter compatibility — stub out Node.js built-ins
