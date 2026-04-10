@@ -1,5 +1,6 @@
 import type { Database } from '../config/database.js';
 import type { AppConfig } from '../config/env.js';
+import type { Connection } from '@solana/web3.js';
 import type Redis from 'ioredis';
 
 /** Extend Fastify instance with custom decorations */
@@ -8,5 +9,6 @@ declare module 'fastify' {
     db: Database;
     redis: Redis;
     config: AppConfig;
+    solanaConnection: Connection;
   }
 }

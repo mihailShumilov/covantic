@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -16,11 +17,29 @@ import {
   STATE_BADGE_VARIANTS,
 } from '@/lib/risk-labels';
 
+interface RiskApiResponse {
+  assessmentId: string;
+  agentAddress: string;
+  score: number;
+  tier: number;
+  premiumBps: number;
+  factors: Record<string, number>;
+  factorDetails: any[];
+  categoryRisks: any[];
+  weightInfo: any[];
+  dataAvailability: any;
+  overallConfidence: number;
+  summary: string;
+  recommendation: string;
+  assessedAt: string;
+}
+
 export default function DashboardPage() {
+  const router = useRouter();
   const { publicKey } = useWallet();
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [showBuyModal, setShowBuyModal] = useState(false);
-  const [riskResult, setRiskResult] = useState<any>(null);
+  const [riskResult, setRiskResult] = useState<RiskApiResponse | null>(null);
   const [isAssessing, setIsAssessing] = useState(false);
   const [pipelineKey, setPipelineKey] = useState(0);
   const [agentAddress, setAgentAddress] = useState('');
@@ -36,22 +55,29 @@ export default function DashboardPage() {
   const handleGetRisk = async () => {
     if (!agentAddress || isAssessing) return;
 
-    // 1. Clear previous results and start pipeline animation
+    // 1. Clear previous results and start pipeline animation (fetching phase)
     setRiskResult(null);
     setIsAssessing(true);
     setPipelineKey((k) => k + 1);
 
-    // 2. Fire API call in background — pipeline animation is already running
+    // 2. Fire API call — pipeline shows "fetching" animation until result arrives
     try {
-      const result = await apiGet(`/api/risk/${agentAddress}`);
+      const result = await apiGet<RiskApiResponse>(`/api/risk/${agentAddress}`);
       setRiskResult(result);
     } catch {
       setRiskResult(null);
     }
   };
 
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
   const handlePipelineComplete = () => {
     setIsAssessing(false);
+    // Validate the assessmentId is a UUID before using it in a navigation path
+    // to prevent open-redirect if the API response is ever tampered with.
+    if (riskResult?.assessmentId && UUID_RE.test(riskResult.assessmentId)) {
+      router.push(`/assessment/${riskResult.assessmentId}`);
+    }
   };
 
   return (
@@ -109,7 +135,7 @@ export default function DashboardPage() {
         {pipelineKey > 0 && (
           <RiskAssessmentPipeline
             key={pipelineKey}
-            result={riskResult}
+            result={riskResult as any}
             onComplete={handlePipelineComplete}
           />
         )}
@@ -193,22 +219,35 @@ function BuyPolicyForm({ onClose }: { onClose: () => void }) {
   const [duration, setDuration] = useState('24');
   const [tier, setTier] = useState(0);
   const [quote, setQuote] = useState<any>(null);
-
-  const getQuote = async () => {
-    try {
-      const q = await apiPost('/api/policies/quote', {
-        coverageAmount: parseFloat(coverage) * 1_000_000,
-        durationSeconds: parseFloat(duration) * 3600,
-        riskTier: tier,
-      });
-      setQuote(q);
-    } catch {
-      // Handle error
-    }
-  };
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    getQuote();
+    // Debounce: wait 400ms after the last change before hitting the API.
+    // This prevents hammering /api/policies/quote on every keystroke.
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+
+    debounceRef.current = setTimeout(async () => {
+      const coverageNum = parseFloat(coverage);
+      const durationNum = parseFloat(duration);
+      // Only fetch if the values are valid positive numbers
+      if (!isFinite(coverageNum) || coverageNum <= 0 || !isFinite(durationNum) || durationNum <= 0) {
+        return;
+      }
+      try {
+        const q = await apiPost('/api/policies/quote', {
+          coverageAmount: coverageNum * 1_000_000,
+          durationSeconds: durationNum * 3600,
+          riskTier: tier,
+        });
+        setQuote(q);
+      } catch {
+        // Handle error
+      }
+    }, 400);
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
   }, [coverage, duration, tier]);
 
   return (

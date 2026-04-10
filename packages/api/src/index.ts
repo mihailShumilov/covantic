@@ -9,6 +9,7 @@ import { registerRoutes } from './routes/index.js';
 import { registerWorkers } from './workers/index.js';
 import { registerErrorHandler } from './middleware/error-handler.js';
 import { registerRateLimit } from './middleware/rate-limit.js';
+import { createSolanaConnection } from './config/solana.js';
 import { NotificationService } from './services/notification-service.js';
 import { logger } from './utils/logger.js';
 import './types/index.js';
@@ -26,6 +27,7 @@ async function bootstrap() {
 
   // 3. Create connections
   const redis = createRedisConnection(config.REDIS_URL);
+  const solanaConnection = createSolanaConnection(config.SOLANA_RPC_URL);
 
   // 4. Create Fastify instance
   const app = Fastify({
@@ -50,6 +52,7 @@ async function bootstrap() {
   app.decorate('db', db);
   app.decorate('redis', redis);
   app.decorate('config', config);
+  app.decorate('solanaConnection', solanaConnection);
 
   // 7. Error handling + rate limiting
   registerErrorHandler(app);

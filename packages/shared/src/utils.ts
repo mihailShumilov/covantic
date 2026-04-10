@@ -37,6 +37,16 @@ export function tierToPremiumBps(tier: RiskTier): number {
   }
 }
 
+/** Human-readable labels for risk tiers, indexed by RiskTier enum value.
+ *  The `& Record<number, string>` allows indexing by plain `number` when the
+ *  tier comes from an API response that hasn't been narrowed to `RiskTier`. */
+export const TIER_LABELS: Record<RiskTier, string> & Record<number, string> = {
+  [RiskTier.LOW]: 'LOW',
+  [RiskTier.MEDIUM]: 'MEDIUM',
+  [RiskTier.HIGH]: 'HIGH',
+  [RiskTier.EXTREME]: 'EXTREME',
+};
+
 /** Map risk score (0-1) to risk tier */
 export function scoreToTier(score: number): RiskTier {
   if (score <= RISK_SCORE_BOUNDARIES.LOW_MAX) return RiskTier.LOW;

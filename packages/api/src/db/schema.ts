@@ -48,6 +48,34 @@ export const agents = pgTable(
   ],
 );
 
+// Risk Assessments — every assessment stored as a separate record for history & sharing
+export const riskAssessments = pgTable(
+  'risk_assessments',
+  {
+    id: uuid('id')
+      .default(sql`gen_random_uuid()`)
+      .primaryKey(),
+    agentAddress: varchar('agent_address', { length: 44 }).notNull(),
+    riskScore: real('risk_score').notNull(),
+    riskTier: smallint('risk_tier').notNull(),
+    premiumBps: integer('premium_bps').notNull(),
+    factors: jsonb('factors').notNull(),
+    factorDetails: jsonb('factor_details').notNull(),
+    categoryRisks: jsonb('category_risks').notNull(),
+    weightInfo: jsonb('weight_info').notNull(),
+    dataAvailability: jsonb('data_availability').notNull(),
+    overallConfidence: real('overall_confidence').notNull(),
+    summary: text('summary').notNull(),
+    recommendation: text('recommendation').notNull(),
+    assessedAt: timestamp('assessed_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_risk_assessments_agent').on(table.agentAddress),
+    index('idx_risk_assessments_created').on(table.createdAt),
+  ],
+);
+
 // Policies — mirror of on-chain data + metadata
 export const policies = pgTable(
   'policies',
