@@ -115,11 +115,6 @@ const DEX_PROGRAMS = new Set([
   'Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB',
 ]);
 
-const TOKEN_PROGRAM_IDS = new Set([
-  'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
-  'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
-]);
-
 /**
  * Analyzes a Solana wallet using standard RPC calls (no Helius dependency).
  * Works with any Solana cluster (devnet, mainnet-beta, localnet).

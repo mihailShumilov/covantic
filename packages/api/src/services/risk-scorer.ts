@@ -937,7 +937,7 @@ const FACTOR_DESCRIPTIONS: Record<keyof RiskFactors, {
     describe: (v) =>
       v < 0.15 ? 'Low MEV exposure — swaps show healthy execution patterns with minimal sandwich attack indicators.'
       : v < 0.4 ? 'Moderate MEV exposure — some swap patterns suggest occasional sandwich attack vulnerability.'
-      : `High MEV sandwich exposure (${pct(v)}) — agent\'s swap patterns indicate frequent value extraction by MEV bots, suggesting insufficient slippage protection or predictable trading patterns.`,
+      : `High MEV sandwich exposure (${pct(v)}) — agent's swap patterns indicate frequent value extraction by MEV bots, suggesting insufficient slippage protection or predictable trading patterns.`,
   },
   protocolConcentration: {
     label: 'Protocol Concentration',
