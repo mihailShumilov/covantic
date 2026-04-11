@@ -1,8 +1,8 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
 # Covantic — SSL Certificate Setup
-# Usage: DOMAIN=covantic.org bash scripts/setup-ssl.sh
+# Usage: DOMAIN=covantic.org sh scripts/setup-ssl.sh
 
 DOMAIN="${DOMAIN:?Set DOMAIN env var, e.g. DOMAIN=covantic.org}"
 EMAIL="${EMAIL:-admin@${DOMAIN}}"
