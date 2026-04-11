@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { sql } from 'drizzle-orm';
 
 export async function healthRoutes(app: FastifyInstance) {
   app.get('/api/health', async (_request, reply) => {
@@ -6,7 +7,7 @@ export async function healthRoutes(app: FastifyInstance) {
 
     // DB check
     try {
-      await app.db.execute({ sql: 'SELECT 1' } as any);
+      await app.db.execute(sql`SELECT 1`);
       checks.database = 'ok';
     } catch {
       checks.database = 'error';
