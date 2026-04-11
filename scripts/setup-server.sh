@@ -93,7 +93,7 @@ echo "     Waiting for database to be ready..."
 sleep 8
 
 echo "==> [6/7] Pushing database schema..."
-$COMPOSE run --rm api sh -c 'npx drizzle-kit push --force'
+$COMPOSE run --rm api sh -c 'cd packages/api && npx drizzle-kit push --force'
 
 echo "==> [6/7] Starting all services..."
 $COMPOSE up -d

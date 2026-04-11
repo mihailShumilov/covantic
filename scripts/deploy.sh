@@ -16,7 +16,7 @@ echo "==> Building images..."
 $COMPOSE build --no-cache
 
 echo "==> Pushing database schema..."
-$COMPOSE run --rm api sh -c 'DATABASE_URL=$DATABASE_URL npx drizzle-kit push --force'
+$COMPOSE run --rm api sh -c 'cd packages/api && npx drizzle-kit push --force'
 
 echo "==> Restarting services..."
 $COMPOSE down
