@@ -1,141 +1,181 @@
-# Covantic — Hetzner VDS Deployment
+# Covantic — Production Deployment
 
-## 1. VDS Initial Setup
+Domain: **covantic.org**
+
+## Quick Start (One Command)
+
+SSH into a fresh Ubuntu server and run:
 
 ```bash
-# SSH into your VDS
-ssh root@YOUR_VDS_IP
-
-# Update system
-apt update && apt upgrade -y
-
-# Install Docker
-curl -fsSL https://get.docker.com | sh
-systemctl enable docker
-systemctl start docker
-
-# Install Docker Compose plugin (included with Docker Engine 24+)
-docker compose version  # verify
-
-# Install Git
-apt install -y git
-
-# Create app user (optional, recommended)
-adduser --disabled-password covantic
-usermod -aG docker covantic
-su - covantic
+git clone https://github.com/mihailShumilov/ai-agent-insurance.git covantic
+cd covantic
+bash scripts/setup-server.sh
 ```
 
-## 2. Clone & Configure
+The script will:
+1. Install Docker, Git, and configure the firewall
+2. Clone the repo (or pull latest)
+3. Generate `.env` with a strong DB password — pauses for you to fill in API keys
+4. Prompt for oracle keypair
+5. Build all Docker images
+6. Start PostgreSQL + Redis, push the DB schema
+7. Start all services (API, Web, Monitor, Nginx)
+8. Request an SSL certificate via Let's Encrypt
+
+## What You Need Before Starting
+
+| Item | Where to get it |
+|------|----------------|
+| Ubuntu VDS (Hetzner, etc.) | Any provider with Docker support |
+| Domain DNS A record | Point `covantic.org` → server IP |
+| Helius API key | https://dev.helius.xyz/ |
+| Oracle keypair | `solana-keygen new -o keys/oracle-keypair.json` |
+| USDC mint (devnet) | Created by `scripts/setup-local.sh` or manually |
+
+## Manual Setup (Step by Step)
+
+### 1. Server Prerequisites
 
 ```bash
-# Clone the repo
+ssh root@YOUR_SERVER_IP
+
+apt update && apt upgrade -y
+curl -fsSL https://get.docker.com | sh
+systemctl enable docker && systemctl start docker
+apt install -y git
+```
+
+### 2. Clone & Configure
+
+```bash
 git clone https://github.com/mihailShumilov/ai-agent-insurance.git covantic
 cd covantic
 
-# Create production .env
+# Create .env from template
 cp .env.production.example .env
-nano .env  # fill in real values
+nano .env
+```
 
-# Generate strong DB password
-openssl rand -base64 32  # use this for POSTGRES_PASSWORD
+**Required `.env` changes:**
 
-# Copy oracle keypair
+```bash
+# Generate a strong DB password
+openssl rand -base64 32
+
+# Update these in .env:
+POSTGRES_PASSWORD=<generated-password>
+HELIUS_API_KEY=<your-key>
+HELIUS_WEBHOOK_SECRET=<your-secret>
+USDC_MINT=<your-devnet-usdc-mint>
+NEXT_PUBLIC_API_URL=https://covantic.org
+NEXT_PUBLIC_WS_URL=wss://covantic.org
+```
+
+Copy oracle keypair:
+```bash
 mkdir -p docker/keys
-# scp from local: scp keys/oracle-keypair.json covantic@VDS_IP:~/covantic/docker/keys/
+# From your local machine:
+scp keys/oracle-keypair.json root@SERVER_IP:~/covantic/docker/keys/
 ```
 
-## 3. First Deploy
+### 3. Build & Start
 
 ```bash
-# Build and start everything (without SSL first)
-docker compose -f docker/docker-compose.prod.yml up -d postgres redis
-sleep 5  # wait for DB
+COMPOSE="docker compose -f docker/docker-compose.prod.yml --env-file .env"
 
-# Push database schema
-docker compose -f docker/docker-compose.prod.yml run --rm api sh -c \
-  'npx drizzle-kit push --force'
+# Build all images
+$COMPOSE build
 
-# Seed demo data (optional)
-docker compose -f docker/docker-compose.prod.yml run --rm api sh -c \
-  'node -e "import(\"./dist/db/seed.js\")"'
+# Start DB first
+$COMPOSE up -d postgres redis
+sleep 8
 
-# Start all services
-docker compose -f docker/docker-compose.prod.yml up -d
+# Push schema
+$COMPOSE run --rm api sh -c 'npx drizzle-kit push --force'
+
+# Start everything
+$COMPOSE up -d
 ```
 
-## 4. SSL Certificate (Let's Encrypt)
+### 4. SSL Certificate
+
+Point DNS A record for `covantic.org` to the server IP, then:
 
 ```bash
-# Point your domain DNS A record to VDS IP first, then:
-DOMAIN=covantic.xyz bash scripts/setup-ssl.sh
+DOMAIN=covantic.org bash scripts/setup-ssl.sh
 ```
 
-**Manual method** (if script doesn't work):
+**Manual SSL method** (if script fails):
 
 ```bash
-# 1. Copy initial HTTP config
-cp docker/nginx/conf.d/initial.conf docker/nginx/conf.d/active.conf
-sed -i 's/YOUR_DOMAIN.com/covantic.xyz/g' docker/nginx/conf.d/active.conf
+COMPOSE="docker compose -f docker/docker-compose.prod.yml --env-file .env"
 
-# 2. Start nginx
-docker compose -f docker/docker-compose.prod.yml up -d nginx
+# 1. HTTP-only nginx for cert provisioning
+cp docker/nginx/conf.d/http.conf.template docker/nginx/conf.d/active.conf
+sed -i 's/YOUR_DOMAIN.com/covantic.org/g' docker/nginx/conf.d/active.conf
+$COMPOSE up -d nginx
 
-# 3. Get certificate
-docker compose -f docker/docker-compose.prod.yml run --rm certbot \
+# 2. Request certificate
+$COMPOSE run --rm certbot \
   certbot certonly --webroot -w /var/www/certbot \
-  --email admin@covantic.xyz --agree-tos --no-eff-email \
-  -d covantic.xyz
+  --email admin@covantic.org --agree-tos --no-eff-email \
+  -d covantic.org
 
-# 4. Switch to SSL config
+# 3. Switch to SSL config
 rm docker/nginx/conf.d/active.conf
-cp docker/nginx/conf.d/covantic.conf docker/nginx/conf.d/active.conf
-sed -i 's/YOUR_DOMAIN.com/covantic.xyz/g' docker/nginx/conf.d/active.conf
+cp docker/nginx/conf.d/ssl.conf.template docker/nginx/conf.d/active.conf
+sed -i 's/YOUR_DOMAIN.com/covantic.org/g' docker/nginx/conf.d/active.conf
 
-# 5. Reload nginx
-docker compose -f docker/docker-compose.prod.yml exec nginx nginx -s reload
+# 4. Reload
+$COMPOSE exec nginx nginx -s reload
 ```
 
 SSL auto-renews via the certbot container (checks every 12h).
 
-## 5. Apply Updates & Restart
-
-### Quick update (rebuild changed services only):
+### 5. Firewall
 
 ```bash
-cd ~/covantic
-git pull --ff-only
-
-# Rebuild and restart only what changed
-docker compose -f docker/docker-compose.prod.yml build api web monitor
-docker compose -f docker/docker-compose.prod.yml up -d api web monitor
-
-# Clean old images
-docker image prune -f
+ufw allow 22/tcp
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw enable
 ```
 
-### Full redeploy:
+PostgreSQL (5432) and Redis (6379) are NOT exposed — only accessible within the Docker network.
 
+## Operations
+
+### Update & Redeploy
+
+**One command** (pulls, builds, migrates, restarts):
 ```bash
 bash scripts/deploy.sh
 ```
 
-### Restart without rebuild:
-
+**Quick update** (rebuild only changed services):
 ```bash
-docker compose -f docker/docker-compose.prod.yml restart api web monitor
+cd ~/covantic
+git pull --ff-only
+COMPOSE="docker compose -f docker/docker-compose.prod.yml --env-file .env"
+$COMPOSE build api web monitor
+$COMPOSE up -d api web monitor
+docker image prune -f
 ```
 
-### Restart single service:
-
+**Restart without rebuild:**
 ```bash
-docker compose -f docker/docker-compose.prod.yml restart api
+docker compose -f docker/docker-compose.prod.yml --env-file .env restart api web monitor
 ```
 
-## 6. Database Operations
+**Restart single service:**
+```bash
+docker compose -f docker/docker-compose.prod.yml --env-file .env restart api
+```
+
+### Database
 
 ```bash
-COMPOSE="docker compose -f docker/docker-compose.prod.yml"
+COMPOSE="docker compose -f docker/docker-compose.prod.yml --env-file .env"
 
 # Push schema changes
 $COMPOSE run --rm api sh -c 'npx drizzle-kit push --force'
@@ -143,86 +183,62 @@ $COMPOSE run --rm api sh -c 'npx drizzle-kit push --force'
 # Seed data
 $COMPOSE run --rm api sh -c 'node -e "import(\"./dist/db/seed.js\")"'
 
-# Connect to DB directly
+# Connect to DB
 $COMPOSE exec postgres psql -U covantic -d covantic
 
 # Backup
 $COMPOSE exec postgres pg_dump -U covantic covantic > backup_$(date +%Y%m%d).sql
 
 # Restore
-cat backup_20260410.sql | $COMPOSE exec -T postgres psql -U covantic -d covantic
+cat backup.sql | $COMPOSE exec -T postgres psql -U covantic -d covantic
 ```
 
-## 7. Logs & Monitoring
+### Logs
 
 ```bash
-COMPOSE="docker compose -f docker/docker-compose.prod.yml"
+COMPOSE="docker compose -f docker/docker-compose.prod.yml --env-file .env"
 
-# All logs
-$COMPOSE logs -f
-
-# Specific service
-$COMPOSE logs -f api
-$COMPOSE logs -f web
-$COMPOSE logs -f monitor
-$COMPOSE logs -f nginx
-
-# Last 100 lines
-$COMPOSE logs --tail 100 api
-
-# Service status
-$COMPOSE ps
+$COMPOSE logs -f              # all services
+$COMPOSE logs -f api          # single service
+$COMPOSE logs --tail 100 api  # last 100 lines
+$COMPOSE ps                   # service status
 ```
 
-## 8. Firewall
-
-```bash
-# Allow only HTTP, HTTPS, SSH
-ufw allow 22/tcp
-ufw allow 80/tcp
-ufw allow 443/tcp
-ufw enable
-
-# Verify — only these ports should be open
-ufw status
-```
-
-**Important**: PostgreSQL (5432) and Redis (6379) are NOT exposed to the host in production — they're only accessible within the Docker network.
-
-## 9. Troubleshooting
+## Troubleshooting
 
 | Problem | Fix |
 |---------|-----|
-| API 500 errors | `docker compose logs api` — check DB connection |
-| Nginx 502 | Service not ready — `docker compose ps`, rebuild if needed |
-| SSL cert expired | `docker compose exec certbot certbot renew --force-renewal` then `docker compose exec nginx nginx -s reload` |
+| API 500 errors | `$COMPOSE logs api` — check DB connection |
+| Nginx 502 | Service not ready — `$COMPOSE ps`, rebuild if needed |
+| SSL cert expired | `$COMPOSE exec certbot certbot renew --force-renewal` then `$COMPOSE exec nginx nginx -s reload` |
 | Out of disk | `docker system prune -a` (removes all unused images) |
-| DB migration fail | `docker compose exec postgres psql -U covantic -d covantic` to debug |
-| Container won't start | `docker compose logs <service>` — check for env var issues |
+| DB migration fail | `$COMPOSE exec postgres psql -U covantic -d covantic` to debug |
+| Container won't start | `$COMPOSE logs <service>` — check for env var issues |
+| Build fails (node-gyp) | Dockerfile.web includes `python3 make g++ linux-headers eudev-dev` — ensure it's up to date |
 
-## Architecture (Production)
+## Architecture
 
 ```
 Internet
-  │
-  ▼
-┌─────────────────────────┐
-│  Nginx (:80, :443)      │
-│  SSL termination        │
-│  Rate limiting          │
-└──┬──────────┬───────────┘
-   │          │
-   ▼          ▼
-┌──────┐  ┌──────┐
-│ Web  │  │ API  │◄── Monitor
-│:3000 │  │:4000 │
-└──────┘  └──┬───┘
-             │
-     ┌───────┴───────┐
-     ▼               ▼
-┌──────────┐  ┌──────────┐
-│ Postgres │  │  Redis   │
-│  :5432   │  │  :6379   │
-└──────────┘  └──────────┘
+  |
+  v
++-------------------------+
+|  Nginx (:80, :443)      |
+|  SSL termination        |
+|  Rate limiting          |
++--+----------+-----------+
+   |          |
+   v          v
++------+  +------+
+| Web  |  | API  |<-- Monitor
+|:3000 |  |:4000 |
++------+  +--+---+
+             |
+     +-------+-------+
+     v               v
++----------+  +----------+
+| Postgres |  |  Redis   |
+|  :5432   |  |  :6379   |
++----------+  +----------+
 (internal network only)
 ```

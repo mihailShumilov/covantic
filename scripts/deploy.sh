@@ -4,7 +4,7 @@ set -euo pipefail
 # Covantic — Deploy / Update script
 # Usage: bash scripts/deploy.sh
 
-COMPOSE="docker compose -f docker/docker-compose.prod.yml"
+COMPOSE="docker compose -f docker/docker-compose.prod.yml --env-file .env"
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 cd "$APP_DIR"
