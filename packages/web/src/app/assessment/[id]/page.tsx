@@ -51,7 +51,7 @@ export default function AssessmentPage({ params }: { params: Promise<{ id: strin
 
   if (loading) {
     return (
-      <div style={{ padding: 'var(--space-xl)', maxWidth: 900, margin: '0 auto', textAlign: 'center' }}>
+      <div style={{ padding: 'var(--space-lg) var(--space-md)', maxWidth: 900, margin: '0 auto', textAlign: 'center' }}>
         <Spinner />
         <p style={{ color: 'var(--color-text-muted)', marginTop: 'var(--space-md)' }}>
           Loading assessment...
@@ -62,7 +62,7 @@ export default function AssessmentPage({ params }: { params: Promise<{ id: strin
 
   if (error || !assessment) {
     return (
-      <div style={{ padding: 'var(--space-xl)', maxWidth: 900, margin: '0 auto', textAlign: 'center' }}>
+      <div style={{ padding: 'var(--space-lg) var(--space-md)', maxWidth: 900, margin: '0 auto', textAlign: 'center' }}>
         <h1 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: 'var(--space-md)' }}>
           Assessment Not Found
         </h1>
@@ -79,7 +79,7 @@ export default function AssessmentPage({ params }: { params: Promise<{ id: strin
   const assessedDate = new Date(assessment.assessedAt);
 
   return (
-    <div style={{ padding: 'var(--space-xl)', maxWidth: 900, margin: '0 auto' }}>
+    <div style={{ padding: 'var(--space-lg) var(--space-md)', maxWidth: 900, margin: '0 auto' }}>
       {/* Header */}
       <div
         style={{
@@ -91,11 +91,11 @@ export default function AssessmentPage({ params }: { params: Promise<{ id: strin
           gap: 'var(--space-md)',
         }}
       >
-        <div>
-          <h1 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: 4 }}>
+        <div style={{ minWidth: 0, flex: '1 1 auto' }}>
+          <h1 style={{ fontSize: 'clamp(1.25rem, 3vw, 1.5rem)', fontWeight: 700, marginBottom: 4 }}>
             Risk Assessment
           </h1>
-          <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
+          <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', wordBreak: 'break-all' }}>
             Agent: <span style={{ fontFamily: 'var(--font-mono)' }}>{assessment.agentAddress}</span>
           </p>
           <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
@@ -122,6 +122,7 @@ export default function AssessmentPage({ params }: { params: Promise<{ id: strin
             gap: 'var(--space-lg)',
             alignItems: 'center',
             padding: 'var(--space-sm)',
+            flexWrap: 'wrap',
           }}
         >
           <div style={{ textAlign: 'center' }}>
@@ -166,7 +167,7 @@ export default function AssessmentPage({ params }: { params: Promise<{ id: strin
               {assessment.premiumBps > 0 ? `${assessment.premiumBps / 100}%` : 'Not insurable'}
             </div>
           </div>
-          <div style={{ marginLeft: 'auto' }}>
+          <div style={{ marginLeft: 'auto', minWidth: 'fit-content' }}>
             <div
               style={{
                 fontSize: '0.6875rem',
@@ -280,7 +281,7 @@ export default function AssessmentPage({ params }: { params: Promise<{ id: strin
               style={{
                 display: 'flex',
                 alignItems: 'flex-start',
-                gap: 'var(--space-md)',
+                gap: 'var(--space-sm)',
                 padding: 'var(--space-sm) 0',
                 borderBottom:
                   index < assessment.factorDetails.length - 1

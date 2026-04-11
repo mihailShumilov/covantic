@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { useRouter } from 'next/navigation';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -35,7 +34,6 @@ interface RiskApiResponse {
 }
 
 export default function DashboardPage() {
-  const router = useRouter();
   const { publicKey } = useWallet();
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [showBuyModal, setShowBuyModal] = useState(false);
@@ -52,6 +50,8 @@ export default function DashboardPage() {
     }
   }, [publicKey]);
 
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
   const handleGetRisk = async () => {
     if (!agentAddress || isAssessing) return;
 
@@ -64,40 +64,39 @@ export default function DashboardPage() {
     try {
       const result = await apiGet<RiskApiResponse>(`/api/risk/${agentAddress}`);
       setRiskResult(result);
+      // Update URL to shareable assessment link without navigating away
+      if (result.assessmentId && UUID_RE.test(result.assessmentId)) {
+        window.history.replaceState(null, '', `/assessment/${result.assessmentId}`);
+      }
     } catch {
       setRiskResult(null);
     }
   };
 
-  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
   const handlePipelineComplete = () => {
     setIsAssessing(false);
-    // Validate the assessmentId is a UUID before using it in a navigation path
-    // to prevent open-redirect if the API response is ever tampered with.
-    if (riskResult?.assessmentId && UUID_RE.test(riskResult.assessmentId)) {
-      router.push(`/assessment/${riskResult.assessmentId}`);
-    }
   };
 
   return (
-    <div style={{ padding: 'var(--space-xl)', maxWidth: 1200, margin: '0 auto' }}>
+    <div style={{ padding: 'var(--space-lg) var(--space-md)', maxWidth: 1200, margin: '0 auto' }}>
       <div
         style={{
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
           marginBottom: 'var(--space-xl)',
+          flexWrap: 'wrap',
+          gap: 'var(--space-sm)',
         }}
       >
-        <h1 style={{ fontSize: '1.5rem', fontWeight: 700 }}>Agent Dashboard</h1>
+        <h1 style={{ fontSize: 'clamp(1.25rem, 3vw, 1.5rem)', fontWeight: 700 }}>Agent Dashboard</h1>
         <Button onClick={() => setShowBuyModal(true)}>Buy Policy</Button>
       </div>
 
       {/* Risk Assessment */}
       <Card title="Risk Assessment" style={{ marginBottom: 'var(--space-lg)' }}>
-        <div style={{ display: 'flex', gap: 'var(--space-md)', alignItems: 'flex-end' }}>
-          <div style={{ flex: 1 }}>
+        <div style={{ display: 'flex', gap: 'var(--space-md)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ flex: '1 1 280px', minWidth: 0 }}>
             <label
               style={{
                 fontSize: '0.8125rem',
@@ -126,7 +125,7 @@ export default function DashboardPage() {
               }}
             />
           </div>
-          <Button onClick={handleGetRisk} size="md" disabled={isAssessing}>
+          <Button onClick={handleGetRisk} size="md" disabled={isAssessing} style={{ flexShrink: 0, width: 'auto' }}>
             {isAssessing ? 'Scanning...' : 'Assess Risk'}
           </Button>
         </div>
@@ -167,6 +166,8 @@ export default function DashboardPage() {
                   padding: 'var(--space-md)',
                   background: 'var(--color-bg)',
                   borderRadius: 'var(--radius-md)',
+                  flexWrap: 'wrap',
+                  gap: 'var(--space-sm)',
                 }}
               >
                 <div>

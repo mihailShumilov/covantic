@@ -732,6 +732,7 @@ export function RiskAssessmentPipeline({ result, onComplete }: Props) {
               background: 'var(--color-surface-hover)',
               borderRadius: 'var(--radius-lg)',
               border: '1px solid var(--color-border)',
+              flexWrap: 'wrap',
             }}
           >
             <div style={{ textAlign: 'center' }}>

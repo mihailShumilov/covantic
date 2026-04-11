@@ -265,3 +265,31 @@ a:hover {
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: var(--color-bg); }
 ::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 3px; }
+
+/* === MOBILE RESPONSIVE === */
+
+/* Header mobile */
+@media (max-width: 640px) {
+  .header-nav { display: none !important; }
+  .header-nav.open { display: flex !important; }
+  .mobile-menu-btn { display: flex !important; }
+}
+
+@media (min-width: 641px) {
+  .mobile-menu-btn { display: none !important; }
+}
+
+/* Wallet button truncation on mobile */
+@media (max-width: 480px) {
+  .wallet-adapter-button {
+    font-size: 0.75rem !important;
+    padding: 0 0.75rem !important;
+    height: 36px !important;
+  }
+}
+
+/* Landing hero mobile */
+@media (max-width: 640px) {
+  .hero-bg { min-height: 60vh !important; }
+  .ticker-track { animation-duration: 20s; }
+}
