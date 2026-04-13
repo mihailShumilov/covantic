@@ -4,7 +4,11 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { BN } from '@coral-xyz/anchor';
 import { PublicKey, SystemProgram } from '@solana/web3.js';
-import { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from '@solana/spl-token';
+import {
+  TOKEN_PROGRAM_ID,
+  getAssociatedTokenAddressSync,
+  createAssociatedTokenAccountIdempotentInstruction,
+} from '@solana/spl-token';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -83,7 +87,16 @@ export default function StakingPage() {
       setMessage(`${label} sent: ${String(sig)}`);
       await Promise.all([refreshPosition(), refreshVault()]);
     } catch (e: any) {
-      setError(e?.message ?? 'Transaction failed');
+      const msg = String(e?.message ?? '');
+      // Wallet adapter + Anchor can both submit the signed tx; the second
+      // submit returns "already been processed" even though the first one
+      // confirmed. Treat as success and refresh.
+      if (msg.includes('already been processed')) {
+        setMessage(`${label} confirmed`);
+        await Promise.all([refreshPosition(), refreshVault()]);
+      } else {
+        setError(msg || 'Transaction failed');
+      }
     } finally {
       setBusy(false);
     }
@@ -109,6 +122,12 @@ export default function StakingPage() {
       const stakerPosition = deriveStakerPda(publicKey);
       const stakerAta = getAssociatedTokenAddressSync(usdcMint, publicKey);
       const vaultAta = getAssociatedTokenAddressSync(usdcMint, vaultPda, true);
+      const createStakerAtaIx = createAssociatedTokenAccountIdempotentInstruction(
+        publicKey,
+        stakerAta,
+        publicKey,
+        usdcMint,
+      );
       return program.methods
         .stake(new BN(amountNum))
         .accounts({
@@ -121,6 +140,7 @@ export default function StakingPage() {
           tokenProgram: TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
         } as any)
+        .preInstructions([createStakerAtaIx])
         .rpc();
     });
 

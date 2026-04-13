@@ -6,7 +6,7 @@ import type { Idl } from '@coral-xyz/anchor';
  * Address matches the on-chain program ID on devnet.
  */
 export const COVANTIC_IDL = {
-  address: '52KrSMg3rsbtRw3FchxJ9jRwRzQmWcDzg1AiiHHHXz1D',
+  address: '91TyFjPEKeKevThuZmfvYzFpzHhchVLtPYf5nLiUzoV7',
   metadata: {
     name: 'covantic',
     version: '0.1.0',

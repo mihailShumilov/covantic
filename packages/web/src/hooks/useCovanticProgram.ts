@@ -12,7 +12,7 @@ import { PROGRAM_ID as PROGRAM_ID_STR } from '@/lib/constants';
 // when NEXT_PUBLIC_PROGRAM_ID isn't available at build time. Any real user
 // action goes through an RPC, so a missing env var will surface as a failed
 // transaction rather than a silently-wrong PDA derivation.
-const DEVNET_FALLBACK_PROGRAM_ID = '52KrSMg3rsbtRw3FchxJ9jRwRzQmWcDzg1AiiHHHXz1D';
+const DEVNET_FALLBACK_PROGRAM_ID = '91TyFjPEKeKevThuZmfvYzFpzHhchVLtPYf5nLiUzoV7';
 
 let warnedAboutMissingProgramId = false;
 function resolveProgramIdString(): string {

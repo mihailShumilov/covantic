@@ -6,10 +6,10 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-covantic = "52KrSMg3rsbtRw3FchxJ9jRwRzQmWcDzg1AiiHHHXz1D"
+covantic = "91TyFjPEKeKevThuZmfvYzFpzHhchVLtPYf5nLiUzoV7"
 
 [programs.localnet]
-covantic = "52KrSMg3rsbtRw3FchxJ9jRwRzQmWcDzg1AiiHHHXz1D"
+covantic = "91TyFjPEKeKevThuZmfvYzFpzHhchVLtPYf5nLiUzoV7"
 
 [registry]
 url = "https://api.apr.dev"
@@ -23,3 +23,5 @@ test = "pnpm exec vitest run"
 
 [test]
 startup_wait = 5000
+shutdown_wait = 2000
+upgradeable = false
