@@ -94,25 +94,6 @@ importers:
         specifier: ^3.0.0
         version: 3.2.4(@types/node@25.5.2)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
 
-  packages/sdk:
-    dependencies:
-      '@coral-xyz/anchor':
-        specifier: ^0.30.1
-        version: 0.30.1(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
-      '@covantic/shared':
-        specifier: workspace:*
-        version: link:../shared
-      '@solana/web3.js':
-        specifier: ^1.95.0
-        version: 1.98.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
-    devDependencies:
-      typescript:
-        specifier: ^5.7.0
-        version: 5.9.3
-      vitest:
-        specifier: ^3.0.0
-        version: 3.2.4(@types/node@25.5.2)(terser@5.46.1)(tsx@4.21.0)(yaml@2.8.3)
-
   packages/shared:
     devDependencies:
       typescript:

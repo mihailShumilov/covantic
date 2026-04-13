@@ -80,18 +80,23 @@ export const RISK_TIERS = [
   { name: 'EXTREME', rate: 'Declined', range: '0.75+', color: 'var(--color-text-muted)', fill: 100 },
 ] as const;
 
-export const SDK_CODE = `import { CovanticPlugin } from '@covantic/sdk';
+export const SDK_CODE = `import { Connection } from '@solana/web3.js';
+import { CovanticClient, RiskTier, usdcToLamports } from '@covantic/solana-sdk';
 
-const agent = new SolanaAgent({
-  plugins: [new CovanticPlugin()],
+const client = new CovanticClient({
+  connection: new Connection('https://api.devnet.solana.com'),
+  wallet,
 });
 
 // Auto-insure before every trade
-await agent.insure({
-  coverage: 1000,    // USDC
-  duration: '24h',
-  triggers: ['exploit', 'oracle'],
-});`;
+const { instruction } = await client.createPolicyIx({
+  coverageLamports: usdcToLamports(1000),
+  durationSeconds: 24 * 3600,
+  riskTier: RiskTier.MEDIUM,
+  agentAddress: wallet.publicKey,
+  usdcMint: USDC_MINT,
+});
+await client.sendTransaction([instruction]);`;
 
 export const STAKER_STATS = [
   { label: 'Pool Size', value: '$340K USDC' },

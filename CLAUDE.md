@@ -12,9 +12,14 @@ packages/
   anchor/   — Solana program (Rust, Anchor 0.30.1)
   api/      — Backend (Fastify 5, Drizzle ORM, BullMQ)
   web/      — Frontend (Next.js 16, React 19, Tailwind)
-  sdk/      — Solana Agent Kit plugin (TypeScript)
   shared/   — Cross-package types, constants, utilities
 ```
+
+## Related Repos
+
+- TypeScript SDK (`@covantic/solana-sdk`) lives in a separate repo:
+  `git@github.com:mihailShumilov/covantic-solana-sdk.git`
+  — Do not add it back as a workspace package; develop there.
 
 ## Tech Stack
 
