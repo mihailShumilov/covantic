@@ -1,4 +1,11 @@
 import type { NextConfig } from 'next';
+import { config as loadDotenv } from 'dotenv';
+import { resolve } from 'node:path';
+
+// Load .env from monorepo root so NEXT_PUBLIC_* vars are available during
+// `next dev` / `next build`. Next.js only auto-loads .env files from the app
+// directory, but this monorepo keeps a single source of truth at the root.
+loadDotenv({ path: resolve(import.meta.dirname, '../../.env') });
 
 const nextConfig: NextConfig = {
   output: 'standalone',
