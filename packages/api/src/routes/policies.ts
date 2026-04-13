@@ -19,15 +19,14 @@ const quoteSchema = z.object({
   durationSeconds: z.number().positive(),
   riskTier: z.number().min(0).max(2),
   /**
-   * Optional agent address. When provided, the server looks up the agent's
-   * most recent risk assessment and rejects the quote if the on-chain agent
-   * is flagged EXTREME. Protects against callers ignoring the off-chain
-   * assessment and requesting a cheaper tier than they qualify for.
+   * Required agent address. The server looks up the agent's most recent
+   * risk assessment and rejects the quote if flagged EXTREME. This is the
+   * only off-chain gate keeping uninsurable agents from getting a cheap
+   * tier quote, so it MUST NOT be optional.
    */
   agentAddress: z
     .string()
-    .regex(SOLANA_ADDRESS_REGEX, 'Invalid Solana address')
-    .optional(),
+    .regex(SOLANA_ADDRESS_REGEX, 'Invalid Solana address'),
 });
 
 export async function policyRoutes(app: FastifyInstance) {
@@ -80,21 +79,19 @@ export async function policyRoutes(app: FastifyInstance) {
   app.post('/api/policies/quote', async (request, reply) => {
     const body = quoteSchema.parse(request.body);
 
-    if (body.agentAddress) {
-      const [latest] = await app.db
-        .select({ tier: riskAssessments.riskTier })
-        .from(riskAssessments)
-        .where(eq(riskAssessments.agentAddress, body.agentAddress))
-        .orderBy(desc(riskAssessments.createdAt))
-        .limit(1);
+    const [latest] = await app.db
+      .select({ tier: riskAssessments.riskTier })
+      .from(riskAssessments)
+      .where(eq(riskAssessments.agentAddress, body.agentAddress))
+      .orderBy(desc(riskAssessments.createdAt))
+      .limit(1);
 
-      if (latest && latest.tier === RiskTier.EXTREME) {
-        return reply.status(400).send({
-          error: 'Agent is currently assessed as EXTREME risk and is not insurable',
-          code: 'AGENT_UNINSURABLE',
-          agentAddress: body.agentAddress,
-        });
-      }
+    if (latest && latest.tier === RiskTier.EXTREME) {
+      return reply.status(400).send({
+        error: 'Agent is currently assessed as EXTREME risk and is not insurable',
+        code: 'AGENT_UNINSURABLE',
+        agentAddress: body.agentAddress,
+      });
     }
 
     const premium = calculatePremium(

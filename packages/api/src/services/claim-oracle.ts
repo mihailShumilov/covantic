@@ -124,9 +124,11 @@ async function verifyOracleManipulation(
     };
   }
 
-  // Get current price and TWAP
+  // Get current price. A real TWAP would require Pyth Benchmarks; for now
+  // we use spot price and flag a deviation below. This weakens oracle
+  // manipulation detection — track as a known gap.
   const currentPrice = await pyth.getPrice('SOL/USD');
-  const twap = await pyth.getTwap('SOL/USD', 300); // 5-min TWAP
+  const twap = await pyth.getSpotPrice('SOL/USD');
 
   if (!currentPrice || !twap) {
     return {

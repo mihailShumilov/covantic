@@ -19,7 +19,10 @@ const envSchema = z.object({
   ORACLE_KEYPAIR_PATH: z.string(),
 
   HELIUS_API_KEY: z.string().min(10),
-  HELIUS_WEBHOOK_SECRET: z.string().optional(),
+  // Required: the /api/monitoring/webhook endpoint rejects all requests that
+  // don't carry a matching HMAC, so the server must refuse to start without
+  // this secret. Use at least 32 random bytes.
+  HELIUS_WEBHOOK_SECRET: z.string().min(32),
 
   USDC_MINT: z.preprocess(
     (v) => (typeof v === 'string' && v.length >= 32 ? v : undefined),

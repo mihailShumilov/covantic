@@ -74,3 +74,20 @@ export const RISK_SCORE_BOUNDARIES = {
   MEDIUM_MAX: 0.6,
   HIGH_MAX: 0.85,
 } as const;
+
+/** Base58 Solana address regex (32-44 chars from the base58 alphabet). */
+export const SOLANA_ADDRESS_REGEX = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+/**
+ * Encode a u64 policy_id into an 8-byte little-endian buffer, matching the
+ * on-chain `&policy.policy_id.to_le_bytes()` seed. Accepts bigint or any
+ * object with a `toString()` (e.g. anchor BN) so BN-using callers don't
+ * need to import @coral-xyz/anchor just to call this.
+ */
+export function policyIdToBytes(id: bigint | { toString(): string }): Uint8Array {
+  const value = typeof id === 'bigint' ? id : BigInt(id.toString());
+  const buf = new Uint8Array(8);
+  const view = new DataView(buf.buffer);
+  view.setBigUint64(0, value, true);
+  return buf;
+}

@@ -19,6 +19,8 @@ export type {
 export type { Claim, SubmitClaimParams, PipelineStep } from './types/claims.js';
 export { ClaimStatus, VerificationStep, StepStatus } from './types/claims.js';
 
+export type { StakerPositionResponse } from './types/staking.js';
+
 export type {
   WSMessage,
   MonitoringEvent,
@@ -51,6 +53,8 @@ export {
   LOCK_PERIODS,
   MAX_POLICIES_PER_WALLET,
   RISK_SCORE_BOUNDARIES,
+  SOLANA_ADDRESS_REGEX,
+  policyIdToBytes,
 } from './constants.js';
 
 // Utils

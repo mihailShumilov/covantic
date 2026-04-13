@@ -1,8 +1,34 @@
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { monitoringEvents } from '../db/schema.js';
 import { TransactionMonitor } from '../services/transaction-monitor.js';
+
+/**
+ * Compare Helius webhook signature against an HMAC-SHA256 of the raw body.
+ * Accepts either the raw secret (legacy) or a signature header; both paths
+ * use timingSafeEqual so response time is constant regardless of prefix match.
+ */
+function webhookSignatureMatches(
+  signatureHeader: string | undefined,
+  rawBody: string | Buffer,
+  secret: string,
+): boolean {
+  if (!signatureHeader) return false;
+  const expected = createHmac('sha256', secret).update(rawBody).digest('hex');
+  // Also allow the legacy mode where the secret is sent as a bearer token
+  const providedBuf = Buffer.from(signatureHeader);
+  const expectedBuf = Buffer.from(expected);
+  const secretBuf = Buffer.from(secret);
+  const hmacMatch =
+    providedBuf.length === expectedBuf.length &&
+    timingSafeEqual(providedBuf, expectedBuf);
+  const legacyMatch =
+    providedBuf.length === secretBuf.length &&
+    timingSafeEqual(providedBuf, secretBuf);
+  return hmacMatch || legacyMatch;
+}
 
 export async function monitoringRoutes(app: FastifyInstance) {
   const monitor = new TransactionMonitor(app.db, app.redis);
@@ -31,11 +57,17 @@ export async function monitoringRoutes(app: FastifyInstance) {
   /** POST /api/monitoring/webhook — Helius webhook endpoint */
   app.post('/api/monitoring/webhook', async (request, reply) => {
     const secret = app.config.HELIUS_WEBHOOK_SECRET;
-    if (secret) {
-      const authHeader = request.headers.authorization;
-      if (authHeader !== secret) {
-        return reply.status(401).send({ error: 'Unauthorized' });
-      }
+    const header =
+      (request.headers['x-helius-hmac-signature'] as string | undefined) ??
+      (request.headers.authorization as string | undefined);
+
+    const rawBody =
+      typeof request.body === 'string'
+        ? request.body
+        : JSON.stringify(request.body);
+
+    if (!webhookSignatureMatches(header, rawBody, secret)) {
+      return reply.status(401).send({ error: 'Unauthorized' });
     }
 
     const payload = request.body as any[];

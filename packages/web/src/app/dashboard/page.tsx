@@ -2,6 +2,9 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
+import { BN } from '@coral-xyz/anchor';
+import { PublicKey } from '@solana/web3.js';
+import { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -15,6 +18,15 @@ import {
   STATE_LABELS,
   STATE_BADGE_VARIANTS,
 } from '@/lib/risk-labels';
+import {
+  useCovanticProgram,
+  deriveConfigPda,
+  deriveVaultPda,
+  derivePolicyPda,
+} from '@/hooks/useCovanticProgram';
+
+const SOLANA_ADDRESS_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface RiskApiResponse {
   assessmentId: string;
@@ -51,10 +63,9 @@ export default function DashboardPage() {
     }
   }, [publicKey]);
 
-  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
   const handleGetRisk = async () => {
     if (!agentAddress || isAssessing) return;
+    if (!SOLANA_ADDRESS_RE.test(agentAddress)) return;
 
     // 1. Clear previous results and start pipeline animation (fetching phase)
     setRiskResult(null);
@@ -217,10 +228,16 @@ export default function DashboardPage() {
 }
 
 function BuyPolicyForm({ onClose }: { onClose: () => void }) {
+  const { publicKey } = useWallet();
+  const { program } = useCovanticProgram();
   const [coverage, setCoverage] = useState('100');
   const [duration, setDuration] = useState('24');
   const [tier, setTier] = useState(0);
+  const [agentAddr, setAgentAddr] = useState('');
   const [quote, setQuote] = useState<any>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [txSig, setTxSig] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -231,8 +248,11 @@ function BuyPolicyForm({ onClose }: { onClose: () => void }) {
     debounceRef.current = setTimeout(async () => {
       const coverageNum = parseFloat(coverage);
       const durationNum = parseFloat(duration);
-      // Only fetch if the values are valid positive numbers
       if (!isFinite(coverageNum) || coverageNum <= 0 || !isFinite(durationNum) || durationNum <= 0) {
+        return;
+      }
+      if (!SOLANA_ADDRESS_RE.test(agentAddr)) {
+        setQuote(null);
         return;
       }
       try {
@@ -240,6 +260,7 @@ function BuyPolicyForm({ onClose }: { onClose: () => void }) {
           coverageAmount: coverageNum * 1_000_000,
           durationSeconds: durationNum * 3600,
           riskTier: tier,
+          agentAddress: agentAddr,
         });
         setQuote(q);
       } catch {
@@ -250,7 +271,7 @@ function BuyPolicyForm({ onClose }: { onClose: () => void }) {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [coverage, duration, tier]);
+  }, [coverage, duration, tier, agentAddr]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
@@ -348,11 +369,117 @@ function BuyPolicyForm({ onClose }: { onClose: () => void }) {
           </p>
         </div>
       )}
+      <div>
+        <label
+          style={{
+            fontSize: '0.8125rem',
+            color: 'var(--color-text-muted)',
+            display: 'block',
+            marginBottom: 4,
+          }}
+        >
+          Agent Wallet Address
+        </label>
+        <input
+          value={agentAddr}
+          onChange={(e) => setAgentAddr(e.target.value)}
+          placeholder="Agent pubkey..."
+          style={{
+            width: '100%',
+            padding: '0.5rem',
+            background: 'var(--color-bg)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-md)',
+            color: 'var(--color-text)',
+            fontFamily: 'var(--font-mono)',
+            fontSize: '0.875rem',
+          }}
+        />
+      </div>
+      {error && (
+        <p style={{ fontSize: '0.8125rem', color: 'var(--color-danger)' }}>{error}</p>
+      )}
+      {txSig && (
+        <p style={{ fontSize: '0.8125rem', color: 'var(--color-primary)' }}>
+          Sent!{' '}
+          <a
+            href={`https://explorer.solana.com/tx/${txSig}?cluster=devnet`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            View on Explorer
+          </a>
+        </p>
+      )}
       <div style={{ display: 'flex', gap: 'var(--space-md)' }}>
-        <Button variant="secondary" onClick={onClose} style={{ flex: 1 }}>
+        <Button variant="secondary" onClick={onClose} style={{ flex: 1 }} disabled={submitting}>
           Cancel
         </Button>
-        <Button style={{ flex: 1 }}>Buy Policy</Button>
+        <Button
+          style={{ flex: 1 }}
+          disabled={submitting || !program || !publicKey}
+          onClick={async () => {
+            setError(null);
+            setTxSig(null);
+            if (!program || !publicKey) {
+              setError('Connect wallet first');
+              return;
+            }
+            let agentPk: PublicKey;
+            try {
+              agentPk = new PublicKey(agentAddr);
+            } catch {
+              setError('Invalid agent address');
+              return;
+            }
+            const coverageNum = Math.round(parseFloat(coverage) * 1_000_000);
+            const durationNum = Math.round(parseFloat(duration) * 3600);
+            if (!coverageNum || !durationNum) {
+              setError('Invalid coverage or duration');
+              return;
+            }
+
+            setSubmitting(true);
+            try {
+              const configPda = deriveConfigPda();
+              const vaultPda = deriveVaultPda();
+              const cfg: any = await (program.account as any).protocolConfig.fetch(configPda);
+              const policyId: BN = cfg.policyCounter;
+              const policyPda = derivePolicyPda(
+                publicKey,
+                BigInt(policyId.toString()),
+              );
+              const usdcMint = cfg.usdcMint as PublicKey;
+              const holderAta = getAssociatedTokenAddressSync(usdcMint, publicKey);
+              const vaultAta = getAssociatedTokenAddressSync(usdcMint, vaultPda, true);
+
+              const sig = await program.methods
+                .createPolicy(
+                  new BN(coverageNum),
+                  new BN(durationNum),
+                  tier,
+                  agentPk,
+                )
+                .accounts({
+                  holder: publicKey,
+                  config: configPda,
+                  vault: vaultPda,
+                  policy: policyPda,
+                  holderTokenAccount: holderAta,
+                  vaultTokenAccount: vaultAta,
+                  tokenProgram: TOKEN_PROGRAM_ID,
+                } as any)
+                .rpc();
+              setTxSig(sig);
+            } catch (e: any) {
+              setError(e?.message ?? 'Transaction failed');
+            } finally {
+              setSubmitting(false);
+            }
+          }}
+        >
+          {submitting ? 'Sending...' : 'Buy Policy'}
+        </Button>
       </div>
     </div>
   );
