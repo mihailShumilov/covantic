@@ -105,11 +105,23 @@ const STABLECOIN_MINTS = new Set([
  * 5. Aggregate category-level and overall risk scores
  * 6. Generate detailed human-readable assessment
  */
+export interface AssessRiskOptions {
+  /**
+   * Reference timestamp used for time-based factors (failure decay, wallet
+   * age, etc). Defaults to the wall clock. Pass an explicit value to make
+   * replays / tests deterministic.
+   */
+  now?: Date;
+}
+
 export async function assessRisk(
   agentAddress: string,
   solanaConnection: Connection,
   helius?: HeliusClient,
+  options: AssessRiskOptions = {},
 ): Promise<RiskAssessment> {
+  const now = options.now ?? new Date();
+  const nowMs = now.getTime();
   const rpcAnalyzer = new SolanaRpcAnalyzer(solanaConnection);
 
   // Step 1: Fetch on-chain data — try Solana RPC first (works on all clusters)
@@ -158,7 +170,7 @@ export async function assessRisk(
     (tx.tokenTransfers ?? []).some((t) => t.toUserAccount === agentAddress),
   );
 
-  const walletAgeDays = computeWalletAgeDays(accountInfo, txs);
+  const walletAgeDays = computeWalletAgeDays(accountInfo, txs, nowMs);
 
   const dataAvailability: DataAvailability = {
     transactionCount: txs.length,
@@ -171,7 +183,15 @@ export async function assessRisk(
   };
 
   // Step 3: Calculate all 15 risk factors
-  const factors = calculateAllFactors(agentAddress, txs, tokens, nativeBalance, accountInfo, dataAvailability);
+  const factors = calculateAllFactors(
+    agentAddress,
+    txs,
+    tokens,
+    nativeBalance,
+    accountInfo,
+    dataAvailability,
+    nowMs,
+  );
 
   // Step 4: Calculate confidence per factor and effective weights
   const weightInfo = calculateDynamicWeights(dataAvailability);
@@ -194,6 +214,7 @@ export async function assessRisk(
   // Step 7: Determine tier and premium
   const tier = scoreToTier(score);
   const premiumBps = tierToPremiumBps(tier);
+  const isInsurable = premiumBps != null;
 
   // Step 8: Generate human-readable output
   const factorDetails = buildFactorDetails(factors, weightInfo, dataAvailability);
@@ -209,6 +230,7 @@ export async function assessRisk(
     score,
     tier,
     premiumBps,
+    isInsurable,
     factors,
     factorDetails,
     categoryRisks,
@@ -217,7 +239,7 @@ export async function assessRisk(
     overallConfidence: Math.round(overallConfidence * 100) / 100,
     summary,
     recommendation,
-    assessedAt: new Date(),
+    assessedAt: now,
   };
 }
 
@@ -232,11 +254,12 @@ function calculateAllFactors(
   nativeBalanceLamports: number,
   accountInfo: AccountInfo | null,
   data: DataAvailability,
+  nowMs: number,
 ): RiskFactors {
   return {
     // Transaction Behavior
-    failedTxRatio: calcFailedTxRatio(txs),
-    avgSlippage: calcAvgSlippage(txs),
+    failedTxRatio: calcFailedTxRatio(txs, nowMs),
+    avgSlippage: calcAvgSlippage(agentAddress, txs),
     txVelocityAnomaly: calcTxVelocityAnomaly(txs),
     sandwichVictim: calcSandwichVictim(agentAddress, txs),
 
@@ -264,16 +287,16 @@ function calculateAllFactors(
 // ── Transaction Behavior ────────────────────────────────────────────────────
 
 /** Time-weighted failed transaction ratio — recent failures count more */
-function calcFailedTxRatio(txs: EnhancedTransaction[]): number {
+function calcFailedTxRatio(txs: EnhancedTransaction[], nowMs: number): number {
   if (txs.length === 0) return 0.5;
 
-  const now = Date.now() / 1000;
+  const nowSeconds = nowMs / 1000;
   let weightedFailed = 0;
   let totalWeight = 0;
 
   for (const tx of txs) {
     // Exponential decay: recent txs weigh more (half-life ~7 days)
-    const ageSeconds = now - tx.timestamp;
+    const ageSeconds = nowSeconds - tx.timestamp;
     const ageDays = ageSeconds / 86400;
     const weight = Math.exp(-0.1 * ageDays);
 
@@ -286,41 +309,60 @@ function calcFailedTxRatio(txs: EnhancedTransaction[]): number {
   return totalWeight > 0 ? clamp(weightedFailed / totalWeight) : 0.5;
 }
 
-/** Average slippage on swap transactions with outlier detection */
-function calcAvgSlippage(txs: EnhancedTransaction[]): number {
+/**
+ * Average slippage on swap transactions.
+ *
+ * On-chain data does not carry price oracles, so we can only measure slippage
+ * when the input and output of a swap are in the SAME mint (e.g. a multi-hop
+ * USDC → X → USDC round trip). Cross-mint swaps (USDC → SOL) cannot be
+ * compared by token amount alone — SOL (9 decimals) and USDC (6 decimals)
+ * have different unit values, and the naive min/max ratio would report a
+ * legitimate trade as ~86% slippage.
+ *
+ * For each swap we look at the agent's net per-mint delta (inflow vs outflow).
+ * If a mint shows both an inflow and an outflow greater than zero, the ratio
+ * `1 - min/max` captures the realized slippage on that leg. Swaps with no
+ * measurable round-trip are skipped. When nothing is measurable we return a
+ * mildly conservative neutral value.
+ */
+function calcAvgSlippage(agentAddress: string, txs: EnhancedTransaction[]): number {
   const swaps = txs.filter((tx) => tx.type === 'SWAP');
   if (swaps.length === 0) return 0.5;
 
   const slippages: number[] = [];
 
   for (const tx of swaps) {
-    const transfers = tx.tokenTransfers ?? [];
-    if (transfers.length < 2) {
-      slippages.push(0.05);
-      continue;
+    const delta = new Map<string, { inflow: number; outflow: number }>();
+
+    for (const t of tx.tokenTransfers ?? []) {
+      const amount = Math.abs(t.tokenAmount ?? 0);
+      if (amount === 0) continue;
+      const entry = delta.get(t.mint) ?? { inflow: 0, outflow: 0 };
+      if (t.toUserAccount === agentAddress) entry.inflow += amount;
+      else if (t.fromUserAccount === agentAddress) entry.outflow += amount;
+      delta.set(t.mint, entry);
     }
 
-    // Look at token balance changes for more accurate slippage
-    const inAmount = Math.abs(transfers[0]?.tokenAmount ?? 0);
-    const outAmount = Math.abs(transfers[1]?.tokenAmount ?? 0);
-
-    if (inAmount > 0 && outAmount > 0) {
-      const ratio = Math.min(inAmount, outAmount) / Math.max(inAmount, outAmount);
+    for (const { inflow, outflow } of delta.values()) {
+      if (inflow <= 0 || outflow <= 0) continue;
+      const ratio = Math.min(inflow, outflow) / Math.max(inflow, outflow);
       slippages.push(clamp(1 - ratio));
-    } else {
-      slippages.push(0.05);
     }
   }
 
-  // Use trimmed mean (remove top/bottom 10%) to reduce outlier impact
+  // No measurable round-trip legs — typical for pure cross-mint swaps.
+  // Return a conservative "insufficient data" value rather than inventing
+  // one from incomparable token amounts.
+  if (slippages.length === 0) return 0.3;
+
+  // Trimmed mean (drop top/bottom 10%) to soften outliers.
   slippages.sort((a, b) => a - b);
   const trimStart = Math.floor(slippages.length * 0.1);
   const trimEnd = Math.max(trimStart + 1, Math.ceil(slippages.length * 0.9));
   const trimmed = slippages.slice(trimStart, trimEnd);
-
   const mean = trimmed.reduce((a, b) => a + b, 0) / trimmed.length;
 
-  // Normalize: 0.01 (1% slippage) is moderate, 0.05+ (5%) is high
+  // 1% realized slippage → 0.10, 5%+ → 1.0
   return clamp(mean * 10);
 }
 
@@ -888,14 +930,15 @@ function pct(value: number): string {
 function computeWalletAgeDays(
   accountInfo: AccountInfo | null,
   txs: EnhancedTransaction[],
+  nowMs: number,
 ): number {
   if (accountInfo?.createdAt) {
-    return (Date.now() - new Date(accountInfo.createdAt).getTime()) / (1000 * 86400);
+    return (nowMs - new Date(accountInfo.createdAt).getTime()) / (1000 * 86400);
   }
   if (txs.length > 0) {
     const earliest = txs[txs.length - 1];
     if (earliest?.timestamp) {
-      return (Date.now() / 1000 - earliest.timestamp) / 86400;
+      return (nowMs / 1000 - earliest.timestamp) / 86400;
     }
   }
   return 0;

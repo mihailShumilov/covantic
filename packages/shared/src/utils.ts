@@ -2,29 +2,30 @@ import { RiskTier } from './types/policy.js';
 import { SolvencyStatus } from './types/vault.js';
 import { PREMIUM_BPS, RISK_SCORE_BOUNDARIES, SOLVENCY_THRESHOLDS, DURATION } from './constants.js';
 
-/** Calculate premium amount in USDC lamports */
+/**
+ * Calculate premium amount in USDC lamports. Returns `null` for uninsurable
+ * (EXTREME) tiers — callers must check before using the value.
+ */
 export function calculatePremium(
   coverageAmount: number,
   durationSeconds: number,
   riskTier: RiskTier,
   premiumMultiplierBps: number = 10000,
-): number {
+): number | null {
   const bps = tierToPremiumBps(riskTier);
-  if (bps < 0) return -1; // EXTREME — not insurable
+  if (bps == null) return null;
 
   const annualPremium = (coverageAmount * bps) / 10000;
   const durationFraction = durationSeconds / (365 * 24 * 3600);
   let premium = Math.round(annualPremium * durationFraction);
 
-  // Apply multiplier (e.g. caution mode = 12500 bps = 1.25x)
   premium = Math.round((premium * premiumMultiplierBps) / 10000);
 
-  // Minimum premium: 0.001 USDC = 1000 lamports
   return Math.max(premium, 1000);
 }
 
-/** Map risk tier to premium basis points */
-export function tierToPremiumBps(tier: RiskTier): number {
+/** Map risk tier to premium basis points. `null` for EXTREME (uninsurable). */
+export function tierToPremiumBps(tier: RiskTier): number | null {
   switch (tier) {
     case RiskTier.LOW:
       return PREMIUM_BPS.LOW;
@@ -33,8 +34,13 @@ export function tierToPremiumBps(tier: RiskTier): number {
     case RiskTier.HIGH:
       return PREMIUM_BPS.HIGH;
     case RiskTier.EXTREME:
-      return -1; // Not insurable
+      return null;
   }
+}
+
+/** True when a tier can be priced and quoted for a policy. */
+export function isInsurableTier(tier: RiskTier): boolean {
+  return tierToPremiumBps(tier) != null;
 }
 
 /** Human-readable labels for risk tiers, indexed by RiskTier enum value.

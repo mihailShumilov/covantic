@@ -21,7 +21,8 @@ interface RiskApiResponse {
   agentAddress: string;
   score: number;
   tier: number;
-  premiumBps: number;
+  premiumBps: number | null;
+  isInsurable?: boolean;
   factors: Record<string, number>;
   factorDetails: any[];
   categoryRisks: any[];

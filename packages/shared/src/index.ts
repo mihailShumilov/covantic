@@ -57,6 +57,7 @@ export {
 export {
   calculatePremium,
   tierToPremiumBps,
+  isInsurableTier,
   scoreToTier,
   TIER_LABELS,
   solvencyStatus,

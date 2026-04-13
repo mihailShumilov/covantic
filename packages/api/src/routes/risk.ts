@@ -81,10 +81,19 @@ async function saveAssessment(
   return assessmentId;
 }
 
+/** How long a scored result stays cached before a GET re-runs the pipeline. */
+const ASSESSMENT_CACHE_TTL_SECONDS = 300;
+const cacheKey = (addr: string) => `risk:assessment:v2:${addr}`;
+
 export async function riskRoutes(app: FastifyInstance) {
   const helius = new HeliusClient(app.config.HELIUS_API_KEY);
 
-  /** GET /api/risk/:agentAddress — Run a NEW risk assessment (always creates a new record) */
+  /**
+   * GET /api/risk/:agentAddress — Return the latest risk assessment, using a
+   * short-lived Redis cache to avoid repeated RPC+scoring work for hot addresses.
+   * Cache misses compute a fresh assessment, persist a new history row, and
+   * populate the cache. POST /refresh bypasses and invalidates the cache.
+   */
   app.get('/api/risk/:agentAddress', { preHandler: [riskAssessmentRateLimit] }, async (request, reply) => {
     const parseResult = addressParam.safeParse(request.params);
     if (!parseResult.success) {
@@ -92,13 +101,31 @@ export async function riskRoutes(app: FastifyInstance) {
     }
     const { agentAddress } = parseResult.data;
 
+    const cached = await app.redis.get(cacheKey(agentAddress));
+    if (cached) {
+      try {
+        const payload = JSON.parse(cached);
+        return reply.header('X-Cache', 'HIT').send(payload);
+      } catch {
+        // Corrupted cache entry — fall through to fresh assessment.
+      }
+    }
+
     const assessment = await assessRisk(agentAddress, app.solanaConnection, helius);
     const assessmentId = await saveAssessment(app.db, agentAddress, assessment);
+    const response = { ...assessment, agentAddress, assessmentId };
 
-    return reply.send({ ...assessment, agentAddress, assessmentId });
+    await app.redis.set(
+      cacheKey(agentAddress),
+      JSON.stringify(response),
+      'EX',
+      ASSESSMENT_CACHE_TTL_SECONDS,
+    );
+
+    return reply.header('X-Cache', 'MISS').send(response);
   });
 
-  /** POST /api/risk/:agentAddress/refresh — Force recalculate (alias, also creates new record) */
+  /** POST /api/risk/:agentAddress/refresh — Force recalculate and invalidate cache */
   app.post('/api/risk/:agentAddress/refresh', { preHandler: [riskAssessmentRateLimit] }, async (request, reply) => {
     const parseResult = addressParam.safeParse(request.params);
     if (!parseResult.success) {
@@ -108,8 +135,16 @@ export async function riskRoutes(app: FastifyInstance) {
 
     const assessment = await assessRisk(agentAddress, app.solanaConnection, helius);
     const assessmentId = await saveAssessment(app.db, agentAddress, assessment);
+    const response = { ...assessment, agentAddress, assessmentId };
 
-    return reply.send({ ...assessment, agentAddress, assessmentId });
+    await app.redis.set(
+      cacheKey(agentAddress),
+      JSON.stringify(response),
+      'EX',
+      ASSESSMENT_CACHE_TTL_SECONDS,
+    );
+
+    return reply.header('X-Cache', 'REFRESH').send(response);
   });
 
   /** GET /api/assessments/:id — Retrieve a stored assessment by ID (for shareable URLs) */
@@ -127,12 +162,17 @@ export async function riskRoutes(app: FastifyInstance) {
     }
 
     const row = rows[0]!;
+    // Historical rows may store -1 for EXTREME (pre-v2); normalise to null so
+    // every response has the same shape.
+    const premiumBps =
+      row.premiumBps == null || row.premiumBps <= 0 ? null : row.premiumBps;
     return reply.send({
       assessmentId: row.id,
       agentAddress: row.agentAddress,
       score: row.riskScore,
       tier: row.riskTier,
-      premiumBps: row.premiumBps,
+      premiumBps,
+      isInsurable: premiumBps != null,
       factors: row.factors,
       factorDetails: row.factorDetails,
       categoryRisks: row.categoryRisks,

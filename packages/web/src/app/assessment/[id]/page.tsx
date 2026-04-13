@@ -17,7 +17,8 @@ interface StoredAssessment {
   agentAddress: string;
   score: number;
   tier: number;
-  premiumBps: number;
+  premiumBps: number | null;
+  isInsurable?: boolean;
   factors: Record<string, number>;
   factorDetails: FactorDetail[];
   categoryRisks: CategoryRisk[];
@@ -164,7 +165,9 @@ export default function AssessmentPage({ params }: { params: Promise<{ id: strin
               Annual Premium
             </div>
             <div style={{ fontSize: '1.25rem', fontWeight: 700 }}>
-              {assessment.premiumBps > 0 ? `${assessment.premiumBps / 100}%` : 'Not insurable'}
+              {assessment.premiumBps != null && assessment.premiumBps > 0
+                ? `${assessment.premiumBps / 100}%`
+                : 'Not insurable'}
             </div>
           </div>
           <div style={{ marginLeft: 'auto', minWidth: 'fit-content' }}>

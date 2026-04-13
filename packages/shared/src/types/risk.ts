@@ -96,7 +96,10 @@ export interface DataAvailability {
 export interface RiskAssessment {
   score: number;
   tier: RiskTier;
-  premiumBps: number;
+  /** Annual premium in basis points. `null` when the tier is uninsurable (EXTREME). */
+  premiumBps: number | null;
+  /** Convenience flag mirroring `premiumBps != null`. */
+  isInsurable: boolean;
   factors: RiskFactors;
   factorDetails: FactorDetail[];
   categoryRisks: CategoryRisk[];

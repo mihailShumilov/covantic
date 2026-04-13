@@ -58,7 +58,9 @@ export const riskAssessments = pgTable(
     agentAddress: varchar('agent_address', { length: 44 }).notNull(),
     riskScore: real('risk_score').notNull(),
     riskTier: smallint('risk_tier').notNull(),
-    premiumBps: integer('premium_bps').notNull(),
+    // Null when tier is EXTREME (uninsurable). Historical rows may contain -1;
+    // consumers should treat any non-positive value as "no quote".
+    premiumBps: integer('premium_bps'),
     factors: jsonb('factors').notNull(),
     factorDetails: jsonb('factor_details').notNull(),
     categoryRisks: jsonb('category_risks').notNull(),

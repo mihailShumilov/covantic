@@ -74,10 +74,10 @@ export const COVERAGE_TRIGGERS = [
 ] as const;
 
 export const RISK_TIERS = [
-  { name: 'LOW', rate: '1.0%', range: '0 — 0.25', color: 'var(--color-accent)', fill: 25 },
-  { name: 'MEDIUM', rate: '2.5%', range: '0.25 — 0.50', color: 'var(--color-warning)', fill: 50 },
-  { name: 'HIGH', rate: '5.0%', range: '0.50 — 0.75', color: 'var(--color-danger)', fill: 75 },
-  { name: 'EXTREME', rate: 'Declined', range: '0.75+', color: 'var(--color-text-muted)', fill: 100 },
+  { name: 'LOW', rate: '1.0%', range: '0 — 0.30', color: 'var(--color-accent)', fill: 30 },
+  { name: 'MEDIUM', rate: '2.5%', range: '0.30 — 0.60', color: 'var(--color-warning)', fill: 60 },
+  { name: 'HIGH', rate: '5.0%', range: '0.60 — 0.85', color: 'var(--color-danger)', fill: 85 },
+  { name: 'EXTREME', rate: 'Declined', range: '0.85+', color: 'var(--color-text-muted)', fill: 100 },
 ] as const;
 
 export const SDK_CODE = `import { Connection } from '@solana/web3.js';

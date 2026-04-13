@@ -774,7 +774,7 @@ export function RiskAssessmentPipeline({ result, onComplete }: Props) {
                 Annual Premium
               </div>
               <div style={{ fontSize: '1.125rem', fontWeight: 700 }}>
-                {result.premiumBps > 0
+                {result.premiumBps != null && result.premiumBps > 0
                   ? `${result.premiumBps / 100}%`
                   : 'Not insurable'}
               </div>
