@@ -386,8 +386,8 @@ export default function LandingPage() {
         </div>
 
         <div style={{ display: 'flex', gap: 'var(--space-md)', justifyContent: 'center', marginTop: 'var(--space-xl)' }}>
-          <a href="https://github.com/mihailShumilov/ai-agent-insurance" target="_blank" rel="noopener noreferrer">
-            <button className="btn-outline">GitHub &rarr;</button>
+          <a href="https://github.com/mihailShumilov/covantic-solana-sdk" target="_blank" rel="noopener noreferrer">
+            <button className="btn-outline">SDK on GitHub &rarr;</button>
           </a>
         </div>
       </Section>
