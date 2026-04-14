@@ -28,7 +28,7 @@ src/
 - Next.js 16 App Router with `"use client"` for interactive components
 - Tailwind CSS with CSS custom properties for theming
 - Solana Wallet Adapter for wallet connection
-- API calls to `http://localhost:4000/api/`
+- API calls to `http://localhost:4099/api/` (configurable via `NEXT_PUBLIC_API_URL`)
 - `@covantic/shared` for all types and constants
 
 ## Commands

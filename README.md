@@ -22,7 +22,9 @@ bash scripts/setup-local.sh
 pnpm dev
 ```
 
-This starts PostgreSQL, Redis, Backend API (port 4099), Frontend (port 3099), and background workers.
+This starts PostgreSQL (5499), Redis (6399), Backend API (4099), Frontend (3099), and background workers.
+
+> The Solana Agent Kit plugin lives in a separate repo: [`covantic-solana-sdk`](https://github.com/mihailShumilov/covantic-solana-sdk).
 
 ## Architecture
 
@@ -31,7 +33,6 @@ packages/
   anchor/   — Solana program (Rust, Anchor 0.30.1)
   api/      — Backend (Fastify 5, Drizzle ORM, BullMQ)
   web/      — Frontend (Next.js 16, React 19)
-  sdk/      — Solana Agent Kit plugin (TypeScript)
   shared/   — Cross-package types, constants, utilities
 ```
 

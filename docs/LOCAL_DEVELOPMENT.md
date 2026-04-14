@@ -25,11 +25,11 @@ pnpm dev
 
 This starts:
 
-- PostgreSQL 18 (port 5432)
-- Redis 7 (port 6379)
-- Backend API (port 4000)
-- Frontend (port 3000)
-- Transaction Monitor (background)
+- PostgreSQL 18 (port 5499)
+- Redis 7 (port 6399)
+- Backend API (port 4099)
+- Frontend (port 3099)
+- Background workers (expiry, solvency, analytics, policy indexer, claim keeper)
 
 ## Manual Setup
 
@@ -70,7 +70,7 @@ Copy `.env.example` to `.env` and fill in:
 
 ## Troubleshooting
 
-### "Port 5432 already in use"
+### "Port 5499 already in use"
 
 ```bash
 docker compose -f docker/docker-compose.yml down

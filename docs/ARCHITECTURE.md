@@ -33,9 +33,9 @@ Dashboard application with:
 - Real-time claims feed with verification pipeline visualization
 - Demo mode for hackathon presentation
 
-### 4. SDK Plugin
+### 4. SDK Plugin (separate repo)
 
-Solana Agent Kit integration enabling AI agents to:
+Solana Agent Kit integration, shipped as [`@covantic/solana-sdk`](https://github.com/mihailShumilov/covantic-solana-sdk), enabling AI agents to:
 
 - Check risk scores programmatically
 - Purchase insurance before DeFi operations

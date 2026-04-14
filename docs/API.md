@@ -1,6 +1,6 @@
 # API Documentation
 
-Base URL: `http://localhost:4000`
+Base URL: `http://localhost:4099`
 
 ## Endpoints
 
@@ -61,7 +61,7 @@ Base URL: `http://localhost:4000`
 
 ## WebSocket
 
-Connect to `ws://localhost:4000/ws`
+Connect to `ws://localhost:4099/ws`
 
 ### Subscribe to channel
 
