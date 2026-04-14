@@ -96,6 +96,22 @@ export const COVANTIC_IDL = {
       ],
     },
     {
+      name: 'oracle_submit_claim',
+      discriminator: [69, 18, 72, 170, 189, 116, 218, 79],
+      accounts: [
+        { name: 'oracle', signer: true },
+        {
+          name: 'config',
+          pda: { seeds: [{ kind: 'const', value: [99, 111, 118, 97, 110, 116, 105, 99, 95, 99, 111, 110, 102, 105, 103] }] },
+        },
+        { name: 'policy', writable: true },
+      ],
+      args: [
+        { name: 'trigger_type', type: 'u8' },
+        { name: 'trigger_tx_signature', type: 'bytes' },
+      ],
+    },
+    {
       name: 'verify_and_payout',
       discriminator: [31, 127, 176, 128, 240, 238, 14, 91],
       accounts: [

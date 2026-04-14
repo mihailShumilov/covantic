@@ -39,13 +39,24 @@ pub mod covantic {
         cancel_policy_handler(ctx)
     }
 
-    /// Submit an insurance claim.
+    /// Submit an insurance claim (holder-signed path, used by SDK/agent flow).
     pub fn submit_claim(
         ctx: Context<SubmitClaim>,
         trigger_type: u8,
         trigger_tx_signature: Vec<u8>,
     ) -> Result<()> {
         submit_claim_handler(ctx, trigger_type, trigger_tx_signature)
+    }
+
+    /// Submit an insurance claim on behalf of a holder (oracle-signed path,
+    /// used by the automated monitoring pipeline). Only the oracle authority
+    /// configured in ProtocolConfig may call this.
+    pub fn oracle_submit_claim(
+        ctx: Context<OracleSubmitClaim>,
+        trigger_type: u8,
+        trigger_tx_signature: Vec<u8>,
+    ) -> Result<()> {
+        oracle_submit_claim_handler(ctx, trigger_type, trigger_tx_signature)
     }
 
     /// Verify a claim and execute payout (oracle only).

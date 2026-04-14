@@ -20,8 +20,8 @@ import {
   MINT_SIZE,
   getMinimumBalanceForRentExemptMint,
 } from '@solana/spl-token';
-import { startAnchor, BankrunProvider } from 'anchor-bankrun';
-import type { ProgramTestContext, BanksClient } from 'solana-bankrun';
+import { BankrunProvider } from 'anchor-bankrun';
+import { startAnchor, type ProgramTestContext, type BanksClient } from 'solana-bankrun';
 
 // ---------------------------------------------------------------------------
 // Constants & helpers
@@ -792,6 +792,97 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
           .signers([holder])
           .rpc(),
       ).rejects.toThrow(/PolicyNotActive|state|active/i);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Oracle-initiated claim flow (auto-claim pipeline)
+  // -------------------------------------------------------------------------
+  describe('oracle-initiated claim flow', () => {
+    async function createFreshPolicy(): Promise<{ policy: PublicKey; policyId: BN }> {
+      const [config] = configPda();
+      const [vault] = vaultPda();
+      const cfg: any = await (program.account as any).protocolConfig.fetch(config);
+      const policyId = cfg.policyCounter as BN;
+      const [policy] = policyPda(holder.publicKey, policyId);
+      await program.methods
+        .createPolicy(usdc(50), new BN(86400), 0, agentWallet.publicKey)
+        .accounts({
+          holder: holder.publicKey,
+          config,
+          vault,
+          policy,
+          holderTokenAccount: holderAta,
+          vaultTokenAccount: vaultAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        } as any)
+        .signers([holder])
+        .rpc();
+      return { policy, policyId };
+    }
+
+    const trigSig = Array.from({ length: 64 }, (_, i) => (i + 7) % 256);
+
+    it('lets the oracle submit a claim without holder signature', async () => {
+      const { policy } = await createFreshPolicy();
+      const [config] = configPda();
+
+      await program.methods
+        .oracleSubmitClaim(2, Buffer.from(trigSig))
+        .accounts({ oracle: oracle.publicKey, config, policy } as any)
+        .signers([oracle])
+        .rpc();
+
+      const pol: any = await (program.account as any).insurancePolicy.fetch(policy);
+      expect(pol.state).toBe(1);
+      expect(pol.triggerType).toBe(2);
+      expect(Number(pol.claimSubmittedAt.toString())).toBeGreaterThan(0);
+    });
+
+    it('rejects a non-oracle signer', async () => {
+      const { policy } = await createFreshPolicy();
+      const [config] = configPda();
+
+      // bankrun flattens program errors into a generic string; we assert
+      // the tx rejects and that state is unchanged.
+      await expect(
+        program.methods
+          .oracleSubmitClaim(1, Buffer.from(trigSig))
+          .accounts({ oracle: strangerOracle.publicKey, config, policy } as any)
+          .signers([strangerOracle])
+          .rpc(),
+      ).rejects.toThrow();
+
+      const pol: any = await (program.account as any).insurancePolicy.fetch(policy);
+      expect(pol.state).toBe(0);
+    });
+
+    it('rejects a non-active policy', async () => {
+      const { policy } = await createFreshPolicy();
+      const [config] = configPda();
+
+      // First oracle submit succeeds and moves to ClaimPending
+      await program.methods
+        .oracleSubmitClaim(3, Buffer.from(trigSig))
+        .accounts({ oracle: oracle.publicKey, config, policy } as any)
+        .signers([oracle])
+        .rpc();
+
+      const polPending: any = await (program.account as any).insurancePolicy.fetch(policy);
+      expect(polPending.state).toBe(1);
+
+      // Second submit must fail because state != Active; state should stay ClaimPending.
+      await expect(
+        program.methods
+          .oracleSubmitClaim(3, Buffer.from(trigSig))
+          .accounts({ oracle: oracle.publicKey, config, policy } as any)
+          .signers([oracle])
+          .rpc(),
+      ).rejects.toThrow();
+
+      const polAfter: any = await (program.account as any).insurancePolicy.fetch(policy);
+      expect(polAfter.state).toBe(1);
     });
   });
 });
