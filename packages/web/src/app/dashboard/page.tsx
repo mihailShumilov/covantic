@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { BN } from '@coral-xyz/anchor';
 import { PublicKey } from '@solana/web3.js';
@@ -11,7 +11,13 @@ import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { RiskAssessmentPipeline } from '@/components/risk/RiskAssessmentPipeline';
 import { apiGet, apiPost } from '@/lib/api-client';
-import { formatUsdc, type Policy } from '@covantic/shared';
+import Link from 'next/link';
+import {
+  formatUsdc,
+  PolicyState,
+  type Policy,
+  type StakerPositionResponse,
+} from '@covantic/shared';
 import {
   TIER_LABELS,
   TIER_BADGE_VARIANTS,
@@ -27,6 +33,40 @@ import {
 
 const SOLANA_ADDRESS_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Anchor returns BN for u64/i64 fields. Guard for both BN and raw number.
+function bnToNumber(v: any): number {
+  if (v == null) return 0;
+  if (typeof v === 'number') return v;
+  if (typeof v.toNumber === 'function') return v.toNumber();
+  return Number(v);
+}
+
+function mapOnChainPolicy(account: any, pda: PublicKey): Policy {
+  const claimSubmittedAtSec = bnToNumber(account.claimSubmittedAt);
+  const triggerTxBytes: Uint8Array | number[] | undefined = account.triggerTxSignature;
+  return {
+    policyId: bnToNumber(account.policyId),
+    holder: (account.holder as PublicKey).toBase58(),
+    agentAddress: (account.agentAddress as PublicKey).toBase58(),
+    coverageAmount: bnToNumber(account.coverageAmount),
+    premiumPaid: bnToNumber(account.premiumPaid),
+    riskTier: account.riskTier as number,
+    startTime: new Date(bnToNumber(account.startTime) * 1000),
+    expiryTime: new Date(bnToNumber(account.expiryTime) * 1000),
+    claimSubmittedAt:
+      claimSubmittedAtSec > 0 ? new Date(claimSubmittedAtSec * 1000) : null,
+    state: account.state as PolicyState,
+    triggerType: account.triggerType as number,
+    triggerTxSignature:
+      triggerTxBytes && triggerTxBytes.length > 0
+        ? Buffer.from(triggerTxBytes).toString('utf8')
+        : null,
+    payoutAmount: bnToNumber(account.payoutAmount),
+    pdaAddress: pda.toBase58(),
+    createTxSignature: null,
+  };
+}
 
 interface RiskApiResponse {
   assessmentId: string;
@@ -48,20 +88,51 @@ interface RiskApiResponse {
 
 export default function DashboardPage() {
   const { publicKey } = useWallet();
+  const { program } = useCovanticProgram();
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [showBuyModal, setShowBuyModal] = useState(false);
   const [riskResult, setRiskResult] = useState<RiskApiResponse | null>(null);
   const [isAssessing, setIsAssessing] = useState(false);
   const [pipelineKey, setPipelineKey] = useState(0);
   const [agentAddress, setAgentAddress] = useState('');
+  const [stakerPosition, setStakerPosition] = useState<StakerPositionResponse | null>(null);
 
   useEffect(() => {
-    if (publicKey) {
-      apiGet<{ policies: Policy[] }>(`/api/policies?holder=${publicKey.toBase58()}`)
-        .then((data) => setPolicies(data.policies))
-        .catch(() => {});
+    if (!publicKey) {
+      setStakerPosition(null);
+      return;
     }
+    apiGet<StakerPositionResponse>(`/api/staking/${publicKey.toBase58()}`)
+      .then(setStakerPosition)
+      .catch(() => setStakerPosition(null));
   }, [publicKey]);
+
+  // Read policies from chain rather than the API — the backend doesn't index
+  // on-chain createPolicy events, so the DB is empty for fresh policies.
+  const refreshPolicies = useCallback(async () => {
+    if (!program || !publicKey) {
+      setPolicies([]);
+      return;
+    }
+    try {
+      // offset = 8 (discriminator) + 8 (policy_id u64) — holder pubkey starts here.
+      // memcmp.bytes is base58, which PublicKey.toBase58() already gives us.
+      const accounts = await (program.account as any).insurancePolicy.all([
+        { memcmp: { offset: 16, bytes: publicKey.toBase58() } },
+      ]);
+      const mapped: Policy[] = accounts
+        .map(({ account, publicKey: pda }: any) => mapOnChainPolicy(account, pda))
+        .sort((a: Policy, b: Policy) => Number(b.startTime) - Number(a.startTime));
+      setPolicies(mapped);
+    } catch (err) {
+      console.warn('Failed to load on-chain policies', err);
+      setPolicies([]);
+    }
+  }, [program, publicKey]);
+
+  useEffect(() => {
+    refreshPolicies();
+  }, [refreshPolicies]);
 
   const handleGetRisk = async () => {
     if (!agentAddress || isAssessing) return;
@@ -152,6 +223,72 @@ export default function DashboardPage() {
         )}
       </Card>
 
+      {/* My Stake */}
+      <Card title="My Stake" style={{ marginBottom: 'var(--space-lg)' }}>
+        {!publicKey ? (
+          <p
+            style={{
+              color: 'var(--color-text-muted)',
+              textAlign: 'center',
+              padding: 'var(--space-lg)',
+            }}
+          >
+            Connect wallet to view your stake.
+          </p>
+        ) : (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+              gap: 'var(--space-md)',
+              alignItems: 'center',
+            }}
+          >
+            <div>
+              <p style={{ color: 'var(--color-text-muted)', fontSize: '0.8125rem' }}>Staked</p>
+              <p style={{ fontSize: '1.25rem', fontWeight: 700 }}>
+                ${stakerPosition ? formatUsdc(stakerPosition.amountStaked) : '0.00'}
+              </p>
+            </div>
+            <div>
+              <p style={{ color: 'var(--color-text-muted)', fontSize: '0.8125rem' }}>
+                Pool Share
+              </p>
+              <p style={{ fontSize: '1.25rem', fontWeight: 700 }}>
+                {stakerPosition ? (stakerPosition.shareBps / 100).toFixed(2) : '0'}%
+              </p>
+            </div>
+            <div>
+              <p style={{ color: 'var(--color-text-muted)', fontSize: '0.8125rem' }}>
+                Pending Rewards
+              </p>
+              <p
+                style={{
+                  fontSize: '1.25rem',
+                  fontWeight: 700,
+                  color: 'var(--color-primary)',
+                }}
+              >
+                ${stakerPosition ? formatUsdc(stakerPosition.rewardsPending) : '0.00'}
+              </p>
+            </div>
+            <div>
+              <p style={{ color: 'var(--color-text-muted)', fontSize: '0.8125rem' }}>
+                Rewards Claimed
+              </p>
+              <p style={{ fontSize: '1.25rem', fontWeight: 700 }}>
+                ${stakerPosition ? formatUsdc(stakerPosition.rewardsClaimed) : '0.00'}
+              </p>
+            </div>
+            <div style={{ justifySelf: 'end' }}>
+              <Link href="/staking" style={{ textDecoration: 'none' }}>
+                <Button variant="secondary">Manage Stake</Button>
+              </Link>
+            </div>
+          </div>
+        )}
+      </Card>
+
       {/* Policies List */}
       <Card title="Your Policies">
         {policies.length === 0 ? (
@@ -221,13 +358,22 @@ export default function DashboardPage() {
         onClose={() => setShowBuyModal(false)}
         title="Buy Insurance Policy"
       >
-        <BuyPolicyForm onClose={() => setShowBuyModal(false)} />
+        <BuyPolicyForm
+          onClose={() => setShowBuyModal(false)}
+          onPolicyCreated={refreshPolicies}
+        />
       </Modal>
     </div>
   );
 }
 
-function BuyPolicyForm({ onClose }: { onClose: () => void }) {
+function BuyPolicyForm({
+  onClose,
+  onPolicyCreated,
+}: {
+  onClose: () => void;
+  onPolicyCreated?: () => void;
+}) {
   const { publicKey } = useWallet();
   const { program } = useCovanticProgram();
   const [coverage, setCoverage] = useState('100');
@@ -471,6 +617,7 @@ function BuyPolicyForm({ onClose }: { onClose: () => void }) {
                 } as any)
                 .rpc();
               setTxSig(sig);
+              onPolicyCreated?.();
             } catch (e: any) {
               setError(e?.message ?? 'Transaction failed');
             } finally {

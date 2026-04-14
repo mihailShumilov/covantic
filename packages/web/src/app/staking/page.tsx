@@ -12,6 +12,7 @@ import {
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
+import { UnstakeFlow } from '@/components/staking/UnstakeFlow';
 import { useCovanticContext } from '@/providers/CovanticProvider';
 import {
   formatUsdc,
@@ -42,7 +43,7 @@ export default function StakingPage() {
   const [stakeAmount, setStakeAmount] = useState('');
   const [position, setPosition] = useState<StakerPositionResponse | null>(null);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [txStatus, setTxStatus] = useState<{ label: string; sig: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Cache config fetch so stake/unstake/claim don't each hit the RPC for usdcMint.
   const contextCacheRef = useRef<{
@@ -76,7 +77,7 @@ export default function StakingPage() {
 
   async function withBusy<T>(label: string, fn: () => Promise<T>): Promise<void> {
     setError(null);
-    setMessage(null);
+    setTxStatus(null);
     if (!program || !publicKey) {
       setError('Connect wallet first');
       return;
@@ -84,7 +85,7 @@ export default function StakingPage() {
     setBusy(true);
     try {
       const sig = await fn();
-      setMessage(`${label} sent: ${String(sig)}`);
+      setTxStatus({ label: `${label} confirmed`, sig: String(sig) });
       await Promise.all([refreshPosition(), refreshVault()]);
     } catch (e: any) {
       const msg = String(e?.message ?? '');
@@ -92,7 +93,7 @@ export default function StakingPage() {
       // submit returns "already been processed" even though the first one
       // confirmed. Treat as success and refresh.
       if (msg.includes('already been processed')) {
-        setMessage(`${label} confirmed`);
+        setTxStatus({ label: `${label} confirmed`, sig: null });
         await Promise.all([refreshPosition(), refreshVault()]);
       } else {
         setError(msg || 'Transaction failed');
@@ -195,7 +196,6 @@ export default function StakingPage() {
     });
 
   const hasStake = (position?.amountStaked ?? 0) > 0;
-  const cooldownActive = Boolean(position?.unstakeRequestedAt);
 
   return (
     <div style={{ padding: 'var(--space-xl)', maxWidth: 1200, margin: '0 auto' }}>
@@ -312,45 +312,70 @@ export default function StakingPage() {
             >
               Claim Rewards
             </Button>
-            {hasStake && !cooldownActive && (
-              <Button variant="secondary" onClick={onRequestUnstake} disabled={busy}>
-                Request Unstake
-              </Button>
-            )}
-            {cooldownActive && (
-              <Button variant="secondary" onClick={onExecuteUnstake} disabled={busy}>
-                Execute Unstake
-              </Button>
-            )}
           </div>
         </div>
-        {cooldownActive && (
-          <p
+
+        <UnstakeFlow
+          cooldownStartIso={position?.unstakeRequestedAt ?? null}
+          amountStaked={position?.amountStaked ?? 0}
+          hasStake={hasStake}
+          busy={busy}
+          walletConnected={Boolean(publicKey)}
+          onRequestUnstake={onRequestUnstake}
+          onExecuteUnstake={onExecuteUnstake}
+        />
+
+        {(txStatus || error) && (
+          <div
+            className="animate-fadeIn"
             style={{
-              fontSize: '0.8125rem',
-              color: 'var(--color-text-muted)',
               marginTop: 'var(--space-md)',
+              padding: 'var(--space-sm) var(--space-md)',
+              borderRadius: 'var(--radius-md)',
+              background: error
+                ? 'oklch(0.63 0.24 25 / 0.12)'
+                : 'oklch(0.72 0.19 162 / 0.12)',
+              border: `1px solid ${
+                error ? 'var(--color-danger)' : 'var(--color-accent)'
+              }`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 'var(--space-md)',
+              flexWrap: 'wrap',
             }}
           >
-            Cooldown started at {position?.unstakeRequestedAt}. Wait 48h before executing.
-          </p>
-        )}
-        {error && (
-          <p style={{ fontSize: '0.8125rem', color: 'var(--color-danger)', marginTop: 'var(--space-md)' }}>
-            {error}
-          </p>
-        )}
-        {message && (
-          <p
-            style={{
-              fontSize: '0.8125rem',
-              color: 'var(--color-primary)',
-              marginTop: 'var(--space-md)',
-              wordBreak: 'break-all',
-            }}
-          >
-            {message}
-          </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+              <span
+                aria-hidden
+                style={{
+                  fontSize: '1rem',
+                  color: error ? 'var(--color-danger)' : 'var(--color-accent)',
+                }}
+              >
+                {error ? '\u26A0' : '\u2713'}
+              </span>
+              <span
+                style={{
+                  fontSize: '0.8125rem',
+                  color: error ? 'var(--color-danger)' : 'var(--color-accent)',
+                  fontWeight: 600,
+                }}
+              >
+                {error ?? txStatus?.label}
+              </span>
+            </div>
+            {!error && txStatus?.sig && (
+              <a
+                href={`https://explorer.solana.com/tx/${txStatus.sig}?cluster=devnet`}
+                target="_blank"
+                rel="noreferrer"
+                style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)' }}
+              >
+                {'View on Explorer \u2192'}
+              </a>
+            )}
+          </div>
         )}
       </Card>
     </div>
