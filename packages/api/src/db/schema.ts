@@ -137,6 +137,7 @@ export const claims = pgTable(
     status: varchar('status', { length: 32 }).notNull().default('pending'),
     verifiedAt: timestamp('verified_at', { withTimezone: true }),
     paidAt: timestamp('paid_at', { withTimezone: true }),
+    submitTxSignature: varchar('submit_tx_signature', { length: 128 }),
     payoutTxSignature: varchar('payout_tx_signature', { length: 128 }),
 
     lockExpiresAt: timestamp('lock_expires_at', { withTimezone: true }),
