@@ -340,6 +340,17 @@ export default function DashboardPage() {
                     Coverage: ${formatUsdc(policy.coverageAmount)} &middot; Premium: $
                     {formatUsdc(policy.premiumPaid)}
                   </p>
+                  {policy.payoutAmount > 0 && (
+                    <p
+                      style={{
+                        fontSize: '0.8125rem',
+                        color: 'var(--color-primary)',
+                        marginTop: 4,
+                      }}
+                    >
+                      Paid out: ${formatUsdc(policy.payoutAmount)} USDC
+                    </p>
+                  )}
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>

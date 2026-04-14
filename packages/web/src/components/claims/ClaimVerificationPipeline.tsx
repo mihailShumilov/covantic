@@ -7,6 +7,61 @@ interface Props {
   steps?: PipelineStep[];
   autoPlay?: boolean;
   onComplete?: () => void;
+  /**
+   * Live claim status string ('pending' | 'verifying' | 'approved' | 'paid'
+   * | 'rejected' | 'failed'). When set, the pipeline renders step states
+   * derived from the claim instead of animating. Ignored if autoPlay is true
+   * so the marketing demo keeps its animation.
+   */
+  status?: string | null;
+}
+
+/**
+ * Translate a claim row's `status` into the five-step pipeline visualization.
+ *
+ * - pending  : PolicyCheck processing
+ * - verifying: PolicyCheck done, TriggerDetection + LossCalculation processing
+ * - approved : 4 steps done, PayoutExecution processing (waiting for lock)
+ * - paid     : all 5 done
+ * - rejected : verifier said no — mark TriggerDetection failed
+ * - failed   : payout failed — mark PayoutExecution failed
+ */
+function stepsForStatus(status: string): PipelineStep[] {
+  const base: PipelineStep[] = STEP_CONFIG.map((s) => ({
+    step: s.step,
+    status: StepStatus.Pending,
+  }));
+  switch (status) {
+    case 'pending':
+      base[0].status = StepStatus.Processing;
+      return base;
+    case 'verifying':
+      base[0].status = StepStatus.Success;
+      base[1].status = StepStatus.Processing;
+      return base;
+    case 'approved':
+      base[0].status = StepStatus.Success;
+      base[1].status = StepStatus.Success;
+      base[2].status = StepStatus.Success;
+      base[3].status = StepStatus.Success;
+      base[4].status = StepStatus.Processing;
+      return base;
+    case 'paid':
+      return base.map((s) => ({ ...s, status: StepStatus.Success }));
+    case 'rejected':
+      base[0].status = StepStatus.Success;
+      base[1].status = StepStatus.Failed;
+      return base;
+    case 'failed':
+      base[0].status = StepStatus.Success;
+      base[1].status = StepStatus.Success;
+      base[2].status = StepStatus.Success;
+      base[3].status = StepStatus.Success;
+      base[4].status = StepStatus.Failed;
+      return base;
+    default:
+      return base;
+  }
 }
 
 const STEP_CONFIG = [
@@ -48,17 +103,22 @@ export function ClaimVerificationPipeline({
   steps: externalSteps,
   autoPlay = false,
   onComplete,
+  status,
 }: Props) {
   const [steps, setSteps] = useState<PipelineStep[]>(
-    externalSteps ?? STEP_CONFIG.map((s) => ({ step: s.step, status: StepStatus.Pending })),
+    externalSteps ??
+      (status ? stepsForStatus(status) : STEP_CONFIG.map((s) => ({ step: s.step, status: StepStatus.Pending }))),
   );
   const [, setCurrentStep] = useState(-1);
 
   useEffect(() => {
     if (externalSteps) {
       setSteps(externalSteps);
+      return;
     }
-  }, [externalSteps]);
+    if (autoPlay) return;
+    if (status) setSteps(stepsForStatus(status));
+  }, [externalSteps, status, autoPlay]);
 
   // Auto-play animation for demo
   useEffect(() => {

@@ -7,6 +7,8 @@ export enum ClaimStatus {
   Approved = 'approved',
   Paid = 'paid',
   Rejected = 'rejected',
+  /** Payout attempt failed (e.g. insufficient vault balance, RPC error). */
+  Failed = 'failed',
 }
 
 /** Insurance claim */
@@ -23,6 +25,9 @@ export interface Claim {
   status: ClaimStatus;
   verifiedAt: Date | null;
   paidAt: Date | null;
+  /** On-chain tx signature for the oracle's oracle_submit_claim call. */
+  submitTxSignature: string | null;
+  /** On-chain tx signature for verify_and_payout (USDC transfer to holder). */
   payoutTxSignature: string | null;
   lockExpiresAt: Date | null;
   createdAt: Date;
