@@ -15,6 +15,7 @@ import Link from 'next/link';
 import {
   formatUsdc,
   PolicyState,
+  SOLANA_ADDRESS_REGEX,
   type Policy,
   type StakerPositionResponse,
 } from '@covantic/shared';
@@ -31,7 +32,7 @@ import {
   derivePolicyPda,
 } from '@/hooks/useCovanticProgram';
 
-const SOLANA_ADDRESS_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const SOLANA_ADDRESS_RE = SOLANA_ADDRESS_REGEX;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Anchor returns BN for u64/i64 fields. Guard for both BN and raw number.

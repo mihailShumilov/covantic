@@ -4,7 +4,7 @@ use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 use crate::constants::*;
 use crate::errors::CovanticError;
 use crate::events::PolicyCancelled;
-use crate::state::{InsurancePolicy, InsuranceVault};
+use crate::state::{InsurancePolicy, InsuranceVault, ProtocolConfig};
 
 /// Cancel an active policy with partial refund (20% penalty).
 pub fn cancel_policy_handler(ctx: Context<CancelPolicy>) -> Result<()> {
@@ -114,12 +114,27 @@ pub struct CancelPolicy<'info> {
     )]
     pub vault: Account<'info, InsuranceVault>,
 
-    /// Vault USDC token account
-    #[account(mut)]
+    /// Protocol config (for usdc_mint check on token accounts)
+    #[account(
+        seeds = [CONFIG_SEED],
+        bump = config.bump,
+    )]
+    pub config: Account<'info, ProtocolConfig>,
+
+    /// Vault USDC token account (must belong to vault and be USDC mint)
+    #[account(
+        mut,
+        constraint = vault_token_account.owner == vault.key() @ CovanticError::InvalidTokenAccount,
+        constraint = vault_token_account.mint == config.usdc_mint @ CovanticError::InvalidTokenAccount,
+    )]
     pub vault_token_account: Account<'info, TokenAccount>,
 
-    /// Holder USDC token account
-    #[account(mut)]
+    /// Holder USDC token account (must belong to policy holder and be USDC mint)
+    #[account(
+        mut,
+        constraint = holder_token_account.owner == policy.holder @ CovanticError::InvalidTokenAccount,
+        constraint = holder_token_account.mint == config.usdc_mint @ CovanticError::InvalidTokenAccount,
+    )]
     pub holder_token_account: Account<'info, TokenAccount>,
 
     pub token_program: Program<'info, Token>,

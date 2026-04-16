@@ -64,3 +64,27 @@ export interface PipelineStep {
   message?: string;
   data?: Record<string, unknown>;
 }
+
+/** JSON shape persisted in the `claims.verification_data` column. All
+ *  fields optional — accumulated across the ingest / verify / payout
+ *  stages. Consumers should treat every field as possibly missing. */
+export interface VerificationData {
+  /** Event name from the monitoring bus that triggered the claim */
+  eventType?: string;
+  /** Origin of the entry (`claim-keeper`, `indexer`, etc.) */
+  source?: string;
+  /** True when the claim came from a demo / simulation path */
+  simulated?: boolean;
+  /** Verifier output merged on the verify step */
+  confidence?: number;
+  method?: string;
+  txSignature?: string;
+  /** Reason when the claim is rejected */
+  reason?: string;
+  /** Structured details from the rejection path */
+  details?: Record<string, unknown>;
+  /** Stringified error from a failed payout attempt */
+  payoutError?: string;
+  /** Open-ended overflow for verifier-specific fields */
+  [key: string]: unknown;
+}

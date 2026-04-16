@@ -4,11 +4,11 @@ export { TIER_LABELS } from '@covantic/shared';
 /** Badge variant for each risk tier */
 export const TIER_BADGE_VARIANTS = ['success', 'warning', 'danger', 'danger'] as const;
 
-/** Policy state display labels */
-export const STATE_LABELS = ['Active', 'Claim Pending', 'Approved', 'Paid', 'Expired', 'Cancelled'] as const;
+/** Policy state display labels — indexed by PolicyState enum */
+export const STATE_LABELS = ['Active', 'Claim Pending', 'Paid', 'Expired', 'Cancelled'] as const;
 
-/** Badge variant for each policy state */
-export const STATE_BADGE_VARIANTS = ['success', 'warning', 'info', 'success', 'neutral', 'neutral'] as const;
+/** Badge variant for each policy state — indexed by PolicyState enum */
+export const STATE_BADGE_VARIANTS = ['success', 'warning', 'success', 'neutral', 'neutral'] as const;
 
 /** Shared input field style for forms */
 export const INPUT_STYLE: React.CSSProperties = {

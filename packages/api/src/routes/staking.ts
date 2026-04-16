@@ -2,27 +2,33 @@ import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { PublicKey } from '@solana/web3.js';
-import { PDA_SEEDS, type StakerPositionResponse } from '@covantic/shared';
+import {
+  PDA_SEEDS,
+  SOLANA_ADDRESS_REGEX,
+  type StakerPositionResponse,
+} from '@covantic/shared';
 import { logger } from '../utils/logger.js';
 
 const STAKER_SEED = Buffer.from(PDA_SEEDS.STAKER);
 
 /**
  * Byte offsets of fields in the on-chain StakerPosition account, measured
- * after the 8-byte Anchor discriminator. Keep this in sync with
+ * after the 8-byte Anchor discriminator. Keep in sync with
  * `packages/anchor/programs/covantic/src/state/staker_position.rs`.
  */
 const STAKER_LAYOUT = {
-  staker: 0,                 // Pubkey (32)
-  amountStaked: 32,          // u64 (8)
-  shareBps: 40,              // u16 (2)
-  rewardsClaimed: 42,        // u64 (8)
-  rewardsPending: 50,        // u64 (8)
-  depositedAt: 58,           // i64 (8)
-  unstakeRequestedAt: 66,    // i64 (8)
-  bump: 74,                  // u8 (1)
+  version: 0,                 // u8 (1)
+  staker: 1,                  // Pubkey (32)
+  amountStaked: 33,           // u64 (8)
+  shareBps: 41,               // u16 (2)
+  rewardsClaimed: 43,         // u64 (8)
+  rewardsPending: 51,         // u64 (8)
+  rewardPerStakeSnapshot: 59, // u128 (16) — opaque to clients
+  depositedAt: 75,            // i64 (8)
+  unstakeRequestedAt: 83,     // i64 (8)
+  bump: 91,                   // u8 (1)
 } as const;
-const STAKER_LAYOUT_SIZE = 75;
+const STAKER_LAYOUT_SIZE = 92;
 
 /** Anchor account discriminator = sha256("account:StakerPosition")[0..8]. */
 const STAKER_DISCRIMINATOR = createHash('sha256')
@@ -56,7 +62,13 @@ export async function stakingRoutes(app: FastifyInstance) {
 
   /** GET /api/staking/:address — Get staker position from chain */
   app.get('/api/staking/:address', async (request, reply) => {
-    const { address } = z.object({ address: z.string().min(32) }).parse(request.params);
+    const parsed = z
+      .object({ address: z.string().regex(SOLANA_ADDRESS_REGEX, 'Invalid Solana address') })
+      .safeParse(request.params);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'Invalid Solana address' });
+    }
+    const { address } = parsed.data;
 
     let stakerPubkey: PublicKey;
     try {

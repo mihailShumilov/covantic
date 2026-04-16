@@ -8,6 +8,7 @@ target/
 .turbo
 .anchor
 keys/
+docker/keys/
 test-ledger/
 pgdata/
 redisdata/

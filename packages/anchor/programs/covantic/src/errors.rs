@@ -44,6 +44,9 @@ pub enum CovanticError {
     #[msg("Trigger transaction signature is required")]
     TriggerTxRequired,
 
+    #[msg("Trigger transaction signature length exceeds the on-chain buffer")]
+    InvalidTriggerTxSignature,
+
     #[msg("Lock period has not elapsed")]
     LockPeriodNotElapsed,
 

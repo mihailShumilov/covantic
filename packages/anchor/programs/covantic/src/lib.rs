@@ -88,4 +88,22 @@ pub mod covantic {
     pub fn claim_rewards(ctx: Context<ClaimRewards>) -> Result<()> {
         claim_rewards_handler(ctx)
     }
+
+    /// Admin-only: rotate admin / oracle authority, toggle pause, adjust
+    /// the solvency-based premium multiplier. Each argument is optional.
+    pub fn update_config(
+        ctx: Context<UpdateConfig>,
+        new_admin: Option<Pubkey>,
+        new_oracle_authority: Option<Pubkey>,
+        new_paused: Option<bool>,
+        new_premium_multiplier_bps: Option<u16>,
+    ) -> Result<()> {
+        update_config_handler(
+            ctx,
+            new_admin,
+            new_oracle_authority,
+            new_paused,
+            new_premium_multiplier_bps,
+        )
+    }
 }

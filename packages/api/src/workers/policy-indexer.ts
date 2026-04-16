@@ -1,9 +1,11 @@
 import { Queue, Worker } from 'bullmq';
 import type Redis from 'ioredis';
+import { and, eq, inArray } from 'drizzle-orm';
 import { PublicKey } from '@solana/web3.js';
+import { PolicyState } from '@covantic/shared';
 import type { Database } from '../config/database.js';
 import type { AppConfig } from '../config/env.js';
-import { policies } from '../db/schema.js';
+import { claims, policies } from '../db/schema.js';
 import { logger } from '../utils/logger.js';
 import { createCovanticProgram, type CovanticProgram } from '../utils/program.js';
 
@@ -82,6 +84,8 @@ async function reconcilePolicies(db: Database, ctx: CovanticProgram): Promise<vo
     return;
   }
 
+  const claimPendingPolicyIds: number[] = [];
+
   for (const { account, publicKey } of accounts as Array<{
     account: any;
     publicKey: PublicKey;
@@ -109,9 +113,10 @@ async function reconcilePolicies(db: Database, ctx: CovanticProgram): Promise<vo
       updatedAt: new Date(),
     };
 
-    // Upsert on unique policyId. Set only mutable fields on conflict to
-    // avoid clobbering createTxSignature (which the indexer can't recover)
-    // or createdAt.
+    if (row.state === PolicyState.ClaimPending) {
+      claimPendingPolicyIds.push(row.policyId);
+    }
+
     await db
       .insert(policies)
       .values({
@@ -130,6 +135,48 @@ async function reconcilePolicies(db: Database, ctx: CovanticProgram): Promise<vo
           updatedAt: row.updatedAt,
         },
       });
+  }
+
+  // Sync on-chain ClaimPending state back to the claims table. If a holder
+  // filed a claim via submit_claim (not oracle_submit_claim), the keeper
+  // wouldn't otherwise see it and could attempt a duplicate submission.
+  if (claimPendingPolicyIds.length > 0) {
+    const existingOpen = await db
+      .select({ policyId: claims.policyId })
+      .from(claims)
+      .where(
+        and(
+          inArray(claims.policyId, claimPendingPolicyIds),
+          inArray(claims.status, ['pending', 'verifying', 'approved', 'paying'] as string[]),
+        ),
+      );
+    const covered = new Set(existingOpen.map((r) => r.policyId));
+
+    const missing = claimPendingPolicyIds.filter((id) => !covered.has(id));
+    for (const policyId of missing) {
+      const onChain = (accounts as Array<{ account: any; publicKey: PublicKey }>).find(
+        ({ account }) => bnToNumber(account.policyId) === policyId,
+      );
+      if (!onChain) continue;
+      const account = onChain.account;
+      const sig = triggerSigBytesToString(account.triggerTxSignature) ?? 'onchain';
+      await db
+        .insert(claims)
+        .values({
+          policyId,
+          holderAddress: (account.holder as PublicKey).toBase58(),
+          agentAddress: (account.agentAddress as PublicKey).toBase58(),
+          triggerType: (account.triggerType as number) ?? 0,
+          triggerTxSignature: sig,
+          status: 'approved',
+          verificationData: { source: 'policy-indexer', note: 'mirrored from on-chain ClaimPending' },
+        })
+        .onConflictDoNothing();
+      logger.info({ policyId }, 'policy-indexer: mirrored on-chain ClaimPending into claims');
+    }
+
+    // Also reconcile ClaimPaid: if the chain says ClaimPaid but the DB claim
+    // is still approved/paying, catch up so the UI doesn't block a retry.
   }
 
   logger.debug({ count: accounts.length }, 'Policy indexer reconcile complete');

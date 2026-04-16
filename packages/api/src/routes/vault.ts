@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { desc } from 'drizzle-orm';
 import { z } from 'zod';
+import { PolicyState } from '@covantic/shared';
 import { vaultSnapshots, policies } from '../db/schema.js';
 import { eq, sql } from 'drizzle-orm';
 
@@ -54,7 +55,7 @@ export async function vaultRoutes(app: FastifyInstance) {
     const activePoliciesCount = await app.db
       .select({ count: sql<number>`count(*)` })
       .from(policies)
-      .where(eq(policies.state, 0));
+      .where(eq(policies.state, PolicyState.Active));
 
     const stats = snapshot[0] ?? {
       totalStaked: 0,

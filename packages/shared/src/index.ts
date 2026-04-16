@@ -16,7 +16,12 @@ export type {
   Agent,
 } from './types/risk.js';
 
-export type { Claim, SubmitClaimParams, PipelineStep } from './types/claims.js';
+export type {
+  Claim,
+  SubmitClaimParams,
+  PipelineStep,
+  VerificationData,
+} from './types/claims.js';
 export { ClaimStatus, VerificationStep, StepStatus } from './types/claims.js';
 
 export type { StakerPositionResponse } from './types/staking.js';
@@ -54,6 +59,10 @@ export {
   MAX_POLICIES_PER_WALLET,
   RISK_SCORE_BOUNDARIES,
   SOLANA_ADDRESS_REGEX,
+  SOLANA_SIGNATURE_REGEX,
+  SYNTHETIC_PAYOUT_RATIO,
+  DEMO_TX_SIGNATURE_PREFIX,
+  generateDemoTxSignature,
   policyIdToBytes,
 } from './constants.js';
 

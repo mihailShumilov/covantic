@@ -12,7 +12,7 @@ export function registerWorkers(db: Database, redis: Redis, config: AppConfig) {
   logger.info('Starting background workers...');
 
   startExpiryCrank(db, redis);
-  startSolvencyChecker(db, redis);
+  startSolvencyChecker(db, redis, config);
   startAnalyticsAggregator(db, redis);
   startPolicyIndexer(db, redis, config);
   startClaimKeeper(db, redis, config);

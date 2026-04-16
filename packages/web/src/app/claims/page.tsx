@@ -7,7 +7,13 @@ import { ClaimVerificationPipeline } from '@/components/claims/ClaimVerification
 import { apiGet } from '@/lib/api-client';
 import { SOLANA_NETWORK } from '@/lib/constants';
 import { useClaimsFeed } from '@/hooks/useClaimsFeed';
-import { formatUsdc, type Claim, TriggerType } from '@covantic/shared';
+import {
+  DEMO_TX_SIGNATURE_PREFIX,
+  SOLANA_SIGNATURE_REGEX,
+  TriggerType,
+  formatUsdc,
+  type Claim,
+} from '@covantic/shared';
 
 const triggerLabels: Record<number, string> = {
   [TriggerType.Exploit]: 'Exploit',
@@ -31,8 +37,11 @@ const statusVariants: Record<
 function explorerTxUrl(sig: string | null | undefined): string | null {
   if (!sig || sig.length === 0) return null;
   // Synthetic demo signatures (`demo_…`) are not real on-chain txs; skip the link.
-  if (sig.startsWith('demo_')) return null;
-  return `https://explorer.solana.com/tx/${sig}?cluster=${SOLANA_NETWORK}`;
+  if (sig.startsWith(DEMO_TX_SIGNATURE_PREFIX)) return null;
+  // Only link to real Base58 signatures. Anything else is either a stub or
+  // malformed server data; don't render a clickable link for it.
+  if (!SOLANA_SIGNATURE_REGEX.test(sig)) return null;
+  return `https://explorer.solana.com/tx/${encodeURIComponent(sig)}?cluster=${encodeURIComponent(SOLANA_NETWORK)}`;
 }
 
 export default function ClaimsPage() {

@@ -5,6 +5,9 @@ use anchor_lang::prelude::*;
 #[account]
 #[derive(InitSpace)]
 pub struct InsurancePolicy {
+    /// Schema version for forward-compatible deserialization
+    pub version: u8,
+
     /// Unique policy ID (from policy_counter)
     pub policy_id: u64,
 
@@ -33,16 +36,17 @@ pub struct InsurancePolicy {
     pub claim_submitted_at: i64,
 
     /// Current policy state
-    /// 0 = Active, 1 = ClaimPending, 2 = ClaimApproved,
-    /// 3 = ClaimPaid, 4 = Expired, 5 = Cancelled
+    /// 0 = Active, 1 = ClaimPending, 2 = ClaimPaid,
+    /// 3 = Expired, 4 = Cancelled
     pub state: u8,
 
     /// Insurance trigger type
     /// 0=None, 1=Exploit, 2=OracleManip, 3=AgentError, 4=GovernanceAttack
     pub trigger_type: u8,
 
-    /// Trigger transaction signature (64 bytes)
-    #[max_len(64)]
+    /// Trigger transaction signature stored as Base58 UTF-8 bytes.
+    /// A Solana signature is 88 Base58 chars at most.
+    #[max_len(88)]
     pub trigger_tx_signature: Vec<u8>,
 
     /// Actual payout amount (<= coverage_amount)
@@ -53,10 +57,10 @@ pub struct InsurancePolicy {
 }
 
 impl InsurancePolicy {
+    pub const CURRENT_VERSION: u8 = 1;
     pub const STATE_ACTIVE: u8 = 0;
     pub const STATE_CLAIM_PENDING: u8 = 1;
-    pub const STATE_CLAIM_APPROVED: u8 = 2;
-    pub const STATE_CLAIM_PAID: u8 = 3;
-    pub const STATE_EXPIRED: u8 = 4;
-    pub const STATE_CANCELLED: u8 = 5;
+    pub const STATE_CLAIM_PAID: u8 = 2;
+    pub const STATE_EXPIRED: u8 = 3;
+    pub const STATE_CANCELLED: u8 = 4;
 }

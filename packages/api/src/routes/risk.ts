@@ -1,14 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import { eq, desc } from 'drizzle-orm';
 import { z } from 'zod';
+import { SOLANA_ADDRESS_REGEX } from '@covantic/shared';
 import { agents, riskAssessments } from '../db/schema.js';
 import { assessRisk } from '../services/risk-scorer.js';
 import { HeliusClient } from '../utils/helius.js';
 import { riskAssessmentRateLimit } from '../middleware/rate-limit.js';
-
-// Base58 Solana addresses are 32–44 characters long and contain only alphanumeric
-// characters excluding 0, O, I, l (standard Base58 alphabet).
-const SOLANA_ADDRESS_REGEX = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 const addressParam = z.object({
   agentAddress: z.string().regex(SOLANA_ADDRESS_REGEX, 'Invalid Solana address'),

@@ -16,6 +16,9 @@ pub fn verify_and_payout_handler(ctx: Context<VerifyAndPayout>, payout_amount: u
     let clock = Clock::get()?;
     let now = clock.unix_timestamp;
 
+    // Emergency pause blocks oracle-driven payouts
+    require!(!config.paused, CovanticError::ProtocolPaused);
+
     // Only oracle authority
     require!(
         ctx.accounts.oracle.key() == config.oracle_authority,

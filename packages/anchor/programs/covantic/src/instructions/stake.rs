@@ -4,7 +4,50 @@ use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 use crate::constants::{CONFIG_SEED, STAKER_SEED, VAULT_SEED};
 use crate::errors::CovanticError;
 use crate::events::Staked;
+use crate::state::insurance_vault::REWARD_PER_STAKE_SCALE;
 use crate::state::{InsuranceVault, ProtocolConfig, StakerPosition};
+
+/// Compute the pending reward delta for a staker based on the global
+/// reward-per-stake accumulator. Returns 0 when the staker has no
+/// position or the accumulator has not advanced past the snapshot.
+pub fn pending_reward_delta(
+    position: &StakerPosition,
+    vault: &InsuranceVault,
+) -> Result<u64> {
+    if position.amount_staked == 0 {
+        return Ok(0);
+    }
+    let acc_delta = vault
+        .reward_per_stake_acc
+        .checked_sub(position.reward_per_stake_snapshot)
+        .ok_or(CovanticError::MathOverflow)?;
+    if acc_delta == 0 {
+        return Ok(0);
+    }
+    let earned = acc_delta
+        .checked_mul(position.amount_staked as u128)
+        .ok_or(CovanticError::MathOverflow)?
+        .checked_div(REWARD_PER_STAKE_SCALE)
+        .ok_or(CovanticError::MathOverflow)?;
+    Ok(earned as u64)
+}
+
+/// Crystallize outstanding rewards for a staker into rewards_pending
+/// and advance their snapshot to the current accumulator.
+pub fn crystallize_rewards(
+    position: &mut StakerPosition,
+    vault: &InsuranceVault,
+) -> Result<()> {
+    let delta = pending_reward_delta(position, vault)?;
+    if delta > 0 {
+        position.rewards_pending = position
+            .rewards_pending
+            .checked_add(delta)
+            .ok_or(CovanticError::MathOverflow)?;
+    }
+    position.reward_per_stake_snapshot = vault.reward_per_stake_acc;
+    Ok(())
+}
 
 /// Stake USDC into the insurance pool.
 pub fn stake_handler(ctx: Context<Stake>, amount: u64) -> Result<()> {
@@ -30,10 +73,17 @@ pub fn stake_handler(ctx: Context<Stake>, amount: u64) -> Result<()> {
     );
     token::transfer(transfer_ctx, amount)?;
 
+    // Crystallize any pre-existing rewards before changing amount_staked,
+    // then advance the snapshot so the new stake earns from "now".
+    crystallize_rewards(staker_position, vault)?;
+
     // Check if this is a new staker (amount_staked == 0 and deposited_at == 0)
     let is_new_staker = staker_position.amount_staked == 0 && staker_position.deposited_at == 0;
 
     // Update staker position
+    if staker_position.version == 0 {
+        staker_position.version = StakerPosition::CURRENT_VERSION;
+    }
     staker_position.staker = ctx.accounts.staker.key();
     staker_position.amount_staked = staker_position
         .amount_staked
@@ -57,7 +107,7 @@ pub fn stake_handler(ctx: Context<Stake>, amount: u64) -> Result<()> {
     }
     vault.recalculate_solvency();
 
-    // Update share_bps (lazy — only for this staker)
+    // Update share_bps (lazy — informational only)
     if vault.total_staked > 0 {
         staker_position.share_bps = ((staker_position.amount_staked as u128)
             .checked_mul(10000)
@@ -74,6 +124,7 @@ pub fn stake_handler(ctx: Context<Stake>, amount: u64) -> Result<()> {
 
     Ok(())
 }
+
 
 #[derive(Accounts)]
 pub struct Stake<'info> {

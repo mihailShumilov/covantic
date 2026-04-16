@@ -2,13 +2,40 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
+import { SOLANA_ADDRESS_REGEX, generateDemoTxSignature } from '@covantic/shared';
 import { monitoringEvents } from '../db/schema.js';
 import { TransactionMonitor } from '../services/transaction-monitor.js';
+import { publishAlert } from '../services/alert-bus.js';
+
+/** Stripped-down shape we require from the Helius enhanced-transaction
+ *  payload. Everything else is ignored, including fields we'd otherwise
+ *  trust for anomaly detection (processTransaction re-derives those). */
+const tokenTransferSchema = z
+  .object({
+    fromUserAccount: z.string().optional(),
+    toUserAccount: z.string().optional(),
+    tokenAmount: z.number().optional(),
+  })
+  .passthrough();
+
+const enhancedTransactionSchema = z
+  .object({
+    signature: z.string().optional(),
+    transactionError: z.unknown().optional(),
+    tokenTransfers: z.array(tokenTransferSchema).optional(),
+    accountData: z.array(z.unknown()).optional(),
+  })
+  .passthrough();
+
+const webhookPayloadSchema = z.union([
+  z.array(enhancedTransactionSchema),
+  enhancedTransactionSchema.transform((tx) => [tx]),
+]);
 
 /**
- * Compare Helius webhook signature against an HMAC-SHA256 of the raw body.
- * Accepts either the raw secret (legacy) or a signature header; both paths
- * use timingSafeEqual so response time is constant regardless of prefix match.
+ * Validate a Helius webhook signature as HMAC-SHA256 of the raw body.
+ * Only HMAC is accepted: the "raw secret as Bearer token" fallback has
+ * been removed as it bypassed the body binding.
  */
 function webhookSignatureMatches(
   signatureHeader: string | undefined,
@@ -17,21 +44,14 @@ function webhookSignatureMatches(
 ): boolean {
   if (!signatureHeader) return false;
   const expected = createHmac('sha256', secret).update(rawBody).digest('hex');
-  // Also allow the legacy mode where the secret is sent as a bearer token
   const providedBuf = Buffer.from(signatureHeader);
   const expectedBuf = Buffer.from(expected);
-  const secretBuf = Buffer.from(secret);
-  const hmacMatch =
-    providedBuf.length === expectedBuf.length &&
-    timingSafeEqual(providedBuf, expectedBuf);
-  const legacyMatch =
-    providedBuf.length === secretBuf.length &&
-    timingSafeEqual(providedBuf, secretBuf);
-  return hmacMatch || legacyMatch;
+  if (providedBuf.length !== expectedBuf.length) return false;
+  return timingSafeEqual(providedBuf, expectedBuf);
 }
 
 export async function monitoringRoutes(app: FastifyInstance) {
-  const monitor = new TransactionMonitor(app.db, app.redis);
+  const monitor = new TransactionMonitor(app.db, app.redis, app.config.ALERT_HMAC_SECRET);
 
   /** GET /api/monitoring/events — Recent monitoring events */
   app.get('/api/monitoring/events', async (request, reply) => {
@@ -57,9 +77,7 @@ export async function monitoringRoutes(app: FastifyInstance) {
   /** POST /api/monitoring/webhook — Helius webhook endpoint */
   app.post('/api/monitoring/webhook', async (request, reply) => {
     const secret = app.config.HELIUS_WEBHOOK_SECRET;
-    const header =
-      (request.headers['x-helius-hmac-signature'] as string | undefined) ??
-      (request.headers.authorization as string | undefined);
+    const header = request.headers['x-helius-hmac-signature'] as string | undefined;
 
     const rawBody =
       typeof request.body === 'string'
@@ -70,13 +88,19 @@ export async function monitoringRoutes(app: FastifyInstance) {
       return reply.status(401).send({ error: 'Unauthorized' });
     }
 
-    const payload = request.body as any[];
-    await monitor.processWebhook(Array.isArray(payload) ? payload : [payload]);
+    const parsed = webhookPayloadSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'Malformed webhook payload' });
+    }
+
+    await monitor.processWebhook(parsed.data);
 
     return reply.status(200).send({ processed: true });
   });
 
-  /** POST /api/demo/simulate-exploit — Simulate an exploit for demo (development only) */
+  /** POST /api/demo/simulate-exploit — Simulate an exploit for demo (development only).
+   *  Guarded by NODE_ENV so the `simulated` flag can never originate in
+   *  production. */
   app.post('/api/demo/simulate-exploit', async (request, reply) => {
     if (app.config.NODE_ENV === 'production') {
       return reply.status(404).send({ error: 'Not found' });
@@ -84,7 +108,7 @@ export async function monitoringRoutes(app: FastifyInstance) {
 
     const { agentAddress, type } = z
       .object({
-        agentAddress: z.string(),
+        agentAddress: z.string().regex(SOLANA_ADDRESS_REGEX, 'Invalid Solana address'),
         type: z.enum(['exploit', 'oracle_deviation', 'agent_error', 'governance_attack']),
       })
       .parse(request.body);
@@ -93,7 +117,7 @@ export async function monitoringRoutes(app: FastifyInstance) {
       agentAddress,
       eventType: type,
       severity: 'critical',
-      txSignature: `demo_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      txSignature: generateDemoTxSignature(),
       details: {
         simulated: true,
         type,
@@ -101,15 +125,12 @@ export async function monitoringRoutes(app: FastifyInstance) {
       },
     });
 
-    await app.redis.publish(
-      'monitoring:alerts',
-      JSON.stringify({
-        channel: 'monitoring:alerts',
-        event: type,
-        data: { agentAddress, type, simulated: true },
-        timestamp: Date.now(),
-      }),
-    );
+    await publishAlert(app.redis, app.config.ALERT_HMAC_SECRET, {
+      channel: 'monitoring:alerts',
+      event: type,
+      data: { agentAddress, type, simulated: true },
+      timestamp: Date.now(),
+    });
 
     return reply.send({ success: true, message: `Simulated ${type} for ${agentAddress}` });
   });

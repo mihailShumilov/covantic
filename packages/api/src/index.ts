@@ -3,6 +3,7 @@ import fastifyWebSocket from '@fastify/websocket';
 import fastifyCors from '@fastify/cors';
 import { loadConfig } from './config/env.js';
 import { runMigrations } from './db/migrate.js';
+import { applyCustomConstraints } from './db/custom-constraints.js';
 import { createDbConnection } from './config/database.js';
 import { createRedisConnection } from './config/redis.js';
 import { registerRoutes } from './routes/index.js';
@@ -24,13 +25,19 @@ async function bootstrap() {
   // 2. Auto-migrate DB
   const db = createDbConnection(config.DATABASE_URL);
   await runMigrations(config.DATABASE_URL);
+  await applyCustomConstraints(db);
 
   // 3. Create connections
   const redis = createRedisConnection(config.REDIS_URL);
   const solanaConnection = createSolanaConnection(config.SOLANA_RPC_URL);
 
-  // 4. Create Fastify instance
+  // 4. Create Fastify instance. trustProxy lets us honour X-Forwarded-For
+  // from the nginx front-end so per-IP rate limits key on the real client
+  // IP, not the Docker gateway. Default to true behind a reverse proxy,
+  // opt out via TRUST_PROXY=false.
+  const trustProxy = config.TRUST_PROXY === 'false' ? false : (config.TRUST_PROXY ?? true);
   const app = Fastify({
+    trustProxy,
     logger: {
       level: config.LOG_LEVEL,
       transport:
@@ -43,7 +50,7 @@ async function bootstrap() {
   // 5. Plugins — restrict CORS to known origins
   const allowedOrigins =
     config.NODE_ENV === 'production'
-      ? ['https://covantic.xyz', 'https://www.covantic.xyz']
+      ? ['https://covantic.org', 'https://www.covantic.org']
       : [/^http:\/\/localhost:\d+$/];
   await app.register(fastifyCors, { origin: allowedOrigins });
   await app.register(fastifyWebSocket);

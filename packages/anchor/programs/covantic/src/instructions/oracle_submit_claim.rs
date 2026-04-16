@@ -21,9 +21,13 @@ pub fn oracle_submit_claim_handler(
     trigger_type: u8,
     trigger_tx_signature: Vec<u8>,
 ) -> Result<()> {
+    let config = &ctx.accounts.config;
     let policy = &mut ctx.accounts.policy;
     let clock = Clock::get()?;
     let now = clock.unix_timestamp;
+
+    // Emergency pause blocks oracle-driven claim submissions
+    require!(!config.paused, CovanticError::ProtocolPaused);
 
     require!(
         policy.state == InsurancePolicy::STATE_ACTIVE,
@@ -38,6 +42,10 @@ pub fn oracle_submit_claim_handler(
     );
 
     require!(!trigger_tx_signature.is_empty(), CovanticError::TriggerTxRequired);
+    require!(
+        trigger_tx_signature.len() <= MAX_TRIGGER_TX_SIG_LEN,
+        CovanticError::InvalidTriggerTxSignature
+    );
 
     policy.state = InsurancePolicy::STATE_CLAIM_PENDING;
     policy.trigger_type = trigger_type;

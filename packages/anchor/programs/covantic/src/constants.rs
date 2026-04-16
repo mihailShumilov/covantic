@@ -61,8 +61,12 @@ pub const TRIGGER_ORACLE_MANIPULATION: u8 = 2;
 pub const TRIGGER_AGENT_ERROR: u8 = 3;
 pub const TRIGGER_GOVERNANCE_ATTACK: u8 = 4;
 
-/// Lock periods for trigger types (seconds)
-pub const LOCK_EXPLOIT: i64 = 0;
+/// Lock periods for trigger types (seconds). The lock is the on-chain
+/// buffer between claim submission and payout, giving the admin time to
+/// pause the protocol if the oracle is compromised. MUST be > 0 for every
+/// trigger type or a compromised oracle keypair can drain the vault in a
+/// single slot with no chance of intervention.
+pub const LOCK_EXPLOIT: i64 = 3600;
 pub const LOCK_ORACLE_MANIPULATION: i64 = 3600;
 pub const LOCK_AGENT_ERROR: i64 = 21600;
 pub const LOCK_GOVERNANCE_ATTACK: i64 = 7200;
@@ -87,3 +91,8 @@ pub const CAUTION_PREMIUM_MULTIPLIER: u16 = 12500;
 
 /// Cancellation penalty: 20%
 pub const CANCEL_PENALTY_BPS: u16 = 2000;
+
+/// Maximum length of the stored trigger transaction signature.
+/// Signatures are persisted as Base58-encoded UTF-8 bytes (87-88 chars).
+/// 88 leaves a 1-byte pad for future-proofing.
+pub const MAX_TRIGGER_TX_SIG_LEN: usize = 88;

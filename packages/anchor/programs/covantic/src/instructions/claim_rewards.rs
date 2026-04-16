@@ -4,35 +4,32 @@ use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 use crate::constants::*;
 use crate::errors::CovanticError;
 use crate::events::RewardsClaimed;
+use crate::instructions::stake::crystallize_rewards;
 use crate::state::{InsuranceVault, StakerPosition};
 
 /// Claim accumulated staker rewards.
+///
+/// Uses the global `reward_per_stake_acc` accumulator to derive any
+/// rewards earned since the last interaction, then transfers the
+/// resulting `rewards_pending` balance and debits the vault's
+/// `total_staker_rewards` accounting.
 pub fn claim_rewards_handler(ctx: Context<ClaimRewards>) -> Result<()> {
     let staker_position = &mut ctx.accounts.staker_position;
     let vault = &mut ctx.accounts.vault;
 
-    // Calculate pending rewards based on share_bps and total_staker_rewards
-    // Rewards are proportional to pool share
-    if vault.total_staked > 0 {
-        let share = (vault.total_staker_rewards as u128)
-            .checked_mul(staker_position.amount_staked as u128)
-            .ok_or(CovanticError::MathOverflow)?
-            .checked_div(vault.total_staked as u128)
-            .ok_or(CovanticError::MathOverflow)? as u64;
-
-        let already_claimed = staker_position.rewards_claimed;
-        let total_earned = share;
-        if total_earned > already_claimed {
-            staker_position.rewards_pending = total_earned
-                .checked_sub(already_claimed)
-                .ok_or(CovanticError::MathOverflow)?;
-        }
-    }
+    crystallize_rewards(staker_position, vault)?;
 
     let rewards = staker_position.rewards_pending;
     require!(rewards > 0, CovanticError::NoRewardsToClaim);
 
-    // Transfer rewards from vault to staker
+    // Debit the pool ledger *before* the CPI. `total_staker_rewards`
+    // tracks the remaining claimable balance; underflow here means our
+    // accounting has drifted and the tx must fail instead of draining.
+    vault.total_staker_rewards = vault
+        .total_staker_rewards
+        .checked_sub(rewards)
+        .ok_or(CovanticError::InsufficientVaultBalance)?;
+
     let vault_bump = vault.bump;
     let seeds = &[VAULT_SEED, &[vault_bump]];
     let signer_seeds = &[&seeds[..]];
@@ -48,7 +45,6 @@ pub fn claim_rewards_handler(ctx: Context<ClaimRewards>) -> Result<()> {
     );
     token::transfer(transfer_ctx, rewards)?;
 
-    // Update staker position
     staker_position.rewards_claimed = staker_position
         .rewards_claimed
         .checked_add(rewards)

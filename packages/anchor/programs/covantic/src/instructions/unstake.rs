@@ -4,6 +4,7 @@ use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 use crate::constants::*;
 use crate::errors::CovanticError;
 use crate::events::{UnstakeRequested, Unstaked};
+use crate::instructions::stake::crystallize_rewards;
 use crate::state::{InsuranceVault, StakerPosition};
 
 /// Phase 1: Request unstake — starts the 48-hour cooldown period.
@@ -57,11 +58,23 @@ pub fn execute_unstake_handler(ctx: Context<ExecuteUnstake>) -> Result<()> {
         CovanticError::UnstakeCooldownNotElapsed
     );
 
+    // Pull in any rewards accrued since the staker's last interaction.
+    crystallize_rewards(staker_position, vault)?;
+
     let amount = staker_position.amount_staked;
     let rewards = staker_position.rewards_pending;
     let total_transfer = amount
         .checked_add(rewards)
         .ok_or(CovanticError::MathOverflow)?;
+
+    // Debit the staker-reward ledger before the CPI; underflow fails the
+    // tx rather than silently allowing over-payment.
+    if rewards > 0 {
+        vault.total_staker_rewards = vault
+            .total_staker_rewards
+            .checked_sub(rewards)
+            .ok_or(CovanticError::InsufficientVaultBalance)?;
+    }
 
     // Transfer USDC + rewards from vault to staker
     let vault_bump = vault.bump;
@@ -79,9 +92,16 @@ pub fn execute_unstake_handler(ctx: Context<ExecuteUnstake>) -> Result<()> {
     );
     token::transfer(transfer_ctx, total_transfer)?;
 
-    // Update vault
-    vault.total_staked = vault.total_staked.saturating_sub(amount);
-    vault.staker_count = vault.staker_count.saturating_sub(1);
+    // Update vault: explicit checked_sub so an inconsistency fails the tx
+    // rather than silently clamping solvency to 0.
+    vault.total_staked = vault
+        .total_staked
+        .checked_sub(amount)
+        .ok_or(CovanticError::InsufficientVaultBalance)?;
+    vault.staker_count = vault
+        .staker_count
+        .checked_sub(1)
+        .ok_or(CovanticError::MathOverflow)?;
     vault.recalculate_solvency();
 
     // Reset staker position

@@ -10,7 +10,7 @@ services:
     container_name: covantic-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-covantic}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-covantic_dev_2026}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: ${POSTGRES_DB:-covantic}
     ports:
       - "5499:5432"
@@ -27,12 +27,13 @@ services:
   redis:
     image: redis:7-alpine
     container_name: covantic-redis
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"]
     ports:
       - "6399:6379"
     volumes:
       - redisdata:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -46,8 +47,9 @@ services:
     container_name: covantic-api
     environment:
       NODE_ENV: development
-      DATABASE_URL: postgresql://covantic:covantic_dev_2026@postgres:5432/covantic
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://${POSTGRES_USER:-covantic}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-covantic}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      ALERT_HMAC_SECRET: ${ALERT_HMAC_SECRET}
       SOLANA_RPC_URL: https://devnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}
       HELIUS_API_KEY: ${HELIUS_API_KEY}
       HELIUS_WEBHOOK_SECRET: ${HELIUS_WEBHOOK_SECRET}
@@ -76,8 +78,9 @@ services:
     container_name: covantic-monitor
     environment:
       NODE_ENV: development
-      DATABASE_URL: postgresql://covantic:covantic_dev_2026@postgres:5432/covantic
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://${POSTGRES_USER:-covantic}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-covantic}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      ALERT_HMAC_SECRET: ${ALERT_HMAC_SECRET}
       SOLANA_RPC_URL: https://devnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}
       HELIUS_API_KEY: ${HELIUS_API_KEY}
       PROGRAM_ID: ${PROGRAM_ID}

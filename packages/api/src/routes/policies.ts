@@ -2,9 +2,13 @@ import type { FastifyInstance } from 'fastify';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { policies, riskAssessments } from '../db/schema.js';
-import { calculatePremium, RiskTier } from '@covantic/shared';
-
-const SOLANA_ADDRESS_REGEX = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+import {
+  PREMIUM_BPS,
+  RiskTier,
+  SOLANA_ADDRESS_REGEX,
+  calculatePremium,
+  tierToPremiumBps,
+} from '@covantic/shared';
 
 const policyQuerySchema = z.object({
   holder: z.string().optional(),
@@ -104,11 +108,14 @@ export async function policyRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: 'Risk tier EXTREME is not insurable' });
     }
 
+    const premiumBps = tierToPremiumBps(body.riskTier as RiskTier) ?? PREMIUM_BPS.LOW;
+
     return reply.send({
       coverageAmount: body.coverageAmount,
       durationSeconds: body.durationSeconds,
       riskTier: body.riskTier,
       premiumAmount: premium,
+      premiumBps,
       premiumMultiplier: 10000,
     });
   });

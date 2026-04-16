@@ -112,10 +112,11 @@ pub fn create_policy_handler(
         .and_then(|v| v.checked_sub(reserve_share))
         .ok_or(CovanticError::MathOverflow)?;
 
-    vault.total_staker_rewards = vault
-        .total_staker_rewards
-        .checked_add(staker_share)
-        .ok_or(CovanticError::MathOverflow)?;
+    // Accrue the staker share through the reward-per-stake accumulator so
+    // existing stakers earn proportionally; total_staker_rewards is also
+    // incremented inside this helper.
+    vault.accrue_staker_rewards(staker_share)?;
+
     vault.reserve_fund = vault
         .reserve_fund
         .checked_add(reserve_share)
@@ -146,6 +147,7 @@ pub fn create_policy_handler(
         .ok_or(CovanticError::MathOverflow)?;
 
     let policy = &mut ctx.accounts.policy;
+    policy.version = InsurancePolicy::CURRENT_VERSION;
     policy.policy_id = policy_id;
     policy.holder = ctx.accounts.holder.key();
     policy.agent_address = agent_address;

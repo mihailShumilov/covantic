@@ -57,13 +57,34 @@ export const SOLVENCY_THRESHOLDS = {
 /** Unstake cooldown period in seconds (48 hours) */
 export const UNSTAKE_COOLDOWN = 48 * 3600;
 
-/** Lock periods per trigger type in seconds */
+/** Lock periods per trigger type in seconds. Must stay in sync with
+ *  `LOCK_*` constants in the Anchor program. A zero lock is unsafe: the
+ *  lock is the only buffer between a claim submission and payout if the
+ *  oracle key is compromised. */
 export const LOCK_PERIODS = {
-  EXPLOIT: 0, // Immediate payout
+  EXPLOIT: 3600, // 1 hour
   ORACLE_MANIPULATION: 3600, // 1 hour
   AGENT_ERROR: 21600, // 6 hours
   GOVERNANCE_ATTACK: 7200, // 2 hours
 } as const;
+
+/** Base58 Solana transaction signature regex (87–88 chars, Base58 alphabet). */
+export const SOLANA_SIGNATURE_REGEX = /^[1-9A-HJ-NP-Za-km-z]{87,88}$/;
+
+/** Synthetic demo payout ratio (80% of coverage) used by the simulated
+ *  pipeline to mirror the marketing animation. Production verifiers derive
+ *  payout from actual loss, not this ratio. */
+export const SYNTHETIC_PAYOUT_RATIO = 0.8;
+
+/** Prefix used on placeholder transaction signatures generated for
+ *  demo/simulation flows. Real Base58 signatures never match. */
+export const DEMO_TX_SIGNATURE_PREFIX = 'demo_';
+
+/** Generate a demo tx signature for simulated monitoring events.
+ *  Detected downstream via {@link DEMO_TX_SIGNATURE_PREFIX}. */
+export function generateDemoTxSignature(): string {
+  return `${DEMO_TX_SIGNATURE_PREFIX}${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
 
 /** Maximum active policies per wallet */
 export const MAX_POLICIES_PER_WALLET = 10;

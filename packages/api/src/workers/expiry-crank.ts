@@ -1,6 +1,7 @@
 import { Queue, Worker } from 'bullmq';
 import type Redis from 'ioredis';
 import { lt, eq, and } from 'drizzle-orm';
+import { PolicyState } from '@covantic/shared';
 import type { Database } from '../config/database.js';
 import { policies } from '../db/schema.js';
 import { logger } from '../utils/logger.js';
@@ -29,8 +30,8 @@ export function startExpiryCrank(db: Database, redis: Redis) {
       // Batch update all expired policies in a single query
       const result = await db
         .update(policies)
-        .set({ state: 4, updatedAt: now })
-        .where(and(eq(policies.state, 0), lt(policies.expiryTime, now)))
+        .set({ state: PolicyState.Expired, updatedAt: now })
+        .where(and(eq(policies.state, PolicyState.Active), lt(policies.expiryTime, now)))
         .returning({ policyId: policies.policyId });
 
       if (result.length > 0) {

@@ -1,15 +1,19 @@
 import { Queue, Worker } from 'bullmq';
 import type Redis from 'ioredis';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import anchorPkg from '@coral-xyz/anchor';
 import { PublicKey } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from '@solana/spl-token';
 import {
+  DEMO_TX_SIGNATURE_PREFIX,
   LOCK_PERIODS,
   PDA_SEEDS,
-  TriggerType,
   PolicyState,
+  SYNTHETIC_PAYOUT_RATIO,
+  TriggerType,
+  generateDemoTxSignature,
   policyIdToBytes,
+  type VerificationData,
 } from '@covantic/shared';
 
 // Anchor's ESM export of BN tripping up on named imports; pull from default.
@@ -25,11 +29,10 @@ import {
   type CovanticProgram,
 } from '../utils/program.js';
 import { verifyClaim, type VerificationResult } from '../services/claim-oracle.js';
+import { ALERT_CHANNEL, verifyAlert } from '../services/alert-bus.js';
 
 const PROCESS_QUEUE = 'claim-keeper';
 const PAYOUT_QUEUE = 'claim-payout';
-
-const OPEN_CLAIM_STATUSES = ['pending', 'verifying', 'approved'] as const;
 
 /** Monitoring event types the keeper reacts to, mapped to on-chain triggers. */
 const EVENT_TO_TRIGGER: Record<string, TriggerType | undefined> = {
@@ -37,11 +40,19 @@ const EVENT_TO_TRIGGER: Record<string, TriggerType | undefined> = {
   oracle_deviation: TriggerType.OracleManipulation,
   agent_error: TriggerType.AgentError,
   governance_attack: TriggerType.GovernanceAttack,
-  // transaction-monitor emits `large_transfer` / `failed_tx` from the
-  // Helius webhook path — treat as agent error until we split them out.
   large_transfer: TriggerType.AgentError,
   failed_tx: TriggerType.AgentError,
 };
+
+/** Shared BullMQ job options: retry up to 3 times with exponential backoff,
+ *  bound retained history so failed jobs are inspectable without unbounded
+ *  Redis growth. */
+const JOB_OPTS = {
+  attempts: 3,
+  backoff: { type: 'exponential' as const, delay: 10_000 },
+  removeOnComplete: { count: 500 },
+  removeOnFail: { count: 100 },
+} as const;
 
 interface AlertPayload {
   agentAddress?: string;
@@ -60,15 +71,23 @@ interface PayoutJobPayload {
   claimId: string;
 }
 
+type ClaimRow = typeof claims.$inferSelect;
+
+function mergeVerificationData(
+  existing: unknown,
+  patch: VerificationData,
+): VerificationData {
+  const base: VerificationData =
+    existing && typeof existing === 'object' && !Array.isArray(existing)
+      ? (existing as VerificationData)
+      : {};
+  return { ...base, ...patch };
+}
+
 /**
  * Auto-claim pipeline. Subscribes to monitoring:alerts, correlates alerts to
  * active on-chain policies, runs the verifier, submits the claim as oracle,
  * and schedules the payout after the trigger's lock period elapses.
- *
- * Why this exists: previously the protocol required the holder to sign
- * submit_claim, so the marketing data-flow (anomaly → auto-submit → payout)
- * had no runtime implementation. Phase 1 added `oracle_submit_claim`, and
- * this worker is what finally drives the pipeline end-to-end.
  */
 export function startClaimKeeper(db: Database, redis: Redis, config: AppConfig) {
   let programCtx: CovanticProgram;
@@ -82,13 +101,19 @@ export function startClaimKeeper(db: Database, redis: Redis, config: AppConfig) 
   const helius = new HeliusClient(config.HELIUS_API_KEY);
   const pyth = new PythClient();
 
-  const processQueue = new Queue<ClaimJobPayload>(PROCESS_QUEUE, { connection: redis });
-  const payoutQueue = new Queue<PayoutJobPayload>(PAYOUT_QUEUE, { connection: redis });
+  const processQueue = new Queue<ClaimJobPayload>(PROCESS_QUEUE, {
+    connection: redis,
+    defaultJobOptions: JOB_OPTS,
+  });
+  const payoutQueue = new Queue<PayoutJobPayload>(PAYOUT_QUEUE, {
+    connection: redis,
+    defaultJobOptions: JOB_OPTS,
+  });
 
   const processWorker = new Worker<ClaimJobPayload>(
     PROCESS_QUEUE,
     async (job) => {
-      await processClaim(job.data.claimId, db, redis, programCtx, helius, pyth, payoutQueue);
+      await processClaim(job.data.claimId, db, redis, programCtx, helius, pyth, payoutQueue, config);
     },
     { connection: redis, concurrency: 2 },
   );
@@ -111,15 +136,15 @@ export function startClaimKeeper(db: Database, redis: Redis, config: AppConfig) 
   // Dedicated subscriber connection. Ingesting from a normal client breaks
   // other commands on it, so we duplicate.
   const subscriber = redis.duplicate();
-  subscriber.subscribe('monitoring:alerts', (err) => {
+  subscriber.subscribe(ALERT_CHANNEL, (err) => {
     if (err) {
       logger.error({ err }, 'claim-keeper failed to subscribe to monitoring:alerts');
     }
   });
 
   subscriber.on('message', (channel, raw) => {
-    if (channel !== 'monitoring:alerts') return;
-    ingestAlert(raw, db, redis, processQueue).catch((err) =>
+    if (channel !== ALERT_CHANNEL) return;
+    ingestAlert(raw, db, redis, processQueue, config).catch((err) =>
       logger.error({ err, raw }, 'claim-keeper failed to ingest alert'),
     );
   });
@@ -137,35 +162,34 @@ async function ingestAlert(
   db: Database,
   redis: Redis,
   processQueue: Queue<ClaimJobPayload>,
+  config: AppConfig,
 ): Promise<void> {
-  let payload: AlertPayload;
-  try {
-    payload = JSON.parse(raw) as AlertPayload;
-  } catch (err) {
-    logger.warn({ err, raw }, 'claim-keeper received unparseable alert');
+  const verified = verifyAlert<AlertPayload>(raw, config.ALERT_HMAC_SECRET);
+  if (!verified) {
+    logger.warn({ raw }, 'claim-keeper: rejecting unsigned or stale alert');
     return;
   }
+  const payload = verified.payload;
 
   const agentAddress = payload.agentAddress ?? payload.data?.agentAddress;
   const eventType = payload.event ?? payload.type ?? payload.data?.type;
   const txSignature = payload.txSignature ?? payload.data?.txSignature ?? null;
-  const simulated = Boolean(payload.simulated ?? payload.data?.simulated);
+  // Only honour the simulated flag in non-production environments. Even on
+  // the signed bus, a stray dev payload must never trigger a real payout.
+  const requestedSimulated = Boolean(payload.simulated ?? payload.data?.simulated);
+  const simulated = requestedSimulated && config.NODE_ENV !== 'production';
 
   if (!agentAddress || !eventType) {
     logger.debug({ raw }, 'claim-keeper skipping malformed alert');
     return;
   }
 
-  // Guard: only react to events we know how to verify. Everything else gets
-  // silently dropped so the monitoring bus stays a general-purpose channel.
   const trigger = EVENT_TO_TRIGGER[eventType];
   if (trigger === undefined) {
     logger.debug({ eventType }, 'claim-keeper ignoring unhandled event type');
     return;
   }
 
-  // Find the most recent Active policy for this agent. An agent with no
-  // coverage is a no-op — this is expected and not worth logging at warn.
   const [active] = await db
     .select()
     .from(policies)
@@ -178,33 +202,11 @@ async function ingestAlert(
     return;
   }
 
-  // Idempotency: if an open claim already exists for this policy, don't file
-  // a second one. Race-tolerant because the unique key is (policy, status).
-  const existing = await db
-    .select({ id: claims.id })
-    .from(claims)
-    .where(
-      and(
-        eq(claims.policyId, active.policyId),
-        inArray(claims.status, OPEN_CLAIM_STATUSES as unknown as string[]),
-      ),
-    )
-    .limit(1);
-
-  const existingId = existing[0]?.id;
-  if (existingId) {
-    logger.info(
-      { policyId: active.policyId, existingClaim: existingId },
-      'claim-keeper: open claim already exists for policy',
-    );
-    return;
-  }
-
   const effectiveTxSignature =
     txSignature && txSignature.length > 0
       ? txSignature
       : simulated
-        ? `demo_${Date.now()}_${Math.random().toString(36).slice(2)}`
+        ? generateDemoTxSignature()
         : null;
 
   if (!effectiveTxSignature) {
@@ -212,38 +214,54 @@ async function ingestAlert(
     return;
   }
 
-  const inserted = await db
-    .insert(claims)
-    .values({
-      policyId: active.policyId,
-      holderAddress: active.holderAddress,
-      agentAddress,
-      triggerType: trigger,
-      triggerTxSignature: effectiveTxSignature,
-      status: 'pending',
-      verificationData: { simulated, eventType, source: 'claim-keeper' },
-    })
-    .returning({ id: claims.id });
+  // Idempotency is enforced by a partial unique index on the claims table
+  // (`claims_open_unique` — see db/custom-constraints.ts). A race between
+  // two concurrent alerts resolves here: the second insert raises a unique
+  // violation we swallow.
+  let claimId: string | undefined;
+  try {
+    const verificationData: VerificationData = { simulated, eventType, source: 'claim-keeper' };
+    const inserted = await db
+      .insert(claims)
+      .values({
+        policyId: active.policyId,
+        holderAddress: active.holderAddress,
+        agentAddress,
+        triggerType: trigger,
+        triggerTxSignature: effectiveTxSignature,
+        status: 'pending',
+        verificationData,
+      })
+      .returning({ id: claims.id });
+    claimId = inserted[0]?.id;
+  } catch (err) {
+    // Unique-violation = open claim already exists. Anything else re-throws.
+    if ((err as { code?: string })?.code === '23505') {
+      logger.info(
+        { policyId: active.policyId, agentAddress },
+        'claim-keeper: open claim already exists for policy (unique constraint)',
+      );
+      return;
+    }
+    throw err;
+  }
 
-  const claimId = inserted[0]?.id;
   if (!claimId) {
     logger.error({ agentAddress, policyId: active.policyId }, 'claim-keeper: insert returned no id');
     return;
   }
 
-  await broadcastClaim(claimId, db, redis);
+  const created = await loadClaim(claimId, db);
+  if (created) {
+    await broadcastClaim(created, redis);
+  }
   await processQueue.add('process', { claimId });
   logger.info({ claimId, policyId: active.policyId, trigger }, 'claim-keeper: claim enqueued');
 }
 
-/**
- * Synthetic verification for simulated monitoring events. Helius cannot
- * resolve the `demo_*` tx signatures we generate for the /demo page or
- * ad-hoc /api/demo/simulate-exploit calls, so the real verifier would
- * always return verified=false. Mirror the animated pipeline's payout
- * multiplier (80% of coverage) and use the on-chain lock period for the
- * trigger so the wait-for-payout experience matches production.
- */
+/** Synthetic verification for simulated monitoring events. Demo tx
+ *  signatures can't be resolved by Helius, so the production verifier
+ *  returns verified:false; this keeps the demo UX working end-to-end. */
 function syntheticVerification(
   triggerType: number,
   coverageAmount: number,
@@ -258,7 +276,7 @@ function syntheticVerification(
 
   return {
     verified: true,
-    lossAmount: Math.floor(coverageAmount * 0.8),
+    lossAmount: Math.floor(coverageAmount * SYNTHETIC_PAYOUT_RATIO),
     confidence: 1.0,
     details: { method: 'synthetic', simulated: true },
     lockPeriod,
@@ -277,32 +295,32 @@ async function processClaim(
   helius: HeliusClient,
   pyth: PythClient,
   payoutQueue: Queue<PayoutJobPayload>,
+  config: AppConfig,
 ): Promise<void> {
   const claim = await loadClaim(claimId, db);
   if (!claim) return;
 
-  await setClaimStatus(claim.id, 'verifying', db, redis);
+  await setClaimStatus(claim, 'verifying', db, redis);
 
-  // Load the policy so we know coverage_amount and can build PDAs for the
-  // on-chain instruction below.
   const [policy] = await db
     .select()
     .from(policies)
     .where(eq(policies.policyId, claim.policyId))
     .limit(1);
   if (!policy) {
-    await rejectClaim(claim.id, { reason: 'policy_not_indexed' }, db, redis);
+    await rejectClaim(claim, { reason: 'policy_not_indexed' }, db, redis);
     return;
   }
 
-  // Demo bypass: simulated monitoring events carry synthetic tx signatures
-  // (`demo_*`) that Helius cannot resolve. Use a deterministic stub so the
-  // marketing demo reaches a paid state on-chain. Production webhooks with
-  // real signatures go through the real verifier.
+  // Demo bypass: synthetic tx signatures (demo_*) can't be resolved by
+  // Helius, so we use a deterministic stub verifier. Triggered only when
+  // the ingest path marked the claim simulated AND we're not in production.
+  const verificationData = (claim.verificationData ?? {}) as VerificationData;
+  const isDemoSignature = claim.triggerTxSignature.startsWith(DEMO_TX_SIGNATURE_PREFIX);
   const simulated =
-    claim.verificationData &&
-    typeof claim.verificationData === 'object' &&
-    (claim.verificationData as any).simulated === true;
+    verificationData.simulated === true &&
+    isDemoSignature &&
+    config.NODE_ENV !== 'production';
 
   let result: VerificationResult;
   if (simulated) {
@@ -320,7 +338,7 @@ async function processClaim(
 
   if (!result.verified || result.lossAmount <= 0) {
     await rejectClaim(
-      claim.id,
+      claim,
       { reason: 'verification_failed', details: result.details },
       db,
       redis,
@@ -328,16 +346,21 @@ async function processClaim(
     return;
   }
 
-  // Persist verification before any on-chain work so a crash after this
-  // point still has the audit trail.
+  const lockExpiresAt = new Date(Date.now() + result.lockPeriod * 1000);
+
+  // Persist verification outputs + lock expiry BEFORE any on-chain call so
+  // a crash after this point still has the audit trail.
   await db
     .update(claims)
     .set({
       lossAmount: result.lossAmount,
       payoutAmount: result.lossAmount,
-      verificationData: { ...(claim.verificationData as object ?? {}), ...result.details, confidence: result.confidence },
+      verificationData: mergeVerificationData(claim.verificationData, {
+        ...result.details,
+        confidence: result.confidence,
+      }),
       verifiedAt: new Date(),
-      lockExpiresAt: new Date(Date.now() + result.lockPeriod * 1000),
+      lockExpiresAt,
       updatedAt: new Date(),
     })
     .where(eq(claims.id, claim.id));
@@ -358,18 +381,16 @@ async function processClaim(
       updatedAt: new Date(),
     })
     .where(eq(claims.id, claim.id));
-  await broadcastClaim(claim.id, db, redis);
+  const approved = await loadClaim(claim.id, db);
+  if (approved) await broadcastClaim(approved, redis);
 
-  // Schedule payout after the lock period. BullMQ delay is persisted, so a
-  // server restart still fires the payout on time.
-  await payoutQueue.add(
-    'payout',
-    { claimId: claim.id },
-    { delay: result.lockPeriod * 1000 },
-  );
+  // Schedule payout relative to the persisted lockExpiresAt so a restart
+  // doesn't reset the timer.
+  const delayMs = Math.max(0, lockExpiresAt.getTime() - Date.now());
+  await payoutQueue.add('payout', { claimId: claim.id }, { delay: delayMs });
 
   logger.info(
-    { claimId: claim.id, submitSig, lockPeriod: result.lockPeriod },
+    { claimId: claim.id, submitSig, lockPeriod: result.lockPeriod, delayMs },
     'claim-keeper: on-chain claim submitted',
   );
 }
@@ -386,8 +407,11 @@ async function executePayout(
 ): Promise<void> {
   const claim = await loadClaim(claimId, db);
   if (!claim) return;
-  if (claim.status !== 'approved') {
-    logger.warn({ claimId, status: claim.status }, 'claim-keeper: payout skipped; not approved');
+  if (claim.status !== 'approved' && claim.status !== 'paying') {
+    logger.warn(
+      { claimId, status: claim.status },
+      'claim-keeper: payout skipped; not approved/paying',
+    );
     return;
   }
 
@@ -397,11 +421,35 @@ async function executePayout(
     .where(eq(policies.policyId, claim.policyId))
     .limit(1);
   if (!policy) {
-    await rejectClaim(claim.id, { reason: 'policy_missing_at_payout' }, db, redis);
+    await rejectClaim(claim, { reason: 'policy_missing_at_payout' }, db, redis);
     return;
   }
 
-  const payoutAmount = claim.payoutAmount ?? policy.coverageAmount;
+  // Null/zero payouts used to fall back to the full coverage amount. That
+  // masked verifier bugs by over-paying; fail loudly instead.
+  const payoutAmount = claim.payoutAmount ?? 0;
+  if (payoutAmount <= 0) {
+    await rejectClaim(
+      claim,
+      { reason: 'payout_amount_missing' },
+      db,
+      redis,
+    );
+    return;
+  }
+
+  // Split-brain fix: mark `paying` before the on-chain RPC. If BullMQ
+  // retries after an RPC success, a reload here sees status=paying and
+  // we skip the second RPC (which would revert anyway due to the on-chain
+  // state check, but we'd lose the audit trail on the retry).
+  if (claim.status !== 'paying') {
+    await db
+      .update(claims)
+      .set({ status: 'paying', updatedAt: new Date() })
+      .where(and(eq(claims.id, claim.id), eq(claims.status, 'approved')));
+    const reloaded = await loadClaim(claim.id, db);
+    if (reloaded) await broadcastClaim(reloaded, redis);
+  }
 
   try {
     const payoutSig = await verifyAndPayoutOnChain(
@@ -421,7 +469,8 @@ async function executePayout(
         updatedAt: new Date(),
       })
       .where(eq(claims.id, claim.id));
-    await broadcastClaim(claim.id, db, redis);
+    const paid = await loadClaim(claim.id, db);
+    if (paid) await broadcastClaim(paid, redis);
 
     logger.info({ claimId: claim.id, payoutSig }, 'claim-keeper: payout executed');
   } catch (err) {
@@ -430,15 +479,15 @@ async function executePayout(
       .update(claims)
       .set({
         status: 'failed',
-        verificationData: {
-          ...((claim.verificationData as object) ?? {}),
+        verificationData: mergeVerificationData(claim.verificationData, {
           payoutError: String(err),
-        },
+        }),
         updatedAt: new Date(),
       })
       .where(eq(claims.id, claim.id));
-    await broadcastClaim(claim.id, db, redis);
-    throw err; // let BullMQ retry
+    const failed = await loadClaim(claim.id, db);
+    if (failed) await broadcastClaim(failed, redis);
+    throw err; // let BullMQ retry per JOB_OPTS.attempts
   }
 }
 
@@ -498,7 +547,6 @@ async function verifyAndPayoutOnChain(
   const holder = new PublicKey(holderAddress);
   const { config, vault, policy } = derivePdas(ctx.programId, holder, policyId);
 
-  // Fetch usdc mint from on-chain config so the keeper survives config rotations
   const cfgAcc: any = await (ctx.program.account as any).protocolConfig.fetch(config);
   const usdcMint = cfgAcc.usdcMint as PublicKey;
   const vaultAta = getAssociatedTokenAddressSync(usdcMint, vault, true);
@@ -522,38 +570,41 @@ async function verifyAndPayoutOnChain(
 // Claim helpers
 // ---------------------------------------------------------------------------
 
-async function loadClaim(id: string, db: Database) {
+async function loadClaim(id: string, db: Database): Promise<ClaimRow | null> {
   const [row] = await db.select().from(claims).where(eq(claims.id, id)).limit(1);
   return row ?? null;
 }
 
-async function setClaimStatus(id: string, status: string, db: Database, redis: Redis) {
-  await db.update(claims).set({ status, updatedAt: new Date() }).where(eq(claims.id, id));
-  await broadcastClaim(id, db, redis);
+async function setClaimStatus(
+  claim: ClaimRow,
+  status: string,
+  db: Database,
+  redis: Redis,
+): Promise<void> {
+  await db.update(claims).set({ status, updatedAt: new Date() }).where(eq(claims.id, claim.id));
+  const reloaded = await loadClaim(claim.id, db);
+  if (reloaded) await broadcastClaim(reloaded, redis);
 }
 
 async function rejectClaim(
-  id: string,
-  reason: Record<string, unknown>,
+  claim: ClaimRow,
+  reason: VerificationData,
   db: Database,
   redis: Redis,
-) {
-  const [current] = await db.select().from(claims).where(eq(claims.id, id)).limit(1);
-  const merged = { ...((current?.verificationData as object) ?? {}), ...reason };
+): Promise<void> {
   await db
     .update(claims)
     .set({
       status: 'rejected',
-      verificationData: merged,
+      verificationData: mergeVerificationData(claim.verificationData, reason),
       updatedAt: new Date(),
     })
-    .where(eq(claims.id, id));
-  await broadcastClaim(id, db, redis);
+    .where(eq(claims.id, claim.id));
+  const reloaded = await loadClaim(claim.id, db);
+  if (reloaded) await broadcastClaim(reloaded, redis);
 }
 
-async function broadcastClaim(id: string, db: Database, redis?: Redis): Promise<void> {
-  const [row] = await db.select().from(claims).where(eq(claims.id, id)).limit(1);
-  if (!row) return;
+async function broadcastClaim(row: ClaimRow, redis: Redis): Promise<void> {
   const msg = JSON.stringify({
     channel: 'claims:feed',
     event: 'claim.update',
@@ -561,13 +612,9 @@ async function broadcastClaim(id: string, db: Database, redis?: Redis): Promise<
     timestamp: Date.now(),
   });
   try {
-    // NotificationService subscribes to claims:feed and forwards to WS. When
-    // no redis arg is passed we still want the broadcast -- use the default
-    // write client via a tiny shim. The indexer path does pass redis.
-    if (redis) {
-      await redis.publish('claims:feed', msg);
-    }
+    await redis.publish('claims:feed', msg);
   } catch (err) {
     logger.warn({ err }, 'claim-keeper: broadcast publish failed');
   }
 }
+

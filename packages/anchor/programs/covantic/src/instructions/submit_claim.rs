@@ -31,8 +31,12 @@ pub fn submit_claim_handler(
         CovanticError::InvalidTriggerType
     );
 
-    // Trigger tx signature is required
+    // Trigger tx signature is required and must fit the on-chain buffer
     require!(!trigger_tx_signature.is_empty(), CovanticError::TriggerTxRequired);
+    require!(
+        trigger_tx_signature.len() <= MAX_TRIGGER_TX_SIG_LEN,
+        CovanticError::InvalidTriggerTxSignature
+    );
 
     // Update policy
     policy.state = InsurancePolicy::STATE_CLAIM_PENDING;

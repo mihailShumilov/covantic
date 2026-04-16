@@ -21,6 +21,7 @@ pub fn initialize_handler(ctx: Context<Initialize>, oracle_authority: Pubkey) ->
     // Initialize InsuranceVault
     let vault_key = ctx.accounts.vault.key();
     let vault = &mut ctx.accounts.vault;
+    vault.version = InsuranceVault::CURRENT_VERSION;
     vault.authority = vault_key;
     vault.total_staked = 0;
     vault.total_coverage = 0;
@@ -29,6 +30,7 @@ pub fn initialize_handler(ctx: Context<Initialize>, oracle_authority: Pubkey) ->
     vault.staker_count = 0;
     vault.solvency_ratio = u16::MAX;
     vault.total_staker_rewards = 0;
+    vault.reward_per_stake_acc = 0;
     vault.reserve_fund = 0;
     vault.protocol_treasury = 0;
     vault.bump = ctx.bumps.vault;

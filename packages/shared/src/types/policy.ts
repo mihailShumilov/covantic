@@ -1,11 +1,11 @@
-/** Policy states matching on-chain enum */
+/** Policy states matching on-chain enum. Must stay in sync with
+ *  `InsurancePolicy::STATE_*` constants in the Anchor program. */
 export enum PolicyState {
   Active = 0,
   ClaimPending = 1,
-  ClaimApproved = 2,
-  ClaimPaid = 3,
-  Expired = 4,
-  Cancelled = 5,
+  ClaimPaid = 2,
+  Expired = 3,
+  Cancelled = 4,
 }
 
 /** Risk tier levels */

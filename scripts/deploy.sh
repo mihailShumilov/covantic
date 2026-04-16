@@ -15,8 +15,13 @@ git pull --ff-only
 echo "==> Building images..."
 $COMPOSE build --no-cache
 
-echo "==> Pushing database schema..."
-$COMPOSE run --rm api sh -c 'cd packages/api && npx drizzle-kit push --force'
+echo "==> Applying database migrations..."
+# `push --force` previously ran here: it drops/recreates tables whenever the
+# schema diverges, which can silently delete production data. Prefer real
+# migration files (drizzle-kit generate) applied with migrate(). If the
+# migrations folder is missing/empty, the API will log "no migrations
+# folder found" and start anyway; generate locally and commit the SQL.
+$COMPOSE run --rm api sh -c 'cd packages/api && npx drizzle-kit migrate'
 
 echo "==> Restarting services..."
 $COMPOSE down

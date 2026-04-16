@@ -7,6 +7,7 @@ pub mod oracle_submit_claim;
 pub mod stake;
 pub mod submit_claim;
 pub mod unstake;
+pub mod update_config;
 pub mod verify_and_payout;
 
 pub use cancel_policy::*;
@@ -18,4 +19,5 @@ pub use oracle_submit_claim::*;
 pub use stake::*;
 pub use submit_claim::*;
 pub use unstake::*;
+pub use update_config::*;
 pub use verify_and_payout::*;
