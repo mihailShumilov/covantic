@@ -14,6 +14,11 @@ RUN pnpm install --frozen-lockfile
 COPY packages/api/ ./packages/api/
 COPY packages/shared/ ./packages/shared/
 
+# Copy the anchor IDL (produced locally by `anchor build`). The API's
+# loadIdl() scans packages/anchor/target/idl/covantic.json — without it,
+# solvency-checker, policy-indexer, and claim-keeper all fail at boot.
+COPY packages/anchor/target/idl/ ./packages/anchor/target/idl/
+
 # Build
 RUN pnpm --filter shared build && pnpm --filter api build
 

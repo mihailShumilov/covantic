@@ -11,6 +11,9 @@ RUN pnpm install --frozen-lockfile
 COPY packages/api/ ./packages/api/
 COPY packages/shared/ ./packages/shared/
 
+# Anchor IDL is required by registerWorkers() → createCovanticProgram()
+COPY packages/anchor/target/idl/ ./packages/anchor/target/idl/
+
 RUN pnpm --filter shared build && pnpm --filter api build
 
 CMD ["pnpm", "--filter", "api", "run", "monitor"]

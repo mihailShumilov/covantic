@@ -1,11 +1,4 @@
-import type { Idl } from "@coral-xyz/anchor";
-
-/**
- * Anchor IDL for the Covantic insurance program.
- * Discriminators are sha256("global|account|event:name")[0..8].
- * Address matches the on-chain program ID on devnet.
- */
-export const COVANTIC_IDL = {
+{
   "address": "HrLqdNdxUJq4pgsL4NsUqzfYrGxR7Hy9PHGEeHnj3skL",
   "metadata": {
     "name": "covantic",
@@ -2414,7 +2407,4 @@ export const COVANTIC_IDL = {
       }
     }
   ]
-} as const satisfies Idl;
-
-export type CovanticIdl = typeof COVANTIC_IDL;
-
+}

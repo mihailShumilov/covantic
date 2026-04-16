@@ -2,6 +2,12 @@ node_modules/
 dist/
 .next/
 target/
+# Anchor build output is gitignored, except for the generated IDL which
+# the API/monitor docker images need at runtime. Keeping it versioned lets
+# the server rebuild images without needing the full Rust/Anchor toolchain.
+!packages/anchor/target/
+!packages/anchor/target/idl/
+!packages/anchor/target/idl/*.json
 .env
 .env.local
 *.log

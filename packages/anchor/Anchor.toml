@@ -6,10 +6,10 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-covantic = "91TyFjPEKeKevThuZmfvYzFpzHhchVLtPYf5nLiUzoV7"
+covantic = "HrLqdNdxUJq4pgsL4NsUqzfYrGxR7Hy9PHGEeHnj3skL"
 
 [programs.localnet]
-covantic = "91TyFjPEKeKevThuZmfvYzFpzHhchVLtPYf5nLiUzoV7"
+covantic = "HrLqdNdxUJq4pgsL4NsUqzfYrGxR7Hy9PHGEeHnj3skL"
 
 [registry]
 url = "https://api.apr.dev"

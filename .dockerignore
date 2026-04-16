@@ -2,6 +2,10 @@ node_modules/
 dist/
 .next/
 target/
+# The API/monitor images need the Anchor IDL at runtime. Everything else
+# under target/ (the .so, debug builds, cargo artefacts) stays excluded.
+!packages/anchor/target/idl/
+!packages/anchor/target/idl/*.json
 .env
 .env.local
 *.log

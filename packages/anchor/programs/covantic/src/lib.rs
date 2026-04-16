@@ -8,7 +8,7 @@ pub mod state;
 
 use instructions::*;
 
-declare_id!("91TyFjPEKeKevThuZmfvYzFpzHhchVLtPYf5nLiUzoV7");
+declare_id!("HrLqdNdxUJq4pgsL4NsUqzfYrGxR7Hy9PHGEeHnj3skL");
 
 /// Covantic — AI Agent Insurance Protocol on Solana.
 /// Parametric insurance for AI agents performing DeFi operations.
