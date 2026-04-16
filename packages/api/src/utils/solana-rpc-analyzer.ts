@@ -22,6 +22,48 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Classify RPC errors that should be retried. Rate limits (429) and transient
+ *  5xx/network errors are retried; programmer errors (bad address, invalid
+ *  method) are not. Keeping this centralized so analyzer + any future caller
+ *  agree on what's transient. */
+function isTransientRpcError(err: unknown): boolean {
+  const msg =
+    err instanceof Error ? err.message : typeof err === 'string' ? err : '';
+  if (!msg) return false;
+  if (/\b429\b|too many|rate.?limit/i.test(msg)) return true;
+  if (/\b50[0-9]\b|bad gateway|gateway timeout|service unavailable/i.test(msg)) return true;
+  if (/timeout|ECONNRESET|ENOTFOUND|ETIMEDOUT|network/i.test(msg)) return true;
+  // solana-web3.js wraps RPC errors as `SolanaJSONRPCError` with a `code`
+  const code = (err as { code?: unknown }).code;
+  if (typeof code === 'number' && code >= -32099 && code <= -32000) return true;
+  return false;
+}
+
+/** Retry a fallible RPC call with exponential backoff. Non-transient errors
+ *  propagate immediately — only genuine rate-limit / transient failures are
+ *  retried. This is what stops a throttled RPC from silently producing empty
+ *  data that the risk scorer then turns into a fake "no activity" score. */
+async function withRpcRetry<T>(
+  label: string,
+  fn: () => Promise<T>,
+  attempts = 3,
+): Promise<T> {
+  let lastError: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      if (i === attempts - 1 || !isTransientRpcError(err)) break;
+      // 400ms, 1.6s, 6.4s — keeps total wall time < 10s
+      const backoffMs = 400 * 4 ** i;
+      logger.warn({ label, attempt: i + 1, backoffMs, err }, 'RPC transient error — retrying');
+      await delay(backoffMs);
+    }
+  }
+  throw lastError;
+}
+
 /** Select evenly-distributed sample indices from a range, always including first and last */
 function selectSample(total: number, maxSample: number): number[] {
   if (total <= maxSample) {
@@ -137,61 +179,63 @@ export class SolanaRpcAnalyzer {
     address: string,
     limit: number = 100,
   ): Promise<AnalyzedTransaction[]> {
-    try {
-      const pubkey = parseAddress(address);
+    const pubkey = parseAddress(address);
 
-      // Step 1: Get all recent signatures (single lightweight call)
-      const signatures = await this.connection.getSignaturesForAddress(pubkey, { limit });
+    // Step 1: Get all recent signatures (single lightweight call). Retry on
+    // transient failures; an empty array here means the wallet is legitimately
+    // inactive and should NOT be conflated with an infrastructure error.
+    const signatures = await withRpcRetry('getSignaturesForAddress', () =>
+      this.connection.getSignaturesForAddress(pubkey, { limit }),
+    );
 
-      if (signatures.length === 0) return [];
+    if (signatures.length === 0) return [];
 
-      logger.info({ address, signatureCount: signatures.length }, 'Fetched signatures');
+    logger.info({ address, signatureCount: signatures.length }, 'Fetched signatures');
 
-      // Step 2: Select a representative sample for full parsing
-      // Parse up to 30 txs — enough for factor analysis without hammering RPC
-      const maxParsed = 30;
-      const sampleIndices = selectSample(signatures.length, maxParsed);
+    // Step 2: Select a representative sample for full parsing
+    const maxParsed = 30;
+    const sampleIndices = selectSample(signatures.length, maxParsed);
 
-      // Step 3: Fetch parsed transactions sequentially with delays
-      const parsedTxs = new Map<number, ParsedTransactionWithMeta | null>();
+    // Step 3: Fetch parsed transactions sequentially with per-call retries.
+    // Per-transaction errors degrade to null so a single bad sig doesn't abort
+    // the whole assessment; hard RPC failures still bubble via withRpcRetry.
+    const parsedTxs = new Map<number, ParsedTransactionWithMeta | null>();
 
-      for (let i = 0; i < sampleIndices.length; i++) {
-        const idx = sampleIndices[i]!;
-        const sig = signatures[idx]!;
+    for (let i = 0; i < sampleIndices.length; i++) {
+      const idx = sampleIndices[i]!;
+      const sig = signatures[idx]!;
 
-        // Rate limit: 1 request per 400ms to stay well under devnet limits
-        if (i > 0) await delay(400);
+      if (i > 0) await delay(200);
 
-        try {
-          const tx = await this.connection.getParsedTransaction(sig.signature, {
+      try {
+        const tx = await withRpcRetry('getParsedTransaction', () =>
+          this.connection.getParsedTransaction(sig.signature, {
             maxSupportedTransactionVersion: 0,
-          });
-          parsedTxs.set(idx, tx);
-        } catch {
-          parsedTxs.set(idx, null);
-        }
+          }),
+        );
+        parsedTxs.set(idx, tx);
+      } catch (err) {
+        logger.warn({ address, signature: sig.signature, err }, 'parsed tx fetch failed — continuing');
+        parsedTxs.set(idx, null);
       }
-
-      // Step 4: Build analyzed transactions — full data for sampled, minimal for others
-      const analyzed: AnalyzedTransaction[] = [];
-
-      for (let i = 0; i < signatures.length; i++) {
-        const sigInfo = signatures[i]!;
-        const parsedTx = parsedTxs.get(i) ?? null;
-
-        analyzed.push(this.normalizeTransaction(address, sigInfo.signature, sigInfo, parsedTx));
-      }
-
-      logger.info(
-        { address, total: signatures.length, parsed: parsedTxs.size },
-        'Transaction analysis complete',
-      );
-
-      return analyzed;
-    } catch (error) {
-      logger.error({ error, address }, 'Failed to analyze transactions via RPC');
-      return [];
     }
+
+    // Step 4: Build analyzed transactions — full data for sampled, minimal for others
+    const analyzed: AnalyzedTransaction[] = [];
+
+    for (let i = 0; i < signatures.length; i++) {
+      const sigInfo = signatures[i]!;
+      const parsedTx = parsedTxs.get(i) ?? null;
+
+      analyzed.push(this.normalizeTransaction(address, sigInfo.signature, sigInfo, parsedTx));
+    }
+
+    logger.info(
+      { address, total: signatures.length, parsed: parsedTxs.size },
+      'Transaction analysis complete',
+    );
+
+    return analyzed;
   }
 
   /** Get token balances for a wallet */
@@ -199,66 +243,63 @@ export class SolanaRpcAnalyzer {
     tokens: AnalyzedTokenBalance[];
     nativeBalance: number;
   }> {
-    try {
-      const pubkey = parseAddress(address);
+    const pubkey = parseAddress(address);
 
-      const [balance, tokenAccounts] = await Promise.all([
-        this.connection.getBalance(pubkey),
+    const [balance, tokenAccounts] = await Promise.all([
+      withRpcRetry('getBalance', () => this.connection.getBalance(pubkey)),
+      withRpcRetry('getParsedTokenAccountsByOwner', () =>
         this.connection.getParsedTokenAccountsByOwner(pubkey, {
           programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'),
         }),
-      ]);
+      ),
+    ]);
 
-      const tokens: AnalyzedTokenBalance[] = tokenAccounts.value.map((account) => {
-        const parsed = account.account.data.parsed.info;
-        return {
-          mint: parsed.mint,
-          amount: Number(parsed.tokenAmount.amount),
-          decimals: parsed.tokenAmount.decimals,
-          tokenAccount: account.pubkey.toBase58(),
-        };
-      });
+    const tokens: AnalyzedTokenBalance[] = tokenAccounts.value.map((account) => {
+      const parsed = account.account.data.parsed.info;
+      return {
+        mint: parsed.mint,
+        amount: Number(parsed.tokenAmount.amount),
+        decimals: parsed.tokenAmount.decimals,
+        tokenAccount: account.pubkey.toBase58(),
+      };
+    });
 
-      return { tokens, nativeBalance: balance };
-    } catch (error) {
-      logger.error({ error, address }, 'Failed to get token balances via RPC');
-      return { tokens: [], nativeBalance: 0 };
-    }
+    return { tokens, nativeBalance: balance };
   }
 
   /** Get account info for a wallet */
   async getAccountInfo(address: string): Promise<AnalyzedAccountInfo | null> {
+    const pubkey = parseAddress(address);
+    const info = await withRpcRetry('getAccountInfo', () =>
+      this.connection.getAccountInfo(pubkey),
+    );
+
+    if (!info) return null;
+
+    // Estimate creation time from oldest available transaction. This call is
+    // non-critical — we already have account info; age is auxiliary — so a
+    // retryable failure here doesn't fail the whole lookup.
+    let createdAt: string | undefined;
     try {
-      const pubkey = parseAddress(address);
-      const info = await this.connection.getAccountInfo(pubkey);
-
-      if (!info) return null;
-
-      // Estimate creation time from oldest available transaction
-      // Use a modest limit to avoid rate-limiting issues on devnet
-      let createdAt: string | undefined;
-      try {
-        const sigs = await this.connection.getSignaturesForAddress(pubkey, { limit: 100 });
-        if (sigs.length > 0) {
-          const oldest = sigs[sigs.length - 1];
-          if (oldest?.blockTime) {
-            createdAt = new Date(oldest.blockTime * 1000).toISOString();
-          }
+      const sigs = await withRpcRetry('getSignaturesForAddress(age)', () =>
+        this.connection.getSignaturesForAddress(pubkey, { limit: 100 }),
+      );
+      if (sigs.length > 0) {
+        const oldest = sigs[sigs.length - 1];
+        if (oldest?.blockTime) {
+          createdAt = new Date(oldest.blockTime * 1000).toISOString();
         }
-      } catch {
-        // Non-critical — we can estimate age from tx history
       }
-
-      return {
-        createdAt,
-        lamports: info.lamports,
-        owner: info.owner.toBase58(),
-        executable: info.executable,
-      };
-    } catch (error) {
-      logger.error({ error, address }, 'Failed to get account info via RPC');
-      return null;
+    } catch (err) {
+      logger.warn({ address, err }, 'wallet age lookup failed — falling back to tx history');
     }
+
+    return {
+      createdAt,
+      lamports: info.lamports,
+      owner: info.owner.toBase58(),
+      executable: info.executable,
+    };
   }
 
   /** Normalize a parsed Solana transaction into our analysis format */

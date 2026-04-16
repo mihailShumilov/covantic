@@ -141,22 +141,38 @@ export async function assessRisk(
       'Fetched on-chain data via Solana RPC',
     );
   } catch (rpcError) {
+    // Primary RPC failed (rate-limit, outage, bad network). Before the hardening
+    // pass this silently produced empty data — which the factor pipeline then
+    // turned into an identical "~0.85 no-activity" score for every wallet.
+    // Surface the failure through the Helius fallback, and if that also fails,
+    // abort the assessment so the caller gets a real 5xx instead of a fake score.
     logger.warn({ agentAddress, error: rpcError }, 'Solana RPC failed, trying Helius fallback');
 
-    if (helius) {
-      const [heliusTxs, heliusBal, heliusInfo] = await Promise.all([
-        helius.getEnhancedTransactions(agentAddress, { limit: 100 }),
-        helius.getTokenBalances(agentAddress),
-        helius.getAccountInfo(agentAddress),
-      ]);
-      transactions = heliusTxs as AnalyzedTransaction[];
-      balances = heliusBal as { tokens: AnalyzedTokenBalance[]; nativeBalance: number };
-      accountInfo = heliusInfo as AnalyzedAccountInfo | null;
-    } else {
-      transactions = [];
-      balances = { tokens: [], nativeBalance: 0 };
-      accountInfo = null;
+    if (!helius) {
+      throw new Error(
+        `Risk assessment unavailable: Solana RPC failed and no Helius fallback configured. ` +
+          `Underlying error: ${rpcError instanceof Error ? rpcError.message : String(rpcError)}`,
+      );
     }
+
+    const [heliusTxs, heliusBal, heliusInfo] = await Promise.all([
+      helius.getEnhancedTransactions(agentAddress, { limit: 100 }),
+      helius.getTokenBalances(agentAddress),
+      helius.getAccountInfo(agentAddress),
+    ]);
+    transactions = heliusTxs as AnalyzedTransaction[];
+    balances = heliusBal as { tokens: AnalyzedTokenBalance[]; nativeBalance: number };
+    accountInfo = heliusInfo as AnalyzedAccountInfo | null;
+
+    logger.info(
+      {
+        agentAddress,
+        source: 'helius',
+        txCount: transactions.length,
+        tokenCount: balances.tokens.length,
+      },
+      'Fetched on-chain data via Helius fallback',
+    );
   }
 
   const txs = Array.isArray(transactions) ? transactions : [];

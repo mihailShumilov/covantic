@@ -126,57 +126,54 @@ export class HeliusClient {
     this.baseUrl = 'https://api.helius.xyz/v0';
   }
 
-  /** Get enhanced transaction history for an address */
+  /** Get enhanced transaction history for an address.
+   *  Throws on HTTP failure so callers can surface a real error instead of
+   *  treating an outage as "empty wallet". 404 is the one exception — Helius
+   *  returns 404 for never-seen addresses, which IS a legitimate empty result. */
   async getEnhancedTransactions(
     address: string,
     options: { limit?: number; before?: string } = {},
   ): Promise<EnhancedTransaction[]> {
     assertAddress(address);
     const limit = Math.min(Math.max(1, options.limit ?? 100), 100);
-    // Use URLSearchParams so all query values are percent-encoded
     const params = new URLSearchParams({ 'api-key': this.apiKey, limit: String(limit) });
     const url = `${this.baseUrl}/addresses/${encodeURIComponent(address)}/transactions?${params}`;
 
-    try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`Helius API error: ${res.status}`);
-      return (await res.json()) as EnhancedTransaction[];
-    } catch (error) {
-      logger.error({ error, address }, 'Failed to fetch enhanced transactions');
-      return [];
+    const res = await fetch(url);
+    if (res.status === 404) return [];
+    if (!res.ok) {
+      throw new Error(`Helius getEnhancedTransactions failed: HTTP ${res.status}`);
     }
+    return (await res.json()) as EnhancedTransaction[];
   }
 
-  /** Get token balances for an address */
+  /** Get token balances for an address. Throws on HTTP failure. */
   async getTokenBalances(address: string): Promise<{ tokens: TokenBalance[]; nativeBalance: number }> {
     assertAddress(address);
     const params = new URLSearchParams({ 'api-key': this.apiKey });
     const url = `${this.baseUrl}/addresses/${encodeURIComponent(address)}/balances?${params}`;
 
-    try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`Helius API error: ${res.status}`);
-      return (await res.json()) as { tokens: TokenBalance[]; nativeBalance: number };
-    } catch (error) {
-      logger.error({ error, address }, 'Failed to fetch token balances');
-      return { tokens: [], nativeBalance: 0 };
+    const res = await fetch(url);
+    if (res.status === 404) return { tokens: [], nativeBalance: 0 };
+    if (!res.ok) {
+      throw new Error(`Helius getTokenBalances failed: HTTP ${res.status}`);
     }
+    return (await res.json()) as { tokens: TokenBalance[]; nativeBalance: number };
   }
 
-  /** Get account info */
+  /** Get account info. 404 means "account does not exist" — a legitimate
+   *  null, not an error. Other failures throw. */
   async getAccountInfo(address: string): Promise<AccountInfo | null> {
     assertAddress(address);
     const params = new URLSearchParams({ 'api-key': this.apiKey });
     const url = `${this.baseUrl}/addresses/${encodeURIComponent(address)}/info?${params}`;
 
-    try {
-      const res = await fetch(url);
-      if (!res.ok) return null;
-      return (await res.json()) as AccountInfo;
-    } catch (error) {
-      logger.error({ error, address }, 'Failed to fetch account info');
-      return null;
+    const res = await fetch(url);
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      throw new Error(`Helius getAccountInfo failed: HTTP ${res.status}`);
     }
+    return (await res.json()) as AccountInfo;
   }
 
   /** Get parsed transaction details */
