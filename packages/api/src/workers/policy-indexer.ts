@@ -1,6 +1,6 @@
 import { Queue, Worker } from 'bullmq';
 import type Redis from 'ioredis';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, inArray } from 'drizzle-orm';
 import { PublicKey } from '@solana/web3.js';
 import { PolicyState } from '@covantic/shared';
 import type { Database } from '../config/database.js';
