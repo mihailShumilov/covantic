@@ -9,14 +9,17 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
+import { Spinner } from '@/components/ui/Spinner';
 import { RiskAssessmentPipeline } from '@/components/risk/RiskAssessmentPipeline';
-import { apiGet, apiPost } from '@/lib/api-client';
+import { ApiError, apiGet, apiPost } from '@/lib/api-client';
 import Link from 'next/link';
 import {
   formatUsdc,
   PolicyState,
+  RiskTier,
   SOLANA_ADDRESS_REGEX,
   type Policy,
+  type PremiumQuote,
   type StakerPositionResponse,
 } from '@covantic/shared';
 import {
@@ -30,6 +33,7 @@ import {
   deriveConfigPda,
   deriveVaultPda,
   derivePolicyPda,
+  deriveAttestationPda,
 } from '@/hooks/useCovanticProgram';
 
 const SOLANA_ADDRESS_RE = SOLANA_ADDRESS_REGEX;
@@ -87,6 +91,14 @@ interface RiskApiResponse {
   assessedAt: string;
 }
 
+/** Narrow assessment slice handed to the Buy Policy modal. */
+interface AssessmentForBuy {
+  agentAddress: string;
+  tier: number;
+  score: number;
+  assessmentId: string;
+}
+
 export default function DashboardPage() {
   const { publicKey } = useWallet();
   const { program } = useCovanticProgram();
@@ -94,6 +106,7 @@ export default function DashboardPage() {
   const [showBuyModal, setShowBuyModal] = useState(false);
   const [riskResult, setRiskResult] = useState<RiskApiResponse | null>(null);
   const [isAssessing, setIsAssessing] = useState(false);
+  const [pipelineShown, setPipelineShown] = useState(false);
   const [pipelineKey, setPipelineKey] = useState(0);
   const [agentAddress, setAgentAddress] = useState('');
   const [stakerPosition, setStakerPosition] = useState<StakerPositionResponse | null>(null);
@@ -116,10 +129,10 @@ export default function DashboardPage() {
       return;
     }
     try {
-      // offset = 8 (discriminator) + 8 (policy_id u64) — holder pubkey starts here.
+      // offset = 8 (discriminator) + 1 (version u8) + 8 (policy_id u64) — holder pubkey starts here.
       // memcmp.bytes is base58, which PublicKey.toBase58() already gives us.
       const accounts = await (program.account as any).insurancePolicy.all([
-        { memcmp: { offset: 16, bytes: publicKey.toBase58() } },
+        { memcmp: { offset: 17, bytes: publicKey.toBase58() } },
       ]);
       const mapped: Policy[] = accounts
         .map(({ account, publicKey: pda }: any) => mapOnChainPolicy(account, pda))
@@ -135,31 +148,43 @@ export default function DashboardPage() {
     refreshPolicies();
   }, [refreshPolicies]);
 
-  const handleGetRisk = async () => {
-    if (!agentAddress || isAssessing) return;
-    if (!SOLANA_ADDRESS_RE.test(agentAddress)) return;
+  const runAssessment = useCallback(async (address: string) => {
+    if (!SOLANA_ADDRESS_RE.test(address)) return;
 
-    // 1. Clear previous results and start pipeline animation (fetching phase)
+    setAgentAddress(address);
     setRiskResult(null);
     setIsAssessing(true);
+    setPipelineShown(true);
     setPipelineKey((k) => k + 1);
 
-    // 2. Fire API call — pipeline shows "fetching" animation until result arrives
     try {
-      const result = await apiGet<RiskApiResponse>(`/api/risk/${agentAddress}`);
+      const result = await apiGet<RiskApiResponse>(`/api/risk/${address}`);
       setRiskResult(result);
-      // Update URL to shareable assessment link without navigating away
       if (result.assessmentId && UUID_RE.test(result.assessmentId)) {
         window.history.replaceState(null, '', `/assessment/${result.assessmentId}`);
       }
     } catch {
       setRiskResult(null);
     }
+  }, []);
+
+  const handleGetRisk = () => {
+    if (!agentAddress || isAssessing) return;
+    void runAssessment(agentAddress);
   };
+
+  const handleReassess = useCallback(() => {
+    if (!riskResult) return;
+    setShowBuyModal(false);
+    void runAssessment(riskResult.agentAddress);
+  }, [riskResult, runAssessment]);
 
   const handlePipelineComplete = () => {
     setIsAssessing(false);
   };
+
+  const isInsurable = !!riskResult && riskResult.tier !== RiskTier.EXTREME;
+  const showBuyCta = !isAssessing && isInsurable;
 
   return (
     <div style={{ padding: 'var(--space-lg) var(--space-md)', maxWidth: 1200, margin: '0 auto' }}>
@@ -174,7 +199,6 @@ export default function DashboardPage() {
         }}
       >
         <h1 style={{ fontSize: 'clamp(1.25rem, 3vw, 1.5rem)', fontWeight: 700 }}>Agent Dashboard</h1>
-        <Button onClick={() => setShowBuyModal(true)}>Buy Policy</Button>
       </div>
 
       {/* Risk Assessment */}
@@ -215,12 +239,53 @@ export default function DashboardPage() {
         </div>
 
         {/* Animated pipeline — stays visible after completion */}
-        {pipelineKey > 0 && (
+        {pipelineShown && (
           <RiskAssessmentPipeline
             key={pipelineKey}
             result={riskResult as any}
             onComplete={handlePipelineComplete}
           />
+        )}
+
+        {/* Buy policy CTA — only after a successful, insurable assessment */}
+        {showBuyCta && riskResult && (
+          <div
+            style={{
+              marginTop: 'var(--space-md)',
+              padding: 'var(--space-md)',
+              background: 'var(--color-bg)',
+              borderRadius: 'var(--radius-md)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: 'var(--space-md)',
+              flexWrap: 'wrap',
+            }}
+          >
+            <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)', margin: 0 }}>
+              Agent is insurable. Buy a policy using the assessed risk tier.
+            </p>
+            <Button onClick={() => setShowBuyModal(true)} size="md" style={{ width: 'auto' }}>
+              Buy Policy
+            </Button>
+          </div>
+        )}
+
+        {/* Uninsurable banner — EXTREME-tier agents cannot buy coverage */}
+        {!isAssessing && riskResult && !isInsurable && (
+          <div
+            style={{
+              marginTop: 'var(--space-md)',
+              padding: 'var(--space-md)',
+              background: 'var(--color-bg)',
+              border: '1px solid var(--color-danger)',
+              borderRadius: 'var(--radius-md)',
+            }}
+          >
+            <p style={{ fontSize: '0.875rem', color: 'var(--color-danger)', margin: 0 }}>
+              Agent is assessed as EXTREME risk and is not insurable.
+            </p>
+          </div>
         )}
       </Card>
 
@@ -301,7 +366,7 @@ export default function DashboardPage() {
             }}
           >
             {publicKey
-              ? 'No policies yet. Buy your first policy!'
+              ? 'No policies yet. Analyze an agent above to buy your first policy.'
               : 'Connect wallet to view policies.'}
           </p>
         ) : (
@@ -364,75 +429,279 @@ export default function DashboardPage() {
         )}
       </Card>
 
-      {/* Buy Policy Modal */}
+      {/* Buy Policy Modal — only renders when we have a live assessment */}
       <Modal
-        open={showBuyModal}
+        open={showBuyModal && !!riskResult}
         onClose={() => setShowBuyModal(false)}
         title="Buy Insurance Policy"
       >
-        <BuyPolicyForm
-          onClose={() => setShowBuyModal(false)}
-          onPolicyCreated={refreshPolicies}
-        />
+        {riskResult && (
+          <BuyPolicyForm
+            assessment={{
+              agentAddress: riskResult.agentAddress,
+              tier: riskResult.tier,
+              score: riskResult.score,
+              assessmentId: riskResult.assessmentId,
+            }}
+            onClose={() => setShowBuyModal(false)}
+            onRequestReassess={handleReassess}
+            onPolicyCreated={refreshPolicies}
+          />
+        )}
       </Modal>
     </div>
   );
 }
 
+/**
+ * Buy Policy form — consumes the assessment handed in by the parent.
+ *
+ * `agentAddress` and `tier` are read-only because the server derives the tier
+ * from the latest stored assessment. The form shows a live countdown until
+ * the underlying assessment is too stale to quote against; once expired, the
+ * submit button is replaced with a prompt to re-analyze.
+ */
+type TxPhase = 'idle' | 'approving' | 'sending' | 'confirming' | 'success' | 'error';
+
 function BuyPolicyForm({
+  assessment,
   onClose,
+  onRequestReassess,
   onPolicyCreated,
 }: {
+  assessment: AssessmentForBuy;
   onClose: () => void;
+  onRequestReassess: () => void;
   onPolicyCreated?: () => void;
 }) {
   const { publicKey } = useWallet();
-  const { program } = useCovanticProgram();
+  const { program, provider } = useCovanticProgram();
   const [coverage, setCoverage] = useState('100');
   const [duration, setDuration] = useState('24');
-  const [tier, setTier] = useState(0);
-  const [agentAddr, setAgentAddr] = useState('');
-  const [quote, setQuote] = useState<any>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const [quote, setQuote] = useState<PremiumQuote | null>(null);
+  const [txPhase, setTxPhase] = useState<TxPhase>('idle');
   const [txSig, setTxSig] = useState<string | null>(null);
+  const [confirmedCoverage, setConfirmedCoverage] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [quoteErrorCode, setQuoteErrorCode] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const submitting =
+    txPhase === 'approving' || txPhase === 'sending' || txPhase === 'confirming';
+
+  // Tick every second so the "Quote valid for MM:SS" countdown updates live.
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
-    // Debounce: wait 400ms after the last change before hitting the API.
-    // This prevents hammering /api/policies/quote on every keystroke.
+    // Debounce quote refresh — avoid hammering the endpoint on every keystroke.
     if (debounceRef.current) clearTimeout(debounceRef.current);
 
     debounceRef.current = setTimeout(async () => {
       const coverageNum = parseFloat(coverage);
       const durationNum = parseFloat(duration);
-      if (!isFinite(coverageNum) || coverageNum <= 0 || !isFinite(durationNum) || durationNum <= 0) {
-        return;
-      }
-      if (!SOLANA_ADDRESS_RE.test(agentAddr)) {
+      if (
+        !isFinite(coverageNum) ||
+        coverageNum <= 0 ||
+        !isFinite(durationNum) ||
+        durationNum <= 0
+      ) {
         setQuote(null);
         return;
       }
       try {
-        const q = await apiPost('/api/policies/quote', {
-          coverageAmount: coverageNum * 1_000_000,
-          durationSeconds: durationNum * 3600,
-          riskTier: tier,
-          agentAddress: agentAddr,
+        const q = await apiPost<PremiumQuote>('/api/policies/quote', {
+          coverageAmount: Math.round(coverageNum * 1_000_000),
+          durationSeconds: Math.round(durationNum * 3600),
+          agentAddress: assessment.agentAddress,
         });
         setQuote(q);
-      } catch {
-        // Handle error
+        setQuoteErrorCode(null);
+        setError(null);
+      } catch (e) {
+        setQuote(null);
+        if (e instanceof ApiError) {
+          setQuoteErrorCode(e.code ?? null);
+          setError(e.message);
+        } else {
+          setQuoteErrorCode(null);
+          setError(e instanceof Error ? e.message : 'Failed to fetch quote');
+        }
       }
     }, 400);
 
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [coverage, duration, tier, agentAddr]);
+  }, [coverage, duration, assessment.agentAddress]);
+
+  const validUntilMs = quote ? new Date(quote.validUntil).getTime() : 0;
+  const msLeft = validUntilMs ? validUntilMs - now : 0;
+  const quoteExpired = quote != null && msLeft <= 0;
+  const staleFromServer = quoteErrorCode === 'ASSESSMENT_STALE';
+  const needsReassess = quoteExpired || staleFromServer;
+
+  const countdown = (() => {
+    if (!quote || msLeft <= 0) return null;
+    const totalSec = Math.floor(msLeft / 1000);
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  })();
+
+  const tierLabel = TIER_LABELS[assessment.tier] ?? 'UNKNOWN';
+  const tierBadgeVariant = TIER_BADGE_VARIANTS[assessment.tier] ?? 'neutral';
+
+  const handleBuy = async () => {
+    setError(null);
+    setTxSig(null);
+    if (!program || !provider || !publicKey) {
+      setError('Connect wallet first');
+      return;
+    }
+    if (!quote) {
+      setError('Waiting for premium quote');
+      return;
+    }
+    let agentPk: PublicKey;
+    try {
+      agentPk = new PublicKey(assessment.agentAddress);
+    } catch {
+      setError('Invalid agent address');
+      return;
+    }
+    const coverageNum = Math.round(parseFloat(coverage) * 1_000_000);
+    const durationNum = Math.round(parseFloat(duration) * 3600);
+    if (!coverageNum || !durationNum) {
+      setError('Invalid coverage or duration');
+      return;
+    }
+
+    try {
+      setTxPhase('approving');
+      const configPda = deriveConfigPda();
+      const vaultPda = deriveVaultPda();
+      const attestationPda = deriveAttestationPda(agentPk);
+      const cfg: any = await (program.account as any).protocolConfig.fetch(configPda);
+      const policyId: BN = cfg.policyCounter;
+      const policyPda = derivePolicyPda(publicKey, BigInt(policyId.toString()));
+      const usdcMint = cfg.usdcMint as PublicKey;
+      const holderAta = getAssociatedTokenAddressSync(usdcMint, publicKey);
+      const vaultAta = getAssociatedTokenAddressSync(usdcMint, vaultPda, true);
+
+      const tx = await program.methods
+        .createPolicy(new BN(coverageNum), new BN(durationNum), agentPk)
+        .accounts({
+          holder: publicKey,
+          config: configPda,
+          vault: vaultPda,
+          attestation: attestationPda,
+          policy: policyPda,
+          holderTokenAccount: holderAta,
+          vaultTokenAccount: vaultAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        } as any)
+        .transaction();
+
+      const { blockhash, lastValidBlockHeight } =
+        await provider.connection.getLatestBlockhash('confirmed');
+      tx.feePayer = publicKey;
+      tx.recentBlockhash = blockhash;
+
+      // Phase 1 — wait for the user to approve the tx in Phantom.
+      const signed = await provider.wallet.signTransaction(tx);
+
+      // Phase 2 — broadcast the signed tx to the cluster.
+      setTxPhase('sending');
+      const sig = await provider.connection.sendRawTransaction(signed.serialize(), {
+        skipPreflight: false,
+      });
+
+      // Phase 3 — wait for the cluster to confirm inclusion.
+      setTxPhase('confirming');
+      const conf = await provider.connection.confirmTransaction(
+        { signature: sig, blockhash, lastValidBlockHeight },
+        'confirmed',
+      );
+      if (conf.value.err) {
+        throw new Error(`Transaction failed on-chain: ${JSON.stringify(conf.value.err)}`);
+      }
+
+      setTxSig(sig);
+      setConfirmedCoverage(coverageNum);
+      setTxPhase('success');
+      onPolicyCreated?.();
+    } catch (e: any) {
+      const msg = e?.message ?? 'Transaction failed';
+      const userRejected = /reject|denied|cancel/i.test(msg);
+      setError(userRejected ? 'Transaction rejected in wallet.' : msg);
+      setTxPhase('error');
+    }
+  };
+
+  if (txPhase === 'success') {
+    return (
+      <TxResultSuccess
+        txSig={txSig}
+        coverageAmount={confirmedCoverage ?? 0}
+        onDone={onClose}
+      />
+    );
+  }
+
+  if (submitting) {
+    return <TxProcessing phase={txPhase} />;
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
+      {/* Locked assessment summary — agent + tier come from the scan, not user input */}
+      <div
+        style={{
+          padding: 'var(--space-md)',
+          background: 'var(--color-bg)',
+          border: '1px solid var(--color-border)',
+          borderRadius: 'var(--radius-md)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 'var(--space-sm)',
+        }}
+      >
+        <div>
+          <p
+            style={{
+              fontSize: '0.75rem',
+              color: 'var(--color-text-muted)',
+              margin: 0,
+              marginBottom: 2,
+            }}
+          >
+            Agent wallet
+          </p>
+          <p
+            style={{
+              margin: 0,
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.8125rem',
+              wordBreak: 'break-all',
+            }}
+          >
+            {assessment.agentAddress}
+          </p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+            Assessed tier
+          </span>
+          <Badge variant={tierBadgeVariant}>{tierLabel}</Badge>
+          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+            Score {(assessment.score * 100).toFixed(0)}/100
+          </span>
+        </div>
+      </div>
+
       <div>
         <label
           style={{
@@ -483,35 +752,8 @@ function BuyPolicyForm({
           }}
         />
       </div>
-      <div>
-        <label
-          style={{
-            fontSize: '0.8125rem',
-            color: 'var(--color-text-muted)',
-            display: 'block',
-            marginBottom: 4,
-          }}
-        >
-          Risk Tier
-        </label>
-        <select
-          value={tier}
-          onChange={(e) => setTier(Number(e.target.value))}
-          style={{
-            width: '100%',
-            padding: '0.5rem',
-            background: 'var(--color-bg)',
-            border: '1px solid var(--color-border)',
-            borderRadius: 'var(--radius-md)',
-            color: 'var(--color-text)',
-          }}
-        >
-          <option value={0}>LOW (1%)</option>
-          <option value={1}>MEDIUM (2.5%)</option>
-          <option value={2}>HIGH (5%)</option>
-        </select>
-      </div>
-      {quote && (
+
+      {quote && !quoteExpired && (
         <div
           style={{
             background: 'var(--color-bg)',
@@ -519,127 +761,263 @@ function BuyPolicyForm({
             borderRadius: 'var(--radius-md)',
           }}
         >
-          <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>
+          <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)', margin: 0 }}>
             Estimated Premium
           </p>
-          <p style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--color-primary)' }}>
+          <p
+            style={{
+              fontSize: '1.5rem',
+              fontWeight: 700,
+              color: 'var(--color-primary)',
+              margin: 0,
+            }}
+          >
             ${formatUsdc(quote.premiumAmount)} USDC
           </p>
+          {countdown && (
+            <p
+              style={{
+                fontSize: '0.75rem',
+                color: 'var(--color-text-muted)',
+                marginTop: 4,
+                marginBottom: 0,
+              }}
+            >
+              Quote valid for {countdown}
+            </p>
+          )}
         </div>
       )}
-      <div>
-        <label
-          style={{
-            fontSize: '0.8125rem',
-            color: 'var(--color-text-muted)',
-            display: 'block',
-            marginBottom: 4,
-          }}
-        >
-          Agent Wallet Address
-        </label>
-        <input
-          value={agentAddr}
-          onChange={(e) => setAgentAddr(e.target.value)}
-          placeholder="Agent pubkey..."
-          style={{
-            width: '100%',
-            padding: '0.5rem',
-            background: 'var(--color-bg)',
-            border: '1px solid var(--color-border)',
-            borderRadius: 'var(--radius-md)',
-            color: 'var(--color-text)',
-            fontFamily: 'var(--font-mono)',
-            fontSize: '0.875rem',
-          }}
-        />
-      </div>
-      {error && (
-        <p style={{ fontSize: '0.8125rem', color: 'var(--color-danger)' }}>{error}</p>
-      )}
-      {txSig && (
-        <p style={{ fontSize: '0.8125rem', color: 'var(--color-primary)' }}>
-          Sent!{' '}
-          <a
-            href={`https://explorer.solana.com/tx/${txSig}?cluster=devnet`}
-            target="_blank"
-            rel="noreferrer"
-          >
-            View on Explorer
-          </a>
+
+      {needsReassess && (
+        <p style={{ fontSize: '0.8125rem', color: 'var(--color-danger)', margin: 0 }}>
+          Risk assessment expired — re-analyze the agent to refresh the quote.
         </p>
       )}
+
+      {error && !needsReassess && (
+        <p style={{ fontSize: '0.8125rem', color: 'var(--color-danger)', margin: 0 }}>{error}</p>
+      )}
+
       <div style={{ display: 'flex', gap: 'var(--space-md)' }}>
         <Button variant="secondary" onClick={onClose} style={{ flex: 1 }} disabled={submitting}>
           Cancel
         </Button>
-        <Button
-          style={{ flex: 1 }}
-          disabled={submitting || !program || !publicKey}
-          onClick={async () => {
-            setError(null);
-            setTxSig(null);
-            if (!program || !publicKey) {
-              setError('Connect wallet first');
-              return;
-            }
-            let agentPk: PublicKey;
-            try {
-              agentPk = new PublicKey(agentAddr);
-            } catch {
-              setError('Invalid agent address');
-              return;
-            }
-            const coverageNum = Math.round(parseFloat(coverage) * 1_000_000);
-            const durationNum = Math.round(parseFloat(duration) * 3600);
-            if (!coverageNum || !durationNum) {
-              setError('Invalid coverage or duration');
-              return;
-            }
+        {needsReassess ? (
+          <Button style={{ flex: 1 }} onClick={onRequestReassess}>
+            Re-analyze Agent
+          </Button>
+        ) : (
+          <Button
+            style={{ flex: 1 }}
+            disabled={submitting || !program || !publicKey || !quote}
+            onClick={handleBuy}
+          >
+            Buy Policy
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
 
-            setSubmitting(true);
-            try {
-              const configPda = deriveConfigPda();
-              const vaultPda = deriveVaultPda();
-              const cfg: any = await (program.account as any).protocolConfig.fetch(configPda);
-              const policyId: BN = cfg.policyCounter;
-              const policyPda = derivePolicyPda(
-                publicKey,
-                BigInt(policyId.toString()),
-              );
-              const usdcMint = cfg.usdcMint as PublicKey;
-              const holderAta = getAssociatedTokenAddressSync(usdcMint, publicKey);
-              const vaultAta = getAssociatedTokenAddressSync(usdcMint, vaultPda, true);
+/** Full-modal view shown while the transaction is in flight. */
+function TxProcessing({ phase }: { phase: TxPhase }) {
+  const steps: { key: TxPhase; label: string; hint: string }[] = [
+    {
+      key: 'approving',
+      label: 'Approve in wallet',
+      hint: 'Confirm the transaction in your wallet to continue.',
+    },
+    {
+      key: 'sending',
+      label: 'Broadcasting',
+      hint: 'Sending the signed transaction to the Solana cluster.',
+    },
+    {
+      key: 'confirming',
+      label: 'Confirming on-chain',
+      hint: 'Waiting for the network to confirm the policy.',
+    },
+  ];
+  const order: TxPhase[] = ['approving', 'sending', 'confirming'];
+  const currentIdx = order.indexOf(phase);
+  const active = steps.find((s) => s.key === phase);
 
-              const sig = await program.methods
-                .createPolicy(
-                  new BN(coverageNum),
-                  new BN(durationNum),
-                  tier,
-                  agentPk,
-                )
-                .accounts({
-                  holder: publicKey,
-                  config: configPda,
-                  vault: vaultPda,
-                  policy: policyPda,
-                  holderTokenAccount: holderAta,
-                  vaultTokenAccount: vaultAta,
-                  tokenProgram: TOKEN_PROGRAM_ID,
-                } as any)
-                .rpc();
-              setTxSig(sig);
-              onPolicyCreated?.();
-            } catch (e: any) {
-              setError(e?.message ?? 'Transaction failed');
-            } finally {
-              setSubmitting(false);
-            }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 'var(--space-sm)',
+          padding: 'var(--space-md)',
+          background: 'var(--color-bg)',
+          borderRadius: 'var(--radius-md)',
+          border: '1px solid var(--color-border)',
+        }}
+      >
+        <Spinner size={20} />
+        <div>
+          <p style={{ margin: 0, fontWeight: 600 }}>{active?.label ?? 'Processing...'}</p>
+          <p
+            style={{
+              margin: 0,
+              fontSize: '0.8125rem',
+              color: 'var(--color-text-muted)',
+            }}
+          >
+            {active?.hint ?? 'Please wait...'}
+          </p>
+        </div>
+      </div>
+      <ol
+        style={{
+          listStyle: 'none',
+          padding: 0,
+          margin: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 'var(--space-sm)',
+        }}
+      >
+        {steps.map((step, idx) => {
+          const isDone = idx < currentIdx;
+          const isActive = idx === currentIdx;
+          const color = isDone
+            ? 'var(--color-primary)'
+            : isActive
+              ? 'var(--color-text)'
+              : 'var(--color-text-muted)';
+          return (
+            <li
+              key={step.key}
+              style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}
+            >
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 22,
+                  height: 22,
+                  borderRadius: '50%',
+                  border: `1px solid ${isDone ? 'var(--color-primary)' : 'var(--color-border)'}`,
+                  background: isDone ? 'var(--color-primary)' : 'transparent',
+                  color: isDone ? 'var(--color-bg)' : color,
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                }}
+              >
+                {isDone ? '✓' : idx + 1}
+              </span>
+              <span style={{ color, fontSize: '0.875rem' }}>{step.label}</span>
+              {isActive && <Spinner size={14} />}
+            </li>
+          );
+        })}
+      </ol>
+      <p
+        style={{
+          fontSize: '0.75rem',
+          color: 'var(--color-text-muted)',
+          margin: 0,
+          textAlign: 'center',
+        }}
+      >
+        Do not close this window until the transaction is confirmed.
+      </p>
+    </div>
+  );
+}
+
+/** Full-modal view shown after a successful policy creation. */
+function TxResultSuccess({
+  txSig,
+  coverageAmount,
+  onDone,
+}: {
+  txSig: string | null;
+  coverageAmount: number;
+  onDone: () => void;
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 'var(--space-sm)',
+          padding: 'var(--space-lg) var(--space-md)',
+          background: 'var(--color-bg)',
+          border: '1px solid var(--color-primary)',
+          borderRadius: 'var(--radius-md)',
+          textAlign: 'center',
+        }}
+      >
+        <div
+          style={{
+            width: 48,
+            height: 48,
+            borderRadius: '50%',
+            background: 'var(--color-primary)',
+            color: 'var(--color-bg)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '1.5rem',
+            fontWeight: 700,
           }}
         >
-          {submitting ? 'Sending...' : 'Buy Policy'}
-        </Button>
+          ✓
+        </div>
+        <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 700 }}>Policy created</h3>
+        <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>
+          Your coverage of ${formatUsdc(coverageAmount)} USDC is now active.
+        </p>
       </div>
+
+      {txSig && (
+        <div
+          style={{
+            padding: 'var(--space-md)',
+            background: 'var(--color-bg)',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--color-border)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
+          }}
+        >
+          <p
+            style={{
+              margin: 0,
+              fontSize: '0.75rem',
+              color: 'var(--color-text-muted)',
+            }}
+          >
+            Transaction signature
+          </p>
+          <a
+            href={`https://explorer.solana.com/tx/${txSig}?cluster=devnet`}
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.8125rem',
+              wordBreak: 'break-all',
+              color: 'var(--color-primary)',
+            }}
+          >
+            {txSig}
+          </a>
+        </div>
+      )}
+
+      <Button onClick={onDone} style={{ width: '100%' }}>
+        View my policies
+      </Button>
     </div>
   );
 }
