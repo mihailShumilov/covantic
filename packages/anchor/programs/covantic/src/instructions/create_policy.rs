@@ -4,19 +4,23 @@ use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 use crate::constants::*;
 use crate::errors::CovanticError;
 use crate::events::PolicyCreated;
-use crate::state::{InsurancePolicy, InsuranceVault, ProtocolConfig};
+use crate::state::{InsurancePolicy, InsuranceVault, ProtocolConfig, RiskAttestation};
 
 /// Create a new insurance policy.
-/// Holder pays premium in USDC which is transferred to the vault.
+///
+/// The risk tier is **not** a caller-supplied argument — it's read from the
+/// oracle-signed `RiskAttestation` PDA for the target agent. This closes the
+/// adverse-selection hole where buyers could pick LOW for a known-HIGH agent.
+/// The holder pays premium in USDC which is transferred to the vault.
 pub fn create_policy_handler(
     ctx: Context<CreatePolicy>,
     coverage_amount: u64,
     duration_seconds: i64,
-    risk_tier: u8,
     agent_address: Pubkey,
 ) -> Result<()> {
     let config = &mut ctx.accounts.config;
     let vault = &mut ctx.accounts.vault;
+    let attestation = &ctx.accounts.attestation;
 
     // Validate protocol is not paused
     require!(!config.paused, CovanticError::ProtocolPaused);
@@ -41,7 +45,21 @@ pub fn create_policy_handler(
         CovanticError::DurationTooLong
     );
 
-    // Validate risk tier
+    // Enforce attestation freshness. The PDA seeds already bind the
+    // attestation to `agent_address`, but we still assert the stored field
+    // matches as defense-in-depth against future seed changes.
+    let now = Clock::get()?.unix_timestamp;
+    require!(
+        attestation.agent == agent_address,
+        CovanticError::AttestationAgentMismatch
+    );
+    require!(
+        now <= attestation.expires_at,
+        CovanticError::AttestationExpired
+    );
+
+    // Tier comes from the oracle. No caller input, no self-selection.
+    let risk_tier = attestation.tier;
     require!(
         risk_tier <= RISK_TIER_HIGH,
         CovanticError::InvalidRiskTier
@@ -138,8 +156,6 @@ pub fn create_policy_handler(
     vault.recalculate_solvency();
 
     // Create policy
-    let clock = Clock::get()?;
-    let now = clock.unix_timestamp;
     let policy_id = config.policy_counter;
     config.policy_counter = config
         .policy_counter
@@ -180,7 +196,7 @@ pub fn create_policy_handler(
 }
 
 #[derive(Accounts)]
-#[instruction(coverage_amount: u64, duration_seconds: i64, risk_tier: u8, agent_address: Pubkey)]
+#[instruction(coverage_amount: u64, duration_seconds: i64, agent_address: Pubkey)]
 pub struct CreatePolicy<'info> {
     /// Policy holder (signer and payer)
     #[account(mut)]
@@ -201,6 +217,14 @@ pub struct CreatePolicy<'info> {
         bump = vault.bump,
     )]
     pub vault: Account<'info, InsuranceVault>,
+
+    /// Oracle-signed risk attestation — tier comes from this account, not
+    /// from caller input. PDA seeds bind it to `agent_address`.
+    #[account(
+        seeds = [ATTESTATION_SEED, agent_address.as_ref()],
+        bump = attestation.bump,
+    )]
+    pub attestation: Account<'info, RiskAttestation>,
 
     /// New policy PDA
     #[account(

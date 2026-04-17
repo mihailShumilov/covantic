@@ -12,6 +12,7 @@ import { registerErrorHandler } from './middleware/error-handler.js';
 import { registerRateLimit } from './middleware/rate-limit.js';
 import { createSolanaConnection } from './config/solana.js';
 import { NotificationService } from './services/notification-service.js';
+import { AttestationPublisher } from './services/attestation-publisher.js';
 import { logger } from './utils/logger.js';
 import './types/index.js';
 
@@ -60,6 +61,7 @@ async function bootstrap() {
   app.decorate('redis', redis);
   app.decorate('config', config);
   app.decorate('solanaConnection', solanaConnection);
+  app.decorate('attestationPublisher', new AttestationPublisher(config));
 
   // 7. Error handling + rate limiting
   registerErrorHandler(app);

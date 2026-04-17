@@ -18,7 +18,15 @@ export const PDA_SEEDS = {
   STAKER: 'covantic_staker',
   CONFIG: 'covantic_config',
   VAULT_TOKEN: 'covantic_vault_token',
+  /** One attestation PDA per agent address. See program state/risk_attestation.rs. */
+  ATTESTATION: 'covantic_attestation',
 } as const;
+
+/**
+ * Maximum validity window for a risk attestation (seconds). Keep in sync
+ * with `MAX_ATTESTATION_VALIDITY` in the Anchor program.
+ */
+export const ATTESTATION_MAX_VALIDITY_SECONDS = 3600;
 
 /** Coverage limits in USDC lamports */
 export const COVERAGE = {

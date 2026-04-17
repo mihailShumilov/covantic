@@ -23,15 +23,27 @@ pub mod covantic {
     }
 
     /// Create an insurance policy.
-    /// Holder pays premium, receives a Policy PDA.
+    /// Holder pays premium, receives a Policy PDA. The risk tier comes from
+    /// the oracle-signed RiskAttestation PDA for the agent — buyers cannot
+    /// self-select a tier.
     pub fn create_policy(
         ctx: Context<CreatePolicy>,
         coverage_amount: u64,
         duration_seconds: i64,
-        risk_tier: u8,
         agent_address: Pubkey,
     ) -> Result<()> {
-        create_policy_handler(ctx, coverage_amount, duration_seconds, risk_tier, agent_address)
+        create_policy_handler(ctx, coverage_amount, duration_seconds, agent_address)
+    }
+
+    /// Publish (or refresh) a risk attestation for an agent. Only the oracle
+    /// authority may sign. `create_policy` requires a live attestation.
+    pub fn upsert_attestation(
+        ctx: Context<UpsertAttestation>,
+        agent: Pubkey,
+        tier: u8,
+        valid_for_seconds: i64,
+    ) -> Result<()> {
+        upsert_attestation_handler(ctx, agent, tier, valid_for_seconds)
     }
 
     /// Cancel a policy with partial refund.

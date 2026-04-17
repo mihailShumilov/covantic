@@ -8,6 +8,7 @@ pub mod stake;
 pub mod submit_claim;
 pub mod unstake;
 pub mod update_config;
+pub mod upsert_attestation;
 pub mod verify_and_payout;
 
 pub use cancel_policy::*;
@@ -20,4 +21,5 @@ pub use stake::*;
 pub use submit_claim::*;
 pub use unstake::*;
 pub use update_config::*;
+pub use upsert_attestation::*;
 pub use verify_and_payout::*;

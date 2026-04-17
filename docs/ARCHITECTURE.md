@@ -60,7 +60,7 @@ Agent → Risk Score API → Buy Policy (on-chain) → Monitor Agent TXs
 
 ## Security Model
 
-- **Oracle Authority**: Single designated keypair for claim verification
+- **Oracle Authority**: Single designated keypair for claim verification and risk-tier attestation. `create_policy` reads the tier from an oracle-signed `RiskAttestation` PDA, so buyers cannot self-select a cheaper tier.
 - **Admin Authority**: Protocol parameter management
 - **PDA-based**: All state accounts use deterministic PDAs
 - **Solvency Guards**: Automatic policy restrictions at low solvency levels

@@ -25,19 +25,36 @@ describe('Covantic E2E', () => {
     expect(data.score).toBeGreaterThanOrEqual(0);
   });
 
-  itE2E('returns a premium quote', async () => {
+  itE2E('returns a premium quote (tier derived from fresh assessment)', async () => {
+    // Quote now requires a recent assessment — prime the cache first.
+    const assessRes = await fetch(`${API_URL}/api/risk/${DEMO_AGENT}`);
+    expect(assessRes.status).toBe(200);
+    const assessment = await assessRes.json();
+
     const res = await fetch(`${API_URL}/api/policies/quote`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         coverageAmount: 100_000_000,
         durationSeconds: 86400,
-        riskTier: 0,
+        agentAddress: DEMO_AGENT,
       }),
     });
+
+    if (assessment.tier === 3) {
+      // EXTREME agent — quote endpoint must refuse.
+      expect(res.status).toBe(400);
+      const data = await res.json();
+      expect(data.code).toBe('AGENT_UNINSURABLE');
+      return;
+    }
+
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.premiumAmount).toBeGreaterThan(0);
+    expect(data.riskTier).toBe(assessment.tier);
+    expect(typeof data.validUntil).toBe('string');
+    expect(typeof data.assessmentId).toBe('string');
   });
 
   itE2E('lists claims', async () => {

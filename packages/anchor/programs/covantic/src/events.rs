@@ -77,3 +77,12 @@ pub struct RewardsClaimed {
     pub staker: Pubkey,
     pub amount: u64,
 }
+
+/// Event: oracle published (or refreshed) a risk attestation for an agent.
+#[event]
+pub struct AttestationUpserted {
+    pub agent: Pubkey,
+    pub tier: u8,
+    pub issued_at: i64,
+    pub expires_at: i64,
+}

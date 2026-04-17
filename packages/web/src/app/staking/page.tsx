@@ -26,6 +26,7 @@ import {
   deriveVaultPda,
   deriveStakerPda,
 } from '@/hooks/useCovanticProgram';
+import { useWsChannel } from '@/hooks/useWsChannel';
 import { apiGet } from '@/lib/api-client';
 
 const solvencyColors: Record<SolvencyStatus, string> = {
@@ -74,6 +75,14 @@ export default function StakingPage() {
   useEffect(() => {
     refreshPosition();
   }, [refreshPosition]);
+
+  // Rewards accrue when reward_per_stake_acc advances, which happens on the
+  // same premium/payout events that trigger a vault:stats broadcast. Refetch
+  // the staker position whenever a new vault snapshot arrives so pending
+  // rewards stay live without polling.
+  useWsChannel<unknown>('vault:stats', () => {
+    refreshPosition();
+  });
 
   async function withBusy<T>(label: string, fn: () => Promise<T>): Promise<void> {
     setError(null);

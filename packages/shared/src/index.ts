@@ -1,5 +1,5 @@
 // Types
-export type { Policy, CreatePolicyParams, PremiumQuote } from './types/policy.js';
+export type { Policy, CreatePolicyParams, PremiumQuote, QuoteErrorCode } from './types/policy.js';
 export { PolicyState, RiskTier, TriggerType } from './types/policy.js';
 
 export type { VaultStats, VaultSnapshot } from './types/vault.js';
@@ -49,6 +49,7 @@ export {
   usdcToLamports,
   lamportsToUsdc,
   PDA_SEEDS,
+  ATTESTATION_MAX_VALIDITY_SECONDS,
   COVERAGE,
   DURATION,
   PREMIUM_BPS,

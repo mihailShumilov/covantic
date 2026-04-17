@@ -270,7 +270,9 @@
       "name": "create_policy",
       "docs": [
         "Create an insurance policy.",
-        "Holder pays premium, receives a Policy PDA."
+        "Holder pays premium, receives a Policy PDA. The risk tier comes from",
+        "the oracle-signed RiskAttestation PDA for the agent — buyers cannot",
+        "self-select a tier."
       ],
       "discriminator": [
         27,
@@ -353,6 +355,46 @@
           }
         },
         {
+          "name": "attestation",
+          "docs": [
+            "Oracle-signed risk attestation — tier comes from this account, not",
+            "from caller input. PDA seeds bind it to `agent_address`."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  97,
+                  116,
+                  116,
+                  101,
+                  115,
+                  116,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "agent_address"
+              }
+            ]
+          }
+        },
+        {
           "name": "policy",
           "docs": [
             "New policy PDA"
@@ -423,10 +465,6 @@
         {
           "name": "duration_seconds",
           "type": "i64"
-        },
-        {
-          "name": "risk_tier",
-          "type": "u8"
         },
         {
           "name": "agent_address",
@@ -1325,6 +1363,121 @@
       ]
     },
     {
+      "name": "upsert_attestation",
+      "docs": [
+        "Publish (or refresh) a risk attestation for an agent. Only the oracle",
+        "authority may sign. `create_policy` requires a live attestation."
+      ],
+      "discriminator": [
+        45,
+        5,
+        153,
+        3,
+        222,
+        1,
+        221,
+        81
+      ],
+      "accounts": [
+        {
+          "name": "oracle",
+          "docs": [
+            "Oracle authority (signer + rent payer on first write)."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "docs": [
+            "Protocol config — used to authorize the oracle signer."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "attestation",
+          "docs": [
+            "Risk attestation PDA — created on first publish, overwritten after."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  97,
+                  116,
+                  116,
+                  101,
+                  115,
+                  116,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "agent"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "agent",
+          "type": "pubkey"
+        },
+        {
+          "name": "tier",
+          "type": "u8"
+        },
+        {
+          "name": "valid_for_seconds",
+          "type": "i64"
+        }
+      ]
+    },
+    {
       "name": "verify_and_payout",
       "docs": [
         "Verify a claim and execute payout (oracle only)."
@@ -1517,6 +1670,19 @@
       ]
     },
     {
+      "name": "RiskAttestation",
+      "discriminator": [
+        111,
+        39,
+        223,
+        244,
+        0,
+        0,
+        96,
+        114
+      ]
+    },
+    {
       "name": "StakerPosition",
       "discriminator": [
         202,
@@ -1531,6 +1697,19 @@
     }
   ],
   "events": [
+    {
+      "name": "AttestationUpserted",
+      "discriminator": [
+        104,
+        52,
+        15,
+        209,
+        99,
+        107,
+        153,
+        93
+      ]
+    },
     {
       "name": "ClaimPaid",
       "discriminator": [
@@ -1792,11 +1971,53 @@
     },
     {
       "code": 6028,
+      "name": "AttestationExpired",
+      "msg": "Risk attestation has expired — re-assess the agent"
+    },
+    {
+      "code": 6029,
+      "name": "AttestationAgentMismatch",
+      "msg": "Risk attestation agent does not match the policy's agent address"
+    },
+    {
+      "code": 6030,
+      "name": "InvalidAttestationValidity",
+      "msg": "Invalid attestation validity window (must be > 0 and <= 1 hour)"
+    },
+    {
+      "code": 6031,
       "name": "MathOverflow",
       "msg": "Arithmetic overflow"
     }
   ],
   "types": [
+    {
+      "name": "AttestationUpserted",
+      "docs": [
+        "Event: oracle published (or refreshed) a risk attestation for an agent."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "agent",
+            "type": "pubkey"
+          },
+          {
+            "name": "tier",
+            "type": "u8"
+          },
+          {
+            "name": "issued_at",
+            "type": "i64"
+          },
+          {
+            "name": "expires_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
     {
       "name": "ClaimPaid",
       "docs": [
@@ -2248,6 +2469,63 @@
           {
             "name": "amount",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RiskAttestation",
+      "docs": [
+        "Oracle-signed attestation of a risk tier for a specific agent.",
+        "",
+        "The backend's risk engine produces a score and tier, then the oracle",
+        "authority signs an `UpsertAttestation` transaction that writes this",
+        "account. Policy creation (`create_policy`) refuses to run without a",
+        "live attestation, which prevents buyers from self-selecting a cheaper",
+        "tier than their agent's on-chain behavior earns.",
+        "",
+        "PDA: `[ATTESTATION_SEED, agent.as_ref()]`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "agent",
+            "docs": [
+              "Agent address this attestation covers. Must match `create_policy.agent_address`."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "tier",
+            "docs": [
+              "Risk tier (0=LOW, 1=MEDIUM, 2=HIGH). EXTREME agents never receive an",
+              "attestation — the oracle refuses to sign for them, so `create_policy`",
+              "has no path to approve coverage."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "issued_at",
+            "docs": [
+              "Unix timestamp when this attestation was minted."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "expires_at",
+            "docs": [
+              "Unix timestamp after which this attestation is considered stale.",
+              "`create_policy` rejects anything past this point."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump"
+            ],
+            "type": "u8"
           }
         ]
       }

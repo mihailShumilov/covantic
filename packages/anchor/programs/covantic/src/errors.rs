@@ -93,6 +93,16 @@ pub enum CovanticError {
     #[msg("Invalid token account: wrong owner or mint")]
     InvalidTokenAccount,
 
+    // -- Attestation Errors --
+    #[msg("Risk attestation has expired — re-assess the agent")]
+    AttestationExpired,
+
+    #[msg("Risk attestation agent does not match the policy's agent address")]
+    AttestationAgentMismatch,
+
+    #[msg("Invalid attestation validity window (must be > 0 and <= 1 hour)")]
+    InvalidAttestationValidity,
+
     // -- Math Errors --
     #[msg("Arithmetic overflow")]
     MathOverflow,

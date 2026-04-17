@@ -13,6 +13,14 @@ pub const CONFIG_SEED: &[u8] = b"covantic_config";
 /// Seed for vault token account PDA
 pub const VAULT_TOKEN_SEED: &[u8] = b"covantic_vault_token";
 
+/// Seed for RiskAttestation PDA — one per agent address.
+pub const ATTESTATION_SEED: &[u8] = b"covantic_attestation";
+
+/// Maximum validity window for a risk attestation (1 hour). The oracle may
+/// refresh more often; this is the upper bound so a compromised oracle key
+/// cannot mint long-lived attestations that survive a rotation.
+pub const MAX_ATTESTATION_VALIDITY: i64 = 3600;
+
 /// Maximum coverage amount in USDC (6 decimals): 1,000,000 USDC
 pub const MAX_COVERAGE_AMOUNT: u64 = 1_000_000_000_000;
 
