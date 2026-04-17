@@ -43,6 +43,7 @@ export const CONFIG_SEED = Buffer.from(PDA_SEEDS.CONFIG);
 export const VAULT_SEED = Buffer.from(PDA_SEEDS.VAULT);
 export const POLICY_SEED = Buffer.from(PDA_SEEDS.POLICY);
 export const STAKER_SEED = Buffer.from(PDA_SEEDS.STAKER);
+export const ATTESTATION_SEED = Buffer.from(PDA_SEEDS.ATTESTATION);
 
 export function useCovanticProgram() {
   const { connection } = useConnection();
@@ -79,6 +80,13 @@ export function deriveStakerPda(staker: PublicKey): PublicKey {
 export function derivePolicyPda(holder: PublicKey, policyId: bigint): PublicKey {
   return PublicKey.findProgramAddressSync(
     [POLICY_SEED, holder.toBuffer(), Buffer.from(policyIdToBytes(policyId))],
+    getProgramId(),
+  )[0];
+}
+
+export function deriveAttestationPda(agent: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [ATTESTATION_SEED, agent.toBuffer()],
     getProgramId(),
   )[0];
 }

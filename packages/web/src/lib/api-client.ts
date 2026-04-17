@@ -1,5 +1,25 @@
 import { API_URL } from './constants';
 
+/**
+ * Thrown by apiFetch when the server responds with a non-2xx status. Carries
+ * the parsed JSON body so callers can branch on the server-issued `code`
+ * (e.g. ASSESSMENT_STALE) without parsing the error message.
+ */
+export class ApiError extends Error {
+  status: number;
+  code?: string;
+  body: Record<string, unknown>;
+  constructor(status: number, body: Record<string, unknown>) {
+    const message =
+      typeof body.error === 'string' ? body.error : `API error: ${status}`;
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.code = typeof body.code === 'string' ? body.code : undefined;
+    this.body = body;
+  }
+}
+
 /** Typed API fetch wrapper */
 export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
@@ -9,7 +29,7 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(body.error ?? `API error: ${res.status}`);
+    throw new ApiError(res.status, body);
   }
 
   return res.json();
