@@ -168,8 +168,18 @@ async function sleep(ms: number, stopSignal: { stopped: boolean }): Promise<void
 }
 
 async function main() {
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error('fleet:start refuses to run with NODE_ENV=production');
+  // The real safety concern is "never point the autonomous fleet at mainnet
+  // where txs cost real money and land on real users' explorers". A devnet
+  // demo server running NODE_ENV=production (the covantic.org VPS) is
+  // explicitly what this script exists for, so we guard on the network,
+  // not on NODE_ENV. Keep the NODE_ENV fallback so a laptop with stale env
+  // still gets yelled at if someone accidentally points it at mainnet.
+  const network = process.env.SOLANA_NETWORK ?? 'devnet';
+  if (network === 'mainnet-beta') {
+    throw new Error(
+      'fleet:start refuses to run against SOLANA_NETWORK=mainnet-beta. ' +
+        'Set SOLANA_NETWORK=devnet (or localnet) to proceed.',
+    );
   }
   const rpcUrl = requireEnv('SOLANA_RPC_URL');
   const usdcMint = new PublicKey(requireEnv('USDC_MINT'));

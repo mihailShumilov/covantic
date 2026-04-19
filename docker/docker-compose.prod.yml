@@ -102,6 +102,36 @@ services:
     networks:
       - internal
 
+  # Autonomous agent fleet runner. Reuses the api image (same source tree
+  # is needed — scripts/fleet-start.ts + services/fleet/* + tsx) but
+  # overrides the command. Read-only mount on ./keys so the container can
+  # sign as the holder + per-agent keypairs. Guarded against mainnet-beta
+  # inside the script, not via NODE_ENV.
+  fleet:
+    image: covantic-api:latest
+    container_name: covantic-fleet
+    command:
+      ["pnpm", "--filter", "api", "exec", "tsx", "scripts/fleet-start.ts"]
+    environment:
+      NODE_ENV: production
+      SOLANA_NETWORK: ${SOLANA_NETWORK:-devnet}
+      SOLANA_RPC_URL: ${SOLANA_RPC_URL}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      USDC_MINT: ${USDC_MINT}
+      ORACLE_KEYPAIR_PATH: /app/keys/oracle-keypair.json
+      PROGRAM_ID: ${PROGRAM_ID}
+      LOG_LEVEL: info
+    volumes:
+      - ./keys:/app/keys:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - internal
+
   # Frontend (Next.js)
   web:
     build:
