@@ -14,10 +14,13 @@ import { RiskAssessmentPipeline } from '@/components/risk/RiskAssessmentPipeline
 import { ApiError, apiGet, apiPost } from '@/lib/api-client';
 import Link from 'next/link';
 import {
+  formatDuration,
   formatUsdc,
   PolicyState,
   RiskTier,
+  shortenAddress,
   SOLANA_ADDRESS_REGEX,
+  tierToPremiumBps,
   type Policy,
   type PremiumQuote,
   type StakerPositionResponse,
@@ -28,6 +31,12 @@ import {
   STATE_LABELS,
   STATE_BADGE_VARIANTS,
 } from '@/lib/risk-labels';
+import {
+  CLAIM_STATUS_VARIANTS,
+  TRIGGER_LABELS,
+  explorerAddressUrl,
+  explorerTxUrl,
+} from '@/lib/explorer';
 import {
   useCovanticProgram,
   deriveConfigPda,
@@ -99,10 +108,51 @@ interface AssessmentForBuy {
   assessmentId: string;
 }
 
+/** Shape returned by GET /api/policies/enrichment. */
+interface EnrichmentResponse {
+  agents: Record<
+    string,
+    {
+      walletAddress: string;
+      name: string | null;
+      description: string | null;
+      currentRiskTier: number | null;
+      currentRiskScore: number | null;
+      riskScoredAt: string | null;
+    }
+  >;
+  claims: Record<
+    string,
+    {
+      id: string;
+      status: string;
+      triggerType: number;
+      triggerTxSignature: string;
+      payoutAmount: number | null;
+      submittedAt: string;
+      verifiedAt: string | null;
+      paidAt: string | null;
+      payoutTxSignature: string | null;
+    }
+  >;
+  meta: Record<
+    string,
+    {
+      createTxSignature: string | null;
+      pdaAddress: string;
+      updatedAt: string;
+      indexerLagSec: number;
+    }
+  >;
+}
+
+const EMPTY_ENRICHMENT: EnrichmentResponse = { agents: {}, claims: {}, meta: {} };
+
 export default function DashboardPage() {
   const { publicKey } = useWallet();
   const { program } = useCovanticProgram();
   const [policies, setPolicies] = useState<Policy[]>([]);
+  const [enrichment, setEnrichment] = useState<EnrichmentResponse>(EMPTY_ENRICHMENT);
   const [showBuyModal, setShowBuyModal] = useState(false);
   const [riskResult, setRiskResult] = useState<RiskApiResponse | null>(null);
   const [isAssessing, setIsAssessing] = useState(false);
@@ -147,6 +197,30 @@ export default function DashboardPage() {
   useEffect(() => {
     refreshPolicies();
   }, [refreshPolicies]);
+
+  // Fetch enrichment (agent name/current-risk + claim status + indexer lag)
+  // whenever the on-chain policy list changes. The call is idempotent and
+  // the endpoint tolerates unknown IDs, so we just POST the current set.
+  useEffect(() => {
+    if (policies.length === 0) {
+      setEnrichment(EMPTY_ENRICHMENT);
+      return;
+    }
+    const agentAddresses = Array.from(new Set(policies.map((p) => p.agentAddress))).join(',');
+    const policyIds = policies.map((p) => p.policyId).join(',');
+    const qs = new URLSearchParams({ agents: agentAddresses, policyIds });
+    let cancelled = false;
+    apiGet<EnrichmentResponse>(`/api/policies/enrichment?${qs.toString()}`)
+      .then((data) => {
+        if (!cancelled) setEnrichment(data);
+      })
+      .catch(() => {
+        if (!cancelled) setEnrichment(EMPTY_ENRICHMENT);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [policies]);
 
   const runAssessment = useCallback(async (address: string) => {
     if (!SOLANA_ADDRESS_RE.test(address)) return;
@@ -372,58 +446,13 @@ export default function DashboardPage() {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
             {policies.map((policy) => (
-              <div
+              <PolicyCard
                 key={policy.policyId}
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  padding: 'var(--space-md)',
-                  background: 'var(--color-bg)',
-                  borderRadius: 'var(--radius-md)',
-                  flexWrap: 'wrap',
-                  gap: 'var(--space-sm)',
-                }}
-              >
-                <div>
-                  <div
-                    style={{
-                      display: 'flex',
-                      gap: 'var(--space-sm)',
-                      alignItems: 'center',
-                      marginBottom: 4,
-                    }}
-                  >
-                    <span style={{ fontWeight: 600 }}>Policy #{policy.policyId}</span>
-                    <Badge variant={STATE_BADGE_VARIANTS[policy.state]}>
-                      {STATE_LABELS[policy.state]}
-                    </Badge>
-                    <Badge variant={TIER_BADGE_VARIANTS[policy.riskTier]}>
-                      {TIER_LABELS[policy.riskTier]}
-                    </Badge>
-                  </div>
-                  <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
-                    Coverage: ${formatUsdc(policy.coverageAmount)} &middot; Premium: $
-                    {formatUsdc(policy.premiumPaid)}
-                  </p>
-                  {policy.payoutAmount > 0 && (
-                    <p
-                      style={{
-                        fontSize: '0.8125rem',
-                        color: 'var(--color-primary)',
-                        marginTop: 4,
-                      }}
-                    >
-                      Paid out: ${formatUsdc(policy.payoutAmount)} USDC
-                    </p>
-                  )}
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
-                    Expires: {new Date(policy.expiryTime).toLocaleDateString()}
-                  </p>
-                </div>
-              </div>
+                policy={policy}
+                agentContext={enrichment.agents[policy.agentAddress] ?? null}
+                claim={enrichment.claims[String(policy.policyId)] ?? null}
+                meta={enrichment.meta[String(policy.policyId)] ?? null}
+              />
             ))}
           </div>
         )}
@@ -449,6 +478,338 @@ export default function DashboardPage() {
           />
         )}
       </Modal>
+    </div>
+  );
+}
+
+/**
+ * Policy card — on-chain policy fields + enrichment sidecar.
+ *
+ * The on-chain payload alone doesn't tell the user which agent a policy
+ * covers or whether a claim is in-flight. This card layers the enrichment
+ * response on top (agent identity, current-risk drift, claim status,
+ * explorer links) so the holder can actually read their own coverage.
+ */
+function PolicyCard({
+  policy,
+  agentContext,
+  claim,
+  meta,
+}: {
+  policy: Policy;
+  agentContext: EnrichmentResponse['agents'][string] | null;
+  claim: EnrichmentResponse['claims'][string] | null;
+  meta: EnrichmentResponse['meta'][string] | null;
+}) {
+  const now = Date.now();
+  const expiryMs = new Date(policy.expiryTime).getTime();
+  const startMs = new Date(policy.startTime).getTime();
+  const remainingSec = Math.max(0, Math.floor((expiryMs - now) / 1000));
+  const elapsedSec = Math.max(0, Math.floor((now - startMs) / 1000));
+  const durationSec = Math.max(1, Math.floor((expiryMs - startMs) / 1000));
+  const progress = Math.min(100, Math.round((elapsedSec / durationSec) * 100));
+  const isLive = policy.state === PolicyState.Active && remainingSec > 0;
+  // The cranker should flip state=Active → Expired once expiry_time passes,
+  // but if it's lagging we don't want to mislead the holder with a stale
+  // "Active" badge. Treat the coverage window as the source of truth here.
+  const crankerLagging = policy.state === PolicyState.Active && remainingSec === 0;
+
+  const purchasedTier = policy.riskTier;
+  const currentTier = agentContext?.currentRiskTier ?? null;
+  const tierWorsened = currentTier != null && currentTier > purchasedTier;
+
+  const premiumBps = tierToPremiumBps(purchasedTier as RiskTier);
+  const annualisedPct =
+    premiumBps != null ? `${(premiumBps / 100).toFixed(2)}%/yr` : null;
+
+  const agentExplorer = explorerAddressUrl(policy.agentAddress);
+  const pdaExplorer = explorerAddressUrl(policy.pdaAddress);
+  const createTxExplorer = explorerTxUrl(meta?.createTxSignature);
+  const claimTxExplorer = explorerTxUrl(claim?.triggerTxSignature);
+  const payoutTxExplorer = explorerTxUrl(claim?.payoutTxSignature);
+
+  const copy = (text: string) => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      void navigator.clipboard.writeText(text);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        padding: 'var(--space-md)',
+        background: 'var(--color-bg)',
+        borderRadius: 'var(--radius-md)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 'var(--space-sm)',
+      }}
+    >
+      {/* Header */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: 'var(--space-sm)',
+        }}
+      >
+        <div style={{ display: 'flex', gap: 'var(--space-sm)', alignItems: 'center' }}>
+          <span style={{ fontWeight: 600 }}>Policy #{policy.policyId}</span>
+          {crankerLagging ? (
+            <span title="Coverage window has ended; waiting for the on-chain crank to flip state to Expired.">
+              <Badge variant="neutral">Expired (pending)</Badge>
+            </span>
+          ) : (
+            <Badge variant={STATE_BADGE_VARIANTS[policy.state]}>{STATE_LABELS[policy.state]}</Badge>
+          )}
+          <Badge variant={TIER_BADGE_VARIANTS[purchasedTier]}>
+            Purchased: {TIER_LABELS[purchasedTier]}
+          </Badge>
+          {tierWorsened && currentTier != null && (
+            <Badge variant="warning">
+              Current: {TIER_LABELS[currentTier]} ↑
+            </Badge>
+          )}
+        </div>
+        {isLive && (
+          <span
+            style={{
+              fontSize: '0.75rem',
+              color: 'var(--color-text-muted)',
+              fontFamily: 'var(--font-mono)',
+            }}
+          >
+            {formatDuration(remainingSec)} remaining
+          </span>
+        )}
+      </div>
+
+      {/* Agent */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 'var(--space-sm)',
+          flexWrap: 'wrap',
+        }}
+      >
+        <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Agent:</span>
+        {agentContext?.name && (
+          <span style={{ fontSize: '0.875rem', fontWeight: 500 }}>{agentContext.name}</span>
+        )}
+        <span
+          title={policy.agentAddress}
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: '0.8125rem',
+            color: 'var(--color-text-muted)',
+          }}
+        >
+          {shortenAddress(policy.agentAddress, 6)}
+        </span>
+        <button
+          type="button"
+          onClick={() => copy(policy.agentAddress)}
+          style={{
+            fontSize: '0.75rem',
+            padding: '0 0.5rem',
+            color: 'var(--color-text-muted)',
+            background: 'transparent',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-sm)',
+            cursor: 'pointer',
+          }}
+        >
+          copy
+        </button>
+        {agentExplorer && (
+          <a
+            href={agentExplorer}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ fontSize: '0.75rem', color: 'var(--color-info)' }}
+          >
+            explorer
+          </a>
+        )}
+        {agentContext?.currentRiskScore != null && (
+          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+            · current score {agentContext.currentRiskScore.toFixed(2)}
+          </span>
+        )}
+      </div>
+
+      {/* Info grid */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+          gap: 'var(--space-sm)',
+          fontSize: '0.8125rem',
+        }}
+      >
+        <div>
+          <div style={{ color: 'var(--color-text-muted)' }}>Coverage</div>
+          <div style={{ fontWeight: 600 }}>${formatUsdc(policy.coverageAmount)}</div>
+        </div>
+        <div>
+          <div style={{ color: 'var(--color-text-muted)' }}>Premium paid</div>
+          <div style={{ fontWeight: 600 }}>
+            ${formatUsdc(policy.premiumPaid)}
+            {annualisedPct && (
+              <span
+                style={{
+                  fontWeight: 400,
+                  color: 'var(--color-text-muted)',
+                  marginLeft: 4,
+                }}
+              >
+                ({annualisedPct})
+              </span>
+            )}
+          </div>
+        </div>
+        <div>
+          <div style={{ color: 'var(--color-text-muted)' }}>Starts</div>
+          <div>{new Date(policy.startTime).toLocaleString()}</div>
+        </div>
+        <div>
+          <div style={{ color: 'var(--color-text-muted)' }}>Expires</div>
+          <div>{new Date(policy.expiryTime).toLocaleString()}</div>
+        </div>
+      </div>
+
+      {/* Progress bar while active */}
+      {isLive && (
+        <div
+          style={{
+            height: 4,
+            borderRadius: 2,
+            background: 'var(--color-surface-hover)',
+            overflow: 'hidden',
+          }}
+        >
+          <div
+            style={{
+              width: `${progress}%`,
+              height: '100%',
+              background: 'var(--color-primary)',
+              transition: 'width 0.3s ease',
+            }}
+          />
+        </div>
+      )}
+
+      {/* Risk drift warning */}
+      {tierWorsened && currentTier != null && (
+        <div
+          style={{
+            fontSize: '0.75rem',
+            color: 'var(--color-warning)',
+            background: 'oklch(0.79 0.17 75 / 0.08)',
+            padding: '0.375rem 0.5rem',
+            borderRadius: 'var(--radius-sm)',
+          }}
+        >
+          Agent risk has drifted: was {TIER_LABELS[purchasedTier]} when insured, now{' '}
+          {TIER_LABELS[currentTier]}. Consider re-assessing before extending coverage.
+        </div>
+      )}
+
+      {/* Claim row */}
+      {claim && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--space-sm)',
+            fontSize: '0.8125rem',
+            flexWrap: 'wrap',
+          }}
+        >
+          <Badge variant={CLAIM_STATUS_VARIANTS[claim.status] ?? 'neutral'}>
+            Claim: {claim.status}
+          </Badge>
+          <span style={{ color: 'var(--color-text-muted)' }}>
+            {TRIGGER_LABELS[claim.triggerType] ?? 'Unknown trigger'}
+          </span>
+          {claim.payoutAmount != null && claim.payoutAmount > 0 && (
+            <span style={{ color: 'var(--color-primary)' }}>
+              Paid ${formatUsdc(claim.payoutAmount)}
+            </span>
+          )}
+          {claimTxExplorer && (
+            <a
+              href={claimTxExplorer}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: 'var(--color-info)' }}
+            >
+              trigger tx
+            </a>
+          )}
+          {payoutTxExplorer && (
+            <a
+              href={payoutTxExplorer}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: 'var(--color-info)' }}
+            >
+              payout tx
+            </a>
+          )}
+        </div>
+      )}
+
+      {/* Payout without a mirrored claim row (e.g. on-chain payout not yet indexed) */}
+      {!claim && policy.payoutAmount > 0 && (
+        <p style={{ fontSize: '0.8125rem', color: 'var(--color-primary)' }}>
+          Paid out: ${formatUsdc(policy.payoutAmount)} USDC
+        </p>
+      )}
+
+      {/* Footer: on-chain links */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 'var(--space-sm)',
+          fontSize: '0.75rem',
+          color: 'var(--color-text-muted)',
+          flexWrap: 'wrap',
+          borderTop: '1px solid var(--color-border)',
+          paddingTop: 'var(--space-sm)',
+        }}
+      >
+        <span>PDA: {shortenAddress(policy.pdaAddress, 6)}</span>
+        {pdaExplorer && (
+          <a
+            href={pdaExplorer}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: 'var(--color-info)' }}
+          >
+            account
+          </a>
+        )}
+        {createTxExplorer && (
+          <a
+            href={createTxExplorer}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: 'var(--color-info)' }}
+          >
+            create tx
+          </a>
+        )}
+        {meta && meta.indexerLagSec > 120 && (
+          <span style={{ color: 'var(--color-warning)' }}>
+            indexer lag {meta.indexerLagSec}s
+          </span>
+        )}
+      </div>
     </div>
   );
 }

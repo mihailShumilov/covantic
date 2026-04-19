@@ -11,7 +11,7 @@ import { logger } from '../utils/logger.js';
 export function registerWorkers(db: Database, redis: Redis, config: AppConfig) {
   logger.info('Starting background workers...');
 
-  startExpiryCrank(db, redis);
+  startExpiryCrank(db, redis, config);
   startSolvencyChecker(db, redis, config);
   startAnalyticsAggregator(db, redis);
   startPolicyIndexer(db, redis, config);

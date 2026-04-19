@@ -117,6 +117,12 @@ async function reconcilePolicies(db: Database, ctx: CovanticProgram): Promise<vo
       claimPendingPolicyIds.push(row.policyId);
     }
 
+    // On-chain is authoritative for every field except `createdAt` (first
+    // time we saw this policyId — preserved for analytics). Critically,
+    // `pdaAddress`, `holderAddress`, `agentAddress` must be refreshed on
+    // conflict too: after a program redeploy the PDA changes while the
+    // policy_id can repeat, and a stale PDA poisons /why-active, the
+    // on-chain expiry-crank, and anything else that reads back by PDA.
     await db
       .insert(policies)
       .values({
@@ -126,12 +132,19 @@ async function reconcilePolicies(db: Database, ctx: CovanticProgram): Promise<vo
       .onConflictDoUpdate({
         target: policies.policyId,
         set: {
+          pdaAddress: row.pdaAddress,
+          holderAddress: row.holderAddress,
+          agentAddress: row.agentAddress,
+          coverageAmount: row.coverageAmount,
+          premiumPaid: row.premiumPaid,
+          riskTier: row.riskTier,
+          startTime: row.startTime,
+          expiryTime: row.expiryTime,
           state: row.state,
           triggerType: row.triggerType,
           triggerTxSignature: row.triggerTxSignature,
           claimSubmittedAt: row.claimSubmittedAt,
           payoutAmount: row.payoutAmount,
-          expiryTime: row.expiryTime,
           updatedAt: row.updatedAt,
         },
       });

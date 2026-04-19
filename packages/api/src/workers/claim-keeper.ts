@@ -333,6 +333,7 @@ async function processClaim(
       policy.coverageAmount,
       helius,
       pyth,
+      { usdcMint: config.USDC_MINT },
     );
   }
 

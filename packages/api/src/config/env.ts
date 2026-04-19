@@ -21,9 +21,19 @@ const envSchema = z.object({
 
   HELIUS_API_KEY: z.string().min(10),
   // The /api/monitoring/webhook endpoint rejects all requests that don't
-  // carry a matching HMAC, so the server must refuse to start without this
-  // secret. Require 64+ chars so a 32-byte hex/Base64 secret is enforced.
+  // carry a matching HMAC or a matching static bearer token, so the server
+  // must refuse to start without this secret. Require 64+ chars so a
+  // 32-byte hex/Base64 secret is enforced.
   HELIUS_WEBHOOK_SECRET: z.string().min(64),
+  // Public URL where Helius can deliver webhooks (e.g.
+  // `https://my-tunnel.ngrok.io`). Only required when running
+  // `pnpm webhook:sync` — the API boot flow tolerates it missing so a
+  // dev can start the stack without a tunnel.
+  WEBHOOK_PUBLIC_URL: z
+    .string()
+    .url()
+    .optional()
+    .transform((v) => (v == null || v === '' ? undefined : v)),
   // HMAC secret used to sign messages on the `monitoring:alerts` Redis
   // channel. The claim-keeper refuses to act on an unsigned or mismatched
   // alert, so any internal process publishing to this channel must share

@@ -85,6 +85,13 @@ export function Header() {
             Dashboard
           </Link>
           <Link
+            href="/fleet"
+            onClick={() => setMenuOpen(false)}
+            style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}
+          >
+            Fleet
+          </Link>
+          <Link
             href="/protocol"
             onClick={() => setMenuOpen(false)}
             style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}
@@ -121,6 +128,13 @@ export function Header() {
             style={{ color: 'var(--color-text-secondary)', fontSize: '0.9375rem', padding: 'var(--space-xs) 0' }}
           >
             Dashboard
+          </Link>
+          <Link
+            href="/fleet"
+            onClick={() => setMenuOpen(false)}
+            style={{ color: 'var(--color-text-secondary)', fontSize: '0.9375rem', padding: 'var(--space-xs) 0' }}
+          >
+            Fleet
           </Link>
           <Link
             href="/protocol"

@@ -7,15 +7,32 @@ Cross-package types, constants, and utilities. Imported as `@covantic/shared`.
 ```
 src/
   types/
-    policy.ts   — PolicyState(0-5), RiskTier(0-3), TriggerType(0-4), Policy, PremiumQuote
+    policy.ts   — PolicyState(0-4), RiskTier(0-3), TriggerType(0-4), Policy, PremiumQuote, QuoteErrorCode
     vault.ts    — SolvencyStatus, VaultStats, VaultSnapshot
     risk.ts     — RiskFactors (7 fields), RiskAssessment, Agent
-    claims.ts   — ClaimStatus, VerificationStep, StepStatus, Claim, PipelineStep
+    claims.ts   — ClaimStatus, VerificationStep, StepStatus, Claim, PipelineStep, VerificationData
     events.ts   — WSMessage, WSChannel, MonitoringEventType, MonitoringSeverity
-  constants.ts  — All protocol constants (decimals, limits, BPS, thresholds, seeds)
-  utils.ts      — calculatePremium(), scoreToTier(), solvencyStatus(), formatUsdc()
+  constants.ts  — All protocol constants (decimals, limits, BPS, thresholds, seeds,
+                   PDA_SEEDS incl. ATTESTATION, ATTESTATION_MAX_VALIDITY_SECONDS,
+                   SOLANA_ADDRESS_REGEX, SOLANA_SIGNATURE_REGEX, SYNTHETIC_PAYOUT_RATIO)
+  utils.ts      — calculatePremium(), tierToPremiumBps(), scoreToTier(),
+                   solvencyStatus(), formatUsdc(), formatDuration(),
+                   shortenAddress(), generateDemoTxSignature(), TIER_LABELS, STATE_LABELS
   index.ts      — Re-exports everything
 ```
+
+## Key Enums (must stay in sync with Anchor)
+
+- `PolicyState`: Active=0, ClaimPending=1, ClaimPaid=2, Expired=3, Cancelled=4
+- `RiskTier`: LOW=0, MEDIUM=1, HIGH=2, EXTREME=3
+- `TriggerType`: None=0, Exploit=1, OracleManipulation=2, AgentError=3, GovernanceAttack=4
+- `QuoteErrorCode`: `ASSESSMENT_REQUIRED` | `AGENT_UNINSURABLE` | `ASSESSMENT_STALE` | `ATTESTATION_PUBLISH_FAILED`
+
+## PremiumQuote
+
+The `/api/policies/quote` response shape. Includes `riskTier` (server-derived),
+`premiumAmount`, `assessmentId`, `assessedAt`, `validUntil`, `attestationPda`,
+`attestationExpiresAt`.
 
 ## Rule
 

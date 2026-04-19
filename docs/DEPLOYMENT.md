@@ -59,14 +59,22 @@ nano .env
 **Required `.env` changes:**
 
 ```bash
-# Generate a strong DB password
-openssl rand -base64 32
+# Generate strong secrets
+openssl rand -base64 32     # POSTGRES_PASSWORD
+openssl rand -hex 32        # HELIUS_WEBHOOK_SECRET (≥ 64 chars after hex encoding)
+openssl rand -hex 32        # ALERT_HMAC_SECRET (internal alert bus signing)
+openssl rand -base64 32     # REDIS_PASSWORD
 
 # Update these in .env:
 POSTGRES_PASSWORD=<generated-password>
+REDIS_PASSWORD=<generated-password>
 HELIUS_API_KEY=<your-key>
-HELIUS_WEBHOOK_SECRET=<your-secret>
+HELIUS_WEBHOOK_SECRET=<generated-secret>     # accepted as Authorization: Bearer <secret> from Helius
+ALERT_HMAC_SECRET=<generated-secret>         # signs internal monitoring:alerts channel
 USDC_MINT=<your-devnet-usdc-mint>
+PROGRAM_ID=<devnet-program-id>
+ORACLE_KEYPAIR_PATH=/app/keys/oracle-keypair.json
+WEBHOOK_PUBLIC_URL=https://covantic.org      # points at /api/monitoring/webhook after sync
 NEXT_PUBLIC_API_URL=https://covantic.org
 NEXT_PUBLIC_WS_URL=wss://covantic.org
 ```
@@ -77,6 +85,9 @@ mkdir -p docker/keys
 # From your local machine:
 scp keys/oracle-keypair.json root@SERVER_IP:~/covantic/docker/keys/
 ```
+
+The oracle keypair signs `upsert_attestation`, `oracle_submit_claim`, `verify_and_payout`, and the
+on-chain `expire_policy` crank — it must be funded with SOL on the target network.
 
 ### 3. Build & Start
 
@@ -132,7 +143,20 @@ $COMPOSE exec nginx nginx -s reload
 
 SSL auto-renews via the certbot container (checks every 12h).
 
-### 5. Firewall
+### 5. Register the Helius webhook
+
+Once the domain is live, register the production webhook so Helius starts delivering events:
+
+```bash
+$COMPOSE exec api pnpm --filter api exec tsx scripts/sync-helius-webhook.ts
+```
+
+The script reads every distinct `agent_address` from the `policies` table (state=Active),
+creates or edits the single Helius webhook tied to this deployment, and sets the
+`Authorization: Bearer <HELIUS_WEBHOOK_SECRET>` header the API validates. Re-run whenever
+you add new insured agents — the call is idempotent.
+
+### 6. Firewall
 
 ```bash
 ufw allow 22/tcp
@@ -215,6 +239,11 @@ $COMPOSE ps                   # service status
 | DB migration fail | `$COMPOSE exec postgres psql -U covantic -d covantic` to debug |
 | Container won't start | `$COMPOSE logs <service>` — check for env var issues |
 | Build fails (node-gyp) | Dockerfile.web includes `python3 make g++ linux-headers eudev-dev` — ensure it's up to date |
+| Helius webhook 401 | Token mismatch between Helius and `HELIUS_WEBHOOK_SECRET`. Re-run `sync-helius-webhook.ts` after rotating the secret. |
+| Insured events not firing claims | `curl https://covantic.org/api/monitoring/metrics` — if `monitor.matched:active` stays 0, the webhook or its address list is wrong. Re-run the sync script. |
+| Policies stuck as `Active` past expiry | `curl .../api/policies/<id>/why-active` — `owner-mismatch` = stale DB row, auto-heals on next indexer tick. `rpc-error` = RPC flaky; check oracle wallet SOL balance (expiry-crank signer). |
+| Claim never pays out after trigger | Check `ALERT_HMAC_SECRET` matches across monitor + api + claim-keeper containers; unsigned alerts are dropped silently. |
+| Oracle wallet out of SOL | On-chain crank (expire_policy) and attestation publisher need gas. Top up with `solana airdrop` on devnet or send SOL on mainnet. |
 
 ## Architecture
 

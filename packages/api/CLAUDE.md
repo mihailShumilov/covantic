@@ -11,24 +11,53 @@ src/
     redis.ts            — ioredis connection
     solana.ts           — @solana/web3.js Connection, loadKeypair()
   db/
-    schema.ts           — 5 tables: agents, policies, claims, monitoringEvents, vaultSnapshots
+    schema.ts           — 6 tables: agents, riskAssessments, policies, claims, monitoringEvents, vaultSnapshots
+    custom-constraints.ts — Drizzle migrator extensions (partial unique indexes, etc.)
     migrate.ts          — Drizzle migrator
-    seed.ts             — Demo data (2 agents, vault snapshot, events)
+    seed.ts             — Demo data
   services/
-    risk-scorer.ts      — 7-factor weighted risk model, Helius API integration
-    claim-oracle.ts     — 4 trigger verifiers (exploit, oracle manip, agent error, governance)
+    risk-scorer.ts        — 7-factor weighted risk model, Helius API integration
+    claim-oracle.ts       — Dispatcher over per-trigger verifiers
+    verifiers/            — exploit, oracle-manipulation, agent-error, governance-attack
     transaction-monitor.ts — Helius webhook processing, anomaly detection
+    alert-bus.ts          — HMAC-signed publish/subscribe over Redis `monitoring:alerts`
+    attestation-publisher.ts — Oracle-signed RiskAttestation PDA publisher (lazy-init CPI)
+    helius-webhook.ts     — Helius webhook REST client (used by sync-helius-webhook.ts)
     notification-service.ts — WebSocket + Redis pub/sub
+    fleet/                — manifest / actions / types for the autonomous agent fleet
   routes/
-    health.ts, risk.ts, policies.ts, claims.ts,
-    vault.ts, staking.ts, monitoring.ts, protocol.ts
+    health.ts       — /api/health
+    risk.ts         — /api/risk/:addr, /api/assessments[/:id]
+    policies.ts     — /api/policies[/:id], /policies/quote, /policies/enrichment, /policies/:id/why-active
+    claims.ts       — /api/claims[/:id]
+    vault.ts        — /api/vault/stats, /api/vault/history, /api/protocol/overview
+    staking.ts      — /api/staking/:address
+    monitoring.ts   — /api/monitoring/{events,webhook,metrics}, /api/demo/simulate-exploit
+    fleet.ts        — /api/fleet
   workers/
-    expiry-crank.ts     — Every 60s, expire overdue policies
-    solvency-checker.ts — Every 5min, check vault health
-    analytics-aggregator.ts — Every 1hr, snapshot stats
+    expiry-crank.ts       — Every 60s + on-boot: on-chain expire_policy for stale policies (oracle signer)
+    solvency-checker.ts   — Every 5min: on-chain vault read → solvency status
+    analytics-aggregator.ts — Hourly: vault snapshot
+    policy-indexer.ts     — Every 60s + on-boot: mirrors on-chain InsurancePolicy accounts into Postgres
+    claim-keeper.ts       — Subscribes to monitoring:alerts, drives oracle_submit_claim + verify_and_payout
+    monitor-entry.ts      — Standalone entrypoint for the monitor container (prod)
+  utils/
+    helius.ts             — Helius enhanced-tx client
+    pyth.ts               — Pyth benchmarks client
+    program.ts            — createCovanticProgram (oracle or read-only)
+    policy-reader.ts      — fetchOnChainPolicy (structured {policy, reason, detail})
+    monitor-metrics.ts    — Redis counters for /api/monitoring/metrics
+    logger.ts             — Pino logger
   middleware/
-    error-handler.ts    — Zod + generic error handling
-    rate-limit.ts       — Redis-based, 100 req/min/IP
+    error-handler.ts      — Zod + generic error handling
+    rate-limit.ts         — Redis-based, 100 req/min/IP
+  scripts/
+    init-protocol.ts      — Idempotent protocol init (called from scripts/init-devnet.sh)
+    mint-mock-usdc.ts     — Mint devnet test-USDC (authority = oracle keypair)
+    sync-helius-webhook.ts — Register/update Helius webhook for every insured agent
+    agent-wallet.ts       — create / fund / trigger CLI for throwaway agent keypairs
+    fleet-{bootstrap,start,status}.ts — Autonomous fleet management
+    seed-demo.ts, simulate-exploit.ts, run-demo.ts, demo-common.ts — demo helpers
 ```
 
 ## Key Patterns
@@ -36,18 +65,35 @@ src/
 - Fastify 5 with plugin architecture — each route file exports a plugin
 - Drizzle ORM (not Prisma) — schema-first, no migrations directory needed with `db:push`
 - BullMQ workers with Redis — repeatable jobs
-- Fastify instance decorated with `db`, `redis`, `config` (typed in `types/index.ts`)
+- Fastify instance decorated with `db`, `redis`, `config`, `attestationPublisher` (typed in `types/index.ts`)
 - All routes under `/api/` prefix
-- WebSocket at `/ws` with channel subscriptions (claims:feed, vault:stats, monitoring:alerts)
+- WebSocket at `/ws` with channel subscriptions (`claims:feed`, `vault:stats`, `monitoring:alerts`)
 - Pino logger (Fastify built-in)
+- `createCovanticProgram({ withOracle: true|false })` is the single entry point for any code
+  that needs to read or write the Anchor program — avoid creating ad-hoc providers
+
+## Webhook Auth
+
+`POST /api/monitoring/webhook` accepts either:
+
+- HMAC-SHA256 of the raw body on `x-helius-hmac-signature` (internal callers, tests)
+- Static bearer token `Authorization: Bearer <HELIUS_WEBHOOK_SECRET>` (real Helius)
+
+Anything else is 401. Rotate via `pnpm webhook:sync`.
+
+## Alert Bus
+
+The `monitoring:alerts` Redis channel is signed with `ALERT_HMAC_SECRET` (see
+`services/alert-bus.ts`). The claim-keeper refuses unsigned or mismatched envelopes. Never
+publish directly to the channel — always go through `publishAlert()`.
 
 ## Commands
 
 ```bash
-pnpm --filter api dev       # Dev with watch
-pnpm --filter api build     # Compile TS
-pnpm --filter api run db:push   # Push schema to DB
-pnpm --filter api run db:seed   # Seed demo data
+pnpm --filter api dev             # Dev with watch
+pnpm --filter api build           # Compile TS
+pnpm --filter api run db:push     # Push schema to DB
+pnpm --filter api run db:seed     # Seed demo data
 ```
 
 ## Port: 4099

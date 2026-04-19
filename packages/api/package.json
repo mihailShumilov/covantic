@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "concurrently -k -n api,fleet -c cyan,magenta \"tsx watch src/index.ts\" \"tsx scripts/fleet-start.ts\"",
+    "dev:api-only": "tsx watch src/index.ts",
+    "dev:fleet": "tsx scripts/fleet-start.ts",
     "build": "tsc",
     "start": "node dist/index.js",
     "monitor": "tsx src/workers/monitor-entry.ts",
@@ -23,8 +25,8 @@
     "test:e2e": "COVANTIC_E2E=1 vitest run tests/e2e.test.ts"
   },
   "dependencies": {
-    "@covantic/shared": "workspace:*",
     "@coral-xyz/anchor": "^0.30.1",
+    "@covantic/shared": "workspace:*",
     "@fastify/cors": "^10.0.0",
     "@fastify/websocket": "^11.0.0",
     "@solana/spl-token": "^0.4.0",
@@ -42,6 +44,7 @@
   "devDependencies": {
     "@types/pg": "^8.11.0",
     "@types/ws": "^8.18.1",
+    "concurrently": "^9.2.1",
     "drizzle-kit": "^0.28.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",

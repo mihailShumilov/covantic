@@ -31,14 +31,19 @@ packages/
 ## Commands
 
 ```bash
-pnpm dev              # Start all (docker + api:4099 + web:3099)
-pnpm build            # Build all packages
-pnpm test             # Run all tests
-pnpm test:anchor      # Anchor tests only
-pnpm docker:up/down   # Manage Docker services
-pnpm db:seed          # Seed database
-pnpm setup            # Full local setup (scripts/setup-local.sh)
-pnpm deploy:devnet    # Deploy anchor program
+pnpm dev                 # Start all (docker + api:4099 + web:3099 + workers)
+pnpm build               # Build all packages
+pnpm test                # Run all tests
+pnpm test:anchor         # Anchor tests only
+pnpm docker:up/down      # Manage Docker services
+pnpm db:seed             # Seed database
+pnpm setup               # Full local setup (scripts/setup-local.sh)
+pnpm init:devnet         # Build + deploy + initialize the Anchor program on devnet
+pnpm deploy:devnet       # Deploy anchor program only (no init)
+pnpm fund:phantom <wallet> [amount]   # Mint devnet test-USDC
+pnpm webhook:sync        # Register/refresh the Helius webhook for all insured agents
+pnpm agent:create|fund|trigger        # Throwaway agent keypair CLI (real on-chain activity)
+pnpm fleet:bootstrap|start|status     # Autonomous fleet of policy-covered agents
 ```
 
 Filter to single package: `pnpm --filter api dev`, `pnpm --filter web dev`
@@ -66,10 +71,30 @@ Filter to single package: `pnpm --filter api dev`, `pnpm --filter web dev`
 
 - Coverage: 1–1,000,000 USDC (6 decimals)
 - Duration: 1 hour–30 days
+- Policy states: Active(0), ClaimPending(1), ClaimPaid(2), Expired(3), Cancelled(4)
 - Risk tiers: LOW(0), MEDIUM(1), HIGH(2), EXTREME(3) → 100/250/500 bps annual
 - Solvency thresholds: Emergency<50%, Critical 50-100%, Caution 100-200%, Healthy≥200%
 - Trigger types: Exploit(1), OracleManipulation(2), AgentError(3), GovernanceAttack(4)
+- Lock periods: exploit=0s, oracle_manipulation=1h, agent_error=6h, governance_attack=2h
 - Unstake cooldown: 48 hours
+- Attestation max validity: 3600 s (`ATTESTATION_MAX_VALIDITY_SECONDS`)
+- Quote max assessment age: 600 s (stale → `ASSESSMENT_STALE`)
+
+## Key Architectural Invariants
+
+- `create_policy` does NOT accept a client-supplied tier. The tier comes from the
+  oracle-signed `RiskAttestation` PDA, which `/api/policies/quote` publishes or refreshes
+  before returning the quote.
+- The `expiry-crank` worker is **on-chain**: it sends `expire_policy` to the program; the
+  `policy-indexer` reconciles the resulting state change on its next tick. Never write
+  `state` to the DB directly — the indexer owns it.
+- The `policy-indexer`'s `onConflictDoUpdate` overwrites every on-chain-authoritative field
+  (`pdaAddress`, `holder`, `agent`, amounts, times, state) — this is what makes post-
+  redeploy self-healing work.
+- `/api/monitoring/webhook` accepts HMAC-of-body OR `Authorization: Bearer <secret>`; real
+  Helius deliveries use the bearer path since Helius does not HMAC-sign payloads.
+- The internal `monitoring:alerts` Redis channel is signed with `ALERT_HMAC_SECRET`. The
+  claim-keeper rejects unsigned alerts.
 
 ## Git
 

@@ -1,11 +1,16 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq, lt, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { SOLANA_ADDRESS_REGEX, generateDemoTxSignature } from '@covantic/shared';
-import { monitoringEvents } from '../db/schema.js';
+import {
+  PolicyState,
+  SOLANA_ADDRESS_REGEX,
+  generateDemoTxSignature,
+} from '@covantic/shared';
+import { monitoringEvents, policies } from '../db/schema.js';
 import { TransactionMonitor } from '../services/transaction-monitor.js';
 import { publishAlert } from '../services/alert-bus.js';
+import { readMonitorMetrics } from '../utils/monitor-metrics.js';
 
 /** Stripped-down shape we require from the Helius enhanced-transaction
  *  payload. Everything else is ignored, including fields we'd otherwise
@@ -33,11 +38,11 @@ const webhookPayloadSchema = z.union([
 ]);
 
 /**
- * Validate a Helius webhook signature as HMAC-SHA256 of the raw body.
- * Only HMAC is accepted: the "raw secret as Bearer token" fallback has
- * been removed as it bypassed the body binding.
+ * Validate an HMAC-SHA256-of-body webhook signature. This is the ideal
+ * (body-bound) auth path, used by internal callers and tests that can
+ * compute the signature themselves.
  */
-function webhookSignatureMatches(
+function hmacSignatureMatches(
   signatureHeader: string | undefined,
   rawBody: string | Buffer,
   secret: string,
@@ -45,6 +50,30 @@ function webhookSignatureMatches(
   if (!signatureHeader) return false;
   const expected = createHmac('sha256', secret).update(rawBody).digest('hex');
   const providedBuf = Buffer.from(signatureHeader);
+  const expectedBuf = Buffer.from(expected);
+  if (providedBuf.length !== expectedBuf.length) return false;
+  return timingSafeEqual(providedBuf, expectedBuf);
+}
+
+/**
+ * Validate a static bearer token in the `Authorization` header.
+ *
+ * Helius webhooks (as of 2026-04) do not HMAC-sign payloads — the
+ * `authHeader` configured on the webhook is sent verbatim as the
+ * Authorization header on every delivery. That means our only practical
+ * path to authenticate real Helius deliveries is a shared static secret.
+ *
+ * Tradeoff vs HMAC: a static token leaks → attacker can replay arbitrary
+ * bodies. Mitigations: secret is 64+ chars, TLS-only ingress, secret
+ * rotatable by re-running sync-helius-webhook.
+ */
+function staticTokenMatches(
+  authHeader: string | undefined,
+  secret: string,
+): boolean {
+  if (!authHeader) return false;
+  const expected = `Bearer ${secret}`;
+  const providedBuf = Buffer.from(authHeader);
   const expectedBuf = Buffer.from(expected);
   if (providedBuf.length !== expectedBuf.length) return false;
   return timingSafeEqual(providedBuf, expectedBuf);
@@ -77,14 +106,20 @@ export async function monitoringRoutes(app: FastifyInstance) {
   /** POST /api/monitoring/webhook — Helius webhook endpoint */
   app.post('/api/monitoring/webhook', async (request, reply) => {
     const secret = app.config.HELIUS_WEBHOOK_SECRET;
-    const header = request.headers['x-helius-hmac-signature'] as string | undefined;
+    const hmacHeader = request.headers['x-helius-hmac-signature'] as string | undefined;
+    const authHeader = request.headers['authorization'] as string | undefined;
 
     const rawBody =
       typeof request.body === 'string'
         ? request.body
         : JSON.stringify(request.body);
 
-    if (!webhookSignatureMatches(header, rawBody, secret)) {
+    // Accept either: HMAC-of-body (preferred, used by internal callers +
+    // tests) OR static bearer token (what real Helius actually sends).
+    const authorized =
+      hmacSignatureMatches(hmacHeader, rawBody, secret) ||
+      staticTokenMatches(authHeader, secret);
+    if (!authorized) {
       return reply.status(401).send({ error: 'Unauthorized' });
     }
 
@@ -96,6 +131,47 @@ export async function monitoringRoutes(app: FastifyInstance) {
     await monitor.processWebhook(parsed.data);
 
     return reply.status(200).send({ processed: true });
+  });
+
+  /**
+   * GET /api/monitoring/metrics — Diagnostic counters and policy-lag health.
+   *
+   * Exposes cumulative counters written by {@link TransactionMonitor}
+   * (matched, skipped-uninsured, skipped-inactive, anomalies) plus a
+   * `policyLag` block that surfaces stuck policies: rows still state=Active
+   * past their expiry_time, with the worst lag in seconds. A non-zero
+   * `stuckCount` means the expiry-crank or policy-indexer is falling behind.
+   *
+   * Intentionally public/GET — no secrets are exposed, and wiring it into
+   * Prometheus/Grafana scrapes later is a one-liner.
+   */
+  app.get('/api/monitoring/metrics', async (_request, reply) => {
+    const counters = await readMonitorMetrics(app.redis);
+
+    const now = new Date();
+    const [stuckAgg] = await app.db
+      .select({
+        count: sql<number>`count(*)`,
+        oldestExpiry: sql<Date | null>`min(${policies.expiryTime})`,
+      })
+      .from(policies)
+      .where(and(eq(policies.state, PolicyState.Active), lt(policies.expiryTime, now)));
+
+    const stuckCount = Number(stuckAgg?.count ?? 0);
+    const oldestExpiry = stuckAgg?.oldestExpiry ? new Date(stuckAgg.oldestExpiry) : null;
+    const maxLagSec = oldestExpiry
+      ? Math.max(0, Math.floor((now.getTime() - oldestExpiry.getTime()) / 1000))
+      : 0;
+
+    return reply.send({
+      monitor: counters,
+      policyLag: {
+        stuckCount,
+        maxLagSec,
+        oldestExpiry: oldestExpiry?.toISOString() ?? null,
+      },
+      now: now.toISOString(),
+    });
   });
 
   /** POST /api/demo/simulate-exploit — Simulate an exploit for demo (development only).
