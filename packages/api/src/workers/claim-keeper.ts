@@ -98,7 +98,7 @@ export function startClaimKeeper(db: Database, redis: Redis, config: AppConfig) 
     return null;
   }
 
-  const helius = new HeliusClient(config.HELIUS_API_KEY);
+  const helius = new HeliusClient(config.HELIUS_API_KEY, config.SOLANA_NETWORK);
   const pyth = new PythClient();
 
   const processQueue = new Queue<ClaimJobPayload>(PROCESS_QUEUE, {

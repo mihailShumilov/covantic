@@ -13,7 +13,9 @@ src/
     claims/page.tsx       — Live claims list (WebSocket), verification pipeline sidebar
     protocol/page.tsx     — Protocol stats, premium distribution chart
     demo/page.tsx         — 4 exploit simulations, event log, auto-play pipeline
-    fleet/page.tsx        — Fleet agents + scrolling activity feed (polls /api/fleet every 6s)
+    fleet/page.tsx        — Fleet agents + scrolling activity feed (polls /api/fleet every 6s).
+                            Distinguishes runner-side `error` (red) from on-chain `meta.err`
+                            via `describeOnChainErr` (muted, expected outcome for `fail` rows).
   components/
     ui/                   — Button, Card, Badge, Spinner, Modal
     layout/Header.tsx     — Nav (Dashboard / Fleet / Protocol / Staking / Claims / Demo) + WalletButton

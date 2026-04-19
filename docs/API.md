@@ -146,6 +146,26 @@ side-by-side with a `diagnosis[]` array naming every inconsistency:
 The manifest is loaded from `keys/fleet.json` (populated by `pnpm fleet:bootstrap`). Activity
 is pushed into the Redis list `covantic:fleet:activity` (capped at 500) by `pnpm fleet:start`.
 
+Activity entry shape (`FleetActivityEntry`, in `@covantic/shared`-shaped JSON):
+
+```json
+{
+  "timestamp": 1776440442000,
+  "agentName": "fleet-abc-0",
+  "agentPubkey": "…",
+  "kind": "safe" | "large" | "fail" | "skip" | "error",
+  "amountUi": 42.5,
+  "signature": "4aHC2…",
+  "error": null | "…",           // runner / RPC exception (no tx landed)
+  "onChainErr": null | { … },    // structured meta.err from a confirmed-failed tx
+  "failureKind": "failed_tx" | …  // which FailureStrategy produced this row
+}
+```
+
+`kind: "fail"` rows normally carry `signature` + `onChainErr` (expected
+on-chain failure). An `error` field on a `fail` row means the runner itself
+threw and no tx reached the cluster — treat as alert-worthy in production.
+
 ### Monitoring
 
 | Method | Route                       | Description                                                               |

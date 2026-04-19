@@ -30,6 +30,7 @@
     "agent:fund": "pnpm --filter api exec tsx scripts/agent-wallet.ts fund",
     "agent:trigger": "pnpm --filter api exec tsx scripts/agent-wallet.ts trigger",
     "agent:help": "pnpm --filter api exec tsx scripts/agent-wallet.ts help",
+    "stake:vault": "pnpm --filter api exec tsx scripts/stake-vault.ts",
     "fleet:bootstrap": "pnpm --filter api exec tsx scripts/fleet-bootstrap.ts",
     "fleet:start": "pnpm --filter api exec tsx scripts/fleet-start.ts",
     "fleet:status": "pnpm --filter api exec tsx scripts/fleet-status.ts",

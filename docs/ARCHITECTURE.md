@@ -37,7 +37,12 @@ Dashboard application with:
 - Policy management (buy, view, cancel) — reads directly from chain
 - Staking pool management (stake / request-unstake / execute-unstake / claim-rewards)
 - Real-time claims feed with the verification pipeline bound to live WebSocket state
-- `/fleet` — live panel over the autonomous agent fleet
+- `/fleet` — live panel over the autonomous agent fleet. Fleet agents exercise
+  the claim pipeline end-to-end by generating real on-chain traffic —
+  including deliberate failures (SPL Memo v2 with non-UTF-8 payload →
+  `InstructionError::InvalidInstructionData`) so the AgentError verifier's
+  `failed_tx` branch has material to score. Failure strategies live in
+  `packages/api/src/services/fleet/failures.ts`.
 - `/demo` — one-click trigger simulation for screen recording
 
 ### 4. SDK Plugin (separate repo)

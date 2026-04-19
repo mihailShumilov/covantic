@@ -44,6 +44,7 @@ pnpm fund:phantom <wallet> [amount]   # Mint devnet test-USDC
 pnpm webhook:sync        # Register/refresh the Helius webhook for all insured agents
 pnpm agent:create|fund|trigger        # Throwaway agent keypair CLI (real on-chain activity)
 pnpm fleet:bootstrap|start|status     # Autonomous fleet of policy-covered agents
+pnpm stake:vault [--amount N]         # Stake USDC into the vault (lift solvency ratio)
 ```
 
 Filter to single package: `pnpm --filter api dev`, `pnpm --filter web dev`
@@ -95,6 +96,17 @@ Filter to single package: `pnpm --filter api dev`, `pnpm --filter web dev`
   Helius deliveries use the bearer path since Helius does not HMAC-sign payloads.
 - The internal `monitoring:alerts` Redis channel is signed with `ALERT_HMAC_SECRET`. The
   claim-keeper rejects unsigned alerts.
+- Helius Enhanced Transactions (`getParsedTransaction`, `getEnhancedTransactions`) are
+  **cluster-partitioned**: devnet signatures must hit `api-devnet.helius-rpc.com`,
+  mainnet must hit `api-mainnet.helius-rpc.com`. Wrong cluster returns `[]` (not an
+  error) and silently breaks every verifier's `triggerTxSignature` lookup. Always pass
+  `SOLANA_NETWORK` into `new HeliusClient(apiKey, cluster)`. The retired
+  `api.helius.xyz/v0` host must not come back.
+- Fleet `fail` actions **must land on-chain** with a real signature + non-null `meta.err`.
+  `executeFail` uses `sendRawTransaction({ skipPreflight: true })` + explicit
+  `confirmTransaction`; strategies live in `packages/api/src/services/fleet/failures.ts`.
+  A client-side serialize throw is a bug — the AgentError `failed_tx` verifier branch
+  can't see those.
 
 ## Git
 

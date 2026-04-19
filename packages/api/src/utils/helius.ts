@@ -116,14 +116,44 @@ export interface AccountInfo {
   executable: boolean;
 }
 
-/** Helius API client for Enhanced Transactions and deep wallet analysis. */
+/** Solana clusters Helius exposes under distinct Enhanced Transaction hosts.
+ *  "localnet" has no Helius coverage — callers falling back to localnet get
+ *  the devnet host so at least the shape is right, but expect 404s. */
+export type HeliusCluster = 'mainnet-beta' | 'devnet' | 'localnet';
+
+/**
+ * Resolve the correct Helius REST base URL for a given Solana cluster.
+ *
+ * The v0 Enhanced Transactions endpoints are cluster-partitioned on the
+ * server side — a devnet signature queried against the mainnet host
+ * returns `[]` (NOT an error), silently breaking every verifier that
+ * depends on `getParsedTransaction`. Hard-coding one host broke the
+ * entire claim pipeline on devnet for the whole hackathon; this helper
+ * exists so that can't happen again.
+ *
+ * The legacy `api.helius.xyz/v0` host has been retired — do not bring it
+ * back without re-checking devnet routing end-to-end.
+ */
+export function resolveHeliusBaseUrl(cluster: HeliusCluster | string): string {
+  if (cluster === 'mainnet-beta') return 'https://api-mainnet.helius-rpc.com/v0';
+  // devnet + localnet share the devnet enhanced-tx host. Localnet won't
+  // return anything useful but the URL shape stays valid.
+  return 'https://api-devnet.helius-rpc.com/v0';
+}
+
+/** Helius API client for Enhanced Transactions and deep wallet analysis.
+ *
+ *  The base URL is cluster-dependent — pass the currently configured
+ *  {@link HeliusCluster} so the client hits the right partition. Default
+ *  is devnet because the project targets devnet; callers that know better
+ *  should pass explicitly via the 2-arg constructor. */
 export class HeliusClient {
   private apiKey: string;
   private baseUrl: string;
 
-  constructor(apiKey: string) {
+  constructor(apiKey: string, cluster: HeliusCluster | string = 'devnet') {
     this.apiKey = apiKey;
-    this.baseUrl = 'https://api.helius.xyz/v0';
+    this.baseUrl = resolveHeliusBaseUrl(cluster);
   }
 
   /** Get enhanced transaction history for an address.

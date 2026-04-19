@@ -83,7 +83,7 @@ const ASSESSMENT_CACHE_TTL_SECONDS = 300;
 const cacheKey = (addr: string) => `risk:assessment:v2:${addr}`;
 
 export async function riskRoutes(app: FastifyInstance) {
-  const helius = new HeliusClient(app.config.HELIUS_API_KEY);
+  const helius = new HeliusClient(app.config.HELIUS_API_KEY, app.config.SOLANA_NETWORK);
 
   /**
    * GET /api/risk/:agentAddress — Return the latest risk assessment, using a

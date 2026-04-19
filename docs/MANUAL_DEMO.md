@@ -392,6 +392,13 @@ in the activity feed (kind `LARGE TRANSFER` / `failing tx`) with a
 signature link. The resulting claim still flows through `/claims` — the
 two views share the same underlying data.
 
+A `failing tx` row shows the structured on-chain error (e.g.
+`failed_tx: InvalidInstructionData`) in muted text — that is the *expected*
+outcome, produced by the SPL Memo v2 strategy in
+`services/fleet/failures.ts`. A red error message instead means the runner
+itself threw (RPC down, signing bug) and no tx landed — alert-worthy in
+production.
+
 ---
 
 ## 8. Staking / protocol (for completeness)
@@ -484,7 +491,7 @@ rm -f keys/fleet.json keys/agents/fleet-*.json keys/fleet-holder.json
 | `POST /api/demo/simulate-exploit`, `POST /api/monitoring/webhook`, `GET /api/monitoring/metrics` | `packages/api/src/routes/monitoring.ts` |
 | Attestation publisher (oracle-signed) | `packages/api/src/services/attestation-publisher.ts` |
 | Per-trigger claim verifiers | `packages/api/src/services/verifiers/{exploit,oracle-manipulation,agent-error,governance-attack}.ts` |
-| Fleet actions + manifest | `packages/api/src/services/fleet/{actions,manifest,types}.ts` |
+| Fleet actions + manifest | `packages/api/src/services/fleet/{actions,failures,manifest,types}.ts` |
 | Helius webhook sync | `packages/api/src/services/helius-webhook.ts`, `scripts/sync-helius-webhook.ts` |
 | Policy indexer | `packages/api/src/workers/policy-indexer.ts` |
 | Claim-keeper (auto-claim pipeline) | `packages/api/src/workers/claim-keeper.ts` |
@@ -494,3 +501,4 @@ rm -f keys/fleet.json keys/agents/fleet-*.json keys/fleet-holder.json
 | WebSocket `/ws` (`claims:feed`, `vault:stats`, `monitoring:alerts`) | `packages/api/src/index.ts`, `services/notification-service.ts` |
 | Agent wallet CLI | `packages/api/scripts/agent-wallet.ts` (`pnpm agent:{create,fund,trigger}`) |
 | Fleet CLI | `packages/api/scripts/fleet-{bootstrap,start,status}.ts` |
+| Stake-vault helper | `packages/api/scripts/stake-vault.ts` (`pnpm stake:vault`) |

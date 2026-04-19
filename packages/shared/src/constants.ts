@@ -79,6 +79,22 @@ export const LOCK_PERIODS = {
 /** Base58 Solana transaction signature regex (87–88 chars, Base58 alphabet). */
 export const SOLANA_SIGNATURE_REGEX = /^[1-9A-HJ-NP-Za-km-z]{87,88}$/;
 
+/**
+ * Canonical SPL Memo v2 program ID. Stable across mainnet-beta, devnet,
+ * and testnet; used by the fleet runner to produce deliberately-failing
+ * transactions (non-UTF-8 payload → `InstructionError::InvalidInstructionData`)
+ * without having to deploy additional programs.
+ */
+export const SPL_MEMO_PROGRAM_ID = 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr';
+
+/**
+ * Solana's maximum serialized transaction size in bytes (PACKET_DATA_SIZE).
+ * Used as a safety bound when the fleet generates instruction payloads —
+ * exceeding it throws client-side in web3.js `Transaction.serialize()` and
+ * the tx never reaches the cluster.
+ */
+export const MAX_TX_BYTES = 1232;
+
 /** Synthetic demo payout ratio (80% of coverage) used by the simulated
  *  pipeline to mirror the marketing animation. Production verifiers derive
  *  payout from actual loss, not this ratio. */

@@ -94,6 +94,7 @@ to supply third-party keys.
 | `pnpm fleet:bootstrap [--count 5] [--coverage 200]` | Create N funded agents + holder keypair, assess risk, buy policies, write `keys/fleet.json` |
 | `pnpm fleet:start` | Run the fleet loop (safe / skip / rogue / failing txs every 45–90 s) |
 | `pnpm fleet:status` | Print current fleet manifest + recent activity |
+| `pnpm stake:vault [--amount N]` | Stake USDC into the vault (raises solvency ratio so `fleet:bootstrap` can add more policies without hitting `SolvencyTooLow`) |
 | `pnpm exec tsx scripts/smoke-auto-claim.ts` | End-to-end smoke: simulate → on-chain paid state |
 
 ## Demo Walkthrough

@@ -14,7 +14,8 @@ src/
     events.ts   — WSMessage, WSChannel, MonitoringEventType, MonitoringSeverity
   constants.ts  — All protocol constants (decimals, limits, BPS, thresholds, seeds,
                    PDA_SEEDS incl. ATTESTATION, ATTESTATION_MAX_VALIDITY_SECONDS,
-                   SOLANA_ADDRESS_REGEX, SOLANA_SIGNATURE_REGEX, SYNTHETIC_PAYOUT_RATIO)
+                   SOLANA_ADDRESS_REGEX, SOLANA_SIGNATURE_REGEX, SPL_MEMO_PROGRAM_ID,
+                   MAX_TX_BYTES, SYNTHETIC_PAYOUT_RATIO)
   utils.ts      — calculatePremium(), tierToPremiumBps(), scoreToTier(),
                    solvencyStatus(), formatUsdc(), formatDuration(),
                    shortenAddress(), generateDemoTxSignature(), TIER_LABELS, STATE_LABELS
@@ -27,6 +28,14 @@ src/
 - `RiskTier`: LOW=0, MEDIUM=1, HIGH=2, EXTREME=3
 - `TriggerType`: None=0, Exploit=1, OracleManipulation=2, AgentError=3, GovernanceAttack=4
 - `QuoteErrorCode`: `ASSESSMENT_REQUIRED` | `AGENT_UNINSURABLE` | `ASSESSMENT_STALE` | `ATTESTATION_PUBLISH_FAILED`
+
+## Fleet Constants
+
+- `SPL_MEMO_PROGRAM_ID` — canonical Memo v2 program ID (`MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr`).
+  Stable across mainnet-beta / devnet / testnet. Used by the fleet runner to produce
+  deliberately-failing transactions via a non-UTF-8 memo payload.
+- `MAX_TX_BYTES = 1232` — Solana `PACKET_DATA_SIZE`. Fleet failure strategies assert
+  serialized txs stay under this limit so nothing is rejected client-side.
 
 ## PremiumQuote
 

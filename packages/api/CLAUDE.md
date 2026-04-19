@@ -24,7 +24,7 @@ src/
     attestation-publisher.ts — Oracle-signed RiskAttestation PDA publisher (lazy-init CPI)
     helius-webhook.ts     — Helius webhook REST client (used by sync-helius-webhook.ts)
     notification-service.ts — WebSocket + Redis pub/sub
-    fleet/                — manifest / actions / types for the autonomous agent fleet
+    fleet/                — manifest / actions / failures / types for the autonomous agent fleet
   routes/
     health.ts       — /api/health
     risk.ts         — /api/risk/:addr, /api/assessments[/:id]
@@ -42,7 +42,7 @@ src/
     claim-keeper.ts       — Subscribes to monitoring:alerts, drives oracle_submit_claim + verify_and_payout
     monitor-entry.ts      — Standalone entrypoint for the monitor container (prod)
   utils/
-    helius.ts             — Helius enhanced-tx client
+    helius.ts             — Helius enhanced-tx client (cluster-aware — pass SOLANA_NETWORK)
     pyth.ts               — Pyth benchmarks client
     program.ts            — createCovanticProgram (oracle or read-only)
     policy-reader.ts      — fetchOnChainPolicy (structured {policy, reason, detail})
@@ -57,8 +57,39 @@ src/
     sync-helius-webhook.ts — Register/update Helius webhook for every insured agent
     agent-wallet.ts       — create / fund / trigger CLI for throwaway agent keypairs
     fleet-{bootstrap,start,status}.ts — Autonomous fleet management
+    stake-vault.ts        — Stake USDC into the vault (raise solvency ratio)
     seed-demo.ts, simulate-exploit.ts, run-demo.ts, demo-common.ts — demo helpers
 ```
+
+## Fleet Module (`services/fleet/`)
+
+```
+manifest.ts   — Load/save keys/fleet.json
+types.ts      — FleetAgent, FleetManifest, FleetActivityEntry, BehaviorProfile
+actions.ts    — rollAction / rollRogue / executeTransfer / executeFail / runOneAction
+failures.ts   — FailureStrategy abstraction + buildFailingInstruction (PURE)
+```
+
+### Failure Strategies
+
+`failures.ts` exposes a registry of `FailureStrategy` objects, one per verifier
+branch. Each strategy declares its `kind`, its `expectedError` (structured
+on-chain error class), and a pure `buildInstruction(agent)` fn. Current
+strategies:
+
+- `failed_tx` — SPL Memo v2 with a 32-byte non-UTF-8 payload (`0xFF`).
+  Returns `InstructionError::InvalidInstructionData` at runtime.
+
+`executeFail` uses `sendRawTransaction({ skipPreflight: true })` + explicit
+`confirmTransaction` so the tx **lands on-chain** with a real signature and a
+non-null `meta.err` — the only way the AgentError verifier's `failed_tx`
+branch can fire. A client-side serialize throw would have produced no sig.
+`ActionResult.onChainErr` carries the structured error; `ActionResult.error`
+is reserved for runner-side exceptions (RPC down, signing bug) and should be
+alerted on in production.
+
+New strategies (`critical_transfer`, `rapid_loss`, `governance_attack`) should
+be added to `failures.ts` and then exposed via `BehaviorProfile.rogueMix`.
 
 ## Key Patterns
 

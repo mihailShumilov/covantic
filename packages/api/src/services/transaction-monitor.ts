@@ -7,9 +7,22 @@ import type Redis from 'ioredis';
 import { publishAlert } from './alert-bus.js';
 import { incrementMetric } from '../utils/monitor-metrics.js';
 
-/** Anomaly detection thresholds (USDC token units, 6 decimals) */
-const LARGE_TRANSFER_THRESHOLD = 1000_000_000; // 1,000 USDC — triggers warning
-const CRITICAL_TRANSFER_THRESHOLD = 10_000_000_000; // 10,000 USDC — triggers critical
+/**
+ * Anomaly detection thresholds, in *UI* token units (NOT raw lamports).
+ *
+ * Helius Enhanced Transactions puts `tokenTransfers[].tokenAmount` as a
+ * decimal-aware amount (e.g. `2000.0` for a 2,000 USDC transfer), so these
+ * thresholds must match that unit. Mixing them with raw 6-decimal lamports
+ * causes the detector to silently never fire on real webhooks — which is
+ * exactly the bug this comment is here to prevent a future recurrence of.
+ *
+ * The AgentError verifier (`services/verifiers/agent-error.ts`) uses the
+ * same 1,000 UI-USDC threshold for the `large_outflow_*` branches, so
+ * keeping these in sync means the verifier never rejects on
+ * "threshold not met" for an event the monitor already classified.
+ */
+const LARGE_TRANSFER_THRESHOLD_UI = 1_000; // 1,000 USDC — triggers warning
+const CRITICAL_TRANSFER_THRESHOLD_UI = 10_000; // 10,000 USDC — triggers critical
 
 /** Minimal shape we read from the Helius enhanced transaction envelope. */
 interface WebhookTransaction {
@@ -169,11 +182,12 @@ export class TransactionMonitor {
     const outgoing = tokenTransfers.filter((t) => t.fromUserAccount === agentAddress);
     const totalOutgoing = outgoing.reduce((sum, t) => sum + (t.tokenAmount ?? 0), 0);
 
-    if (totalOutgoing > LARGE_TRANSFER_THRESHOLD) {
+    if (totalOutgoing > LARGE_TRANSFER_THRESHOLD_UI) {
       anomalies.push({
         type: 'large_transfer',
-        severity: totalOutgoing > CRITICAL_TRANSFER_THRESHOLD ? 'critical' : 'warning',
-        details: { amount: totalOutgoing, transfers: outgoing.length },
+        severity:
+          totalOutgoing > CRITICAL_TRANSFER_THRESHOLD_UI ? 'critical' : 'warning',
+        details: { amountUi: totalOutgoing, transfers: outgoing.length },
       });
     }
 
