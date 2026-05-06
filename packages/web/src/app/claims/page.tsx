@@ -44,9 +44,25 @@ function explorerTxUrl(sig: string | null | undefined): string | null {
   return `https://explorer.solana.com/tx/${encodeURIComponent(sig)}?cluster=${encodeURIComponent(SOLANA_NETWORK)}`;
 }
 
+function formatRemaining(target: Date | string | null | undefined, nowMs: number): string | null {
+  if (!target) return null;
+  const t = target instanceof Date ? target.getTime() : new Date(target).getTime();
+  if (!Number.isFinite(t)) return null;
+  const ms = t - nowMs;
+  if (ms <= 0) return null;
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
 export default function ClaimsPage() {
   const [initialClaims, setInitialClaims] = useState<Claim[]>([]);
   const [selectedClaim, setSelectedClaim] = useState<Claim | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const claims = useClaimsFeed(initialClaims);
 
   useEffect(() => {
@@ -54,6 +70,15 @@ export default function ClaimsPage() {
       .then((data) => setInitialClaims(data.claims))
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    const hasPending = claims.some(
+      (c) => c.status === 'approved' && c.lockExpiresAt,
+    );
+    if (!hasPending) return;
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [claims]);
 
   // Keep the selected claim row in sync with feed updates.
   useEffect(() => {
@@ -86,6 +111,10 @@ export default function ClaimsPage() {
               {claims.map((claim) => {
                 const submitUrl = explorerTxUrl(claim.submitTxSignature);
                 const payoutUrl = explorerTxUrl(claim.payoutTxSignature);
+                const countdown =
+                  claim.status === 'approved'
+                    ? formatRemaining(claim.lockExpiresAt, nowMs)
+                    : null;
                 return (
                   <div
                     key={claim.id}
@@ -117,6 +146,11 @@ export default function ClaimsPage() {
                     <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
                       {triggerLabels[claim.triggerType] ?? 'Unknown'} &middot;
                       {claim.payoutAmount ? ` $${formatUsdc(claim.payoutAmount)}` : ' Pending'}
+                      {countdown && (
+                        <span style={{ color: 'var(--color-info)' }}>
+                          {' '}&middot; pays out in {countdown}
+                        </span>
+                      )}
                     </p>
                     {(submitUrl || payoutUrl) && (
                       <div
@@ -160,7 +194,11 @@ export default function ClaimsPage() {
 
         {/* Verification Pipeline */}
         <Card title="Verification Pipeline">
-          <ClaimVerificationPipeline autoPlay={false} status={selectedClaim?.status ?? null} />
+          <ClaimVerificationPipeline
+            autoPlay={false}
+            status={selectedClaim?.status ?? null}
+            lockExpiresAt={selectedClaim?.lockExpiresAt ?? null}
+          />
         </Card>
       </div>
     </div>

@@ -14,6 +14,27 @@ interface Props {
    * so the marketing demo keeps its animation.
    */
   status?: string | null;
+  /**
+   * Wall-clock timestamp at which the on-chain payout lock expires.
+   * Used to render a countdown on the PayoutExecution step while a claim
+   * sits in `approved` waiting for the trigger-specific lock period.
+   */
+  lockExpiresAt?: Date | string | null;
+}
+
+function formatRemaining(target: Date | string | null | undefined, nowMs: number): string | null {
+  if (!target) return null;
+  const t = target instanceof Date ? target.getTime() : new Date(target).getTime();
+  if (!Number.isFinite(t)) return null;
+  const ms = t - nowMs;
+  if (ms <= 0) return null;
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
 }
 
 /**
@@ -104,12 +125,14 @@ export function ClaimVerificationPipeline({
   autoPlay = false,
   onComplete,
   status,
+  lockExpiresAt,
 }: Props) {
   const [steps, setSteps] = useState<PipelineStep[]>(
     externalSteps ??
       (status ? stepsForStatus(status) : STEP_CONFIG.map((s) => ({ step: s.step, status: StepStatus.Pending }))),
   );
   const [, setCurrentStep] = useState(-1);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
     if (externalSteps) {
@@ -119,6 +142,15 @@ export function ClaimVerificationPipeline({
     if (autoPlay) return;
     if (status) setSteps(stepsForStatus(status));
   }, [externalSteps, status, autoPlay]);
+
+  useEffect(() => {
+    if (!lockExpiresAt) return;
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [lockExpiresAt]);
+
+  const payoutCountdown =
+    status === 'approved' ? formatRemaining(lockExpiresAt, nowMs) : null;
 
   // Auto-play animation for demo
   useEffect(() => {
@@ -216,12 +248,16 @@ export function ClaimVerificationPipeline({
                     className="animate-pulse"
                     style={{ fontSize: '0.75rem', color: 'var(--color-info)' }}
                   >
-                    processing...
+                    {config.step === VerificationStep.PayoutExecution && payoutCountdown
+                      ? `pays out in ${payoutCountdown}`
+                      : 'processing...'}
                   </span>
                 )}
               </div>
               <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
-                {config.description}
+                {config.step === VerificationStep.PayoutExecution && payoutCountdown
+                  ? 'Lock period before USDC transfer to holder'
+                  : config.description}
               </p>
               {stepState?.message && (
                 <p
