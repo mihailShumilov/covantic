@@ -88,10 +88,22 @@ export default function ClaimsPage() {
   }, [claims, selectedClaim]);
 
   return (
-    <div style={{ padding: 'var(--space-xl)', maxWidth: 1200, margin: '0 auto' }}>
-      <h1 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: 'var(--space-xl)' }}>
-        Claims Feed
-      </h1>
+    <div className="cov-page">
+      <div style={{ marginBottom: 24 }}>
+        <div className="cov-label" style={{ color: 'var(--c-info)', marginBottom: 8 }}>
+          Claims
+        </div>
+        <h1
+          style={{
+            fontFamily: 'var(--font-display)',
+            fontWeight: 'var(--display-weight)' as never,
+            letterSpacing: 'var(--display-tracking)',
+            fontSize: 34,
+          }}
+        >
+          Claims feed
+        </h1>
+      </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-lg)' }}>
         {/* Claims List */}

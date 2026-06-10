@@ -2,27 +2,32 @@ export function Footer() {
   return (
     <footer
       style={{
-        padding: 'var(--space-2xl) var(--space-xl)',
-        borderTop: '1px solid var(--color-border-subtle)',
-        textAlign: 'center',
-        color: 'var(--color-text-muted)',
-        fontSize: '0.8125rem',
+        maxWidth: 'var(--page-max)',
+        margin: '0 auto',
+        padding: '24px var(--page-pad) 40px',
+        width: '100%',
+        display: 'flex',
+        gap: 16,
+        alignItems: 'center',
+        flexWrap: 'wrap',
       }}
     >
-      <div style={{ marginBottom: 'var(--space-sm)' }}>
-        <span style={{ color: 'var(--color-text-secondary)' }}>Covantic Protocol</span>
-        {' \u00B7 '}
-        Colosseum Frontier 2026
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'center', gap: 'var(--space-lg)', marginBottom: 'var(--space-md)' }}>
-        <a href="https://github.com/mihailShumilov/ai-agent-insurance" target="_blank" rel="noopener noreferrer"
-          style={{ color: 'var(--color-text-muted)' }}>
-          GitHub
-        </a>
-      </div>
-      <div style={{ fontStyle: 'italic', color: 'var(--color-text-muted)', fontSize: '0.75rem' }}>
+      <span className="cov-mono" style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>
+        Covantic Protocol · Colosseum Frontier 2026
+      </span>
+      <span style={{ flex: 1 }} />
+      <a
+        className="cov-mono"
+        href="https://github.com/mihailShumilov/ai-agent-insurance"
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{ fontSize: 11.5, color: 'var(--text-faint)' }}
+      >
+        GitHub
+      </a>
+      <span className="cov-mono" style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>
         The coverage primitive for autonomous agents.
-      </div>
+      </span>
     </footer>
   );
 }

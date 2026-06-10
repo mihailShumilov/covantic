@@ -261,18 +261,21 @@ export default function DashboardPage() {
   const showBuyCta = !isAssessing && isInsurable;
 
   return (
-    <div style={{ padding: 'var(--space-lg) var(--space-md)', maxWidth: 1200, margin: '0 auto' }}>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 'var(--space-xl)',
-          flexWrap: 'wrap',
-          gap: 'var(--space-sm)',
-        }}
-      >
-        <h1 style={{ fontSize: 'clamp(1.25rem, 3vw, 1.5rem)', fontWeight: 700 }}>Agent Dashboard</h1>
+    <div className="cov-page">
+      <div style={{ marginBottom: 24 }}>
+        <div className="cov-label" style={{ color: 'var(--c-info)', marginBottom: 8 }}>
+          Dashboard
+        </div>
+        <h1
+          style={{
+            fontFamily: 'var(--font-display)',
+            fontWeight: 'var(--display-weight)' as never,
+            letterSpacing: 'var(--display-tracking)',
+            fontSize: 34,
+          }}
+        >
+          Your agents, covered.
+        </h1>
       </div>
 
       {/* Risk Assessment */}

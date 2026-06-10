@@ -44,11 +44,19 @@ export default function DemoPage() {
   };
 
   return (
-    <div style={{ padding: 'var(--space-xl)', maxWidth: 1200, margin: '0 auto' }}>
-      <div style={{ marginBottom: 'var(--space-xl)' }}>
+    <div className="cov-page">
+      <div style={{ marginBottom: 24 }}>
         <Badge variant="warning">DEMO MODE</Badge>
-        <h1 style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: 'var(--space-sm)' }}>
-          Covantic Demo
+        <h1
+          style={{
+            fontFamily: 'var(--font-display)',
+            fontWeight: 'var(--display-weight)' as never,
+            letterSpacing: 'var(--display-tracking)',
+            fontSize: 34,
+            marginTop: 'var(--space-sm)',
+          }}
+        >
+          Covantic demo
         </h1>
         <p style={{ color: 'var(--color-text-secondary)', marginTop: 'var(--space-xs)' }}>
           Simulate insurance scenarios and watch the full claim-to-payout pipeline in action.

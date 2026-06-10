@@ -6,24 +6,9 @@ interface CardProps {
 
 export function Card({ children, title, style }: CardProps) {
   return (
-    <div
-      style={{
-        background: 'var(--color-surface)',
-        borderRadius: 'var(--radius-lg)',
-        border: '1px solid var(--color-border)',
-        padding: 'var(--space-lg)',
-        ...style,
-      }}
-    >
+    <div className="cov-card" style={{ padding: '20px 24px', ...style }}>
       {title && (
-        <h3
-          style={{
-            fontSize: '1rem',
-            fontWeight: 600,
-            color: 'var(--color-text-secondary)',
-            marginBottom: 'var(--space-md)',
-          }}
-        >
+        <h3 className="cov-label" style={{ marginBottom: 14 }}>
           {title}
         </h3>
       )}

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
+import { CovBackground } from '@/components/cov/visuals';
 import { WalletProvider } from '@/providers/WalletProvider';
 import { CovanticProvider } from '@/providers/CovanticProvider';
 import '@/styles/globals.css';
@@ -30,14 +31,17 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" data-theme="dark">
+    <html lang="en" data-theme="terminal">
       <body>
         <WalletProvider>
           <CovanticProvider>
-            <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-              <Header />
-              <main style={{ flex: 1 }}>{children}</main>
-              <Footer />
+            <div className="cov-root">
+              <CovBackground />
+              <div className="cov-content">
+                <Header />
+                <main style={{ flex: 1 }}>{children}</main>
+                <Footer />
+              </div>
             </div>
           </CovanticProvider>
         </WalletProvider>

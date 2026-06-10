@@ -1,470 +1,328 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
-import { useFadeIn } from '@/hooks/useFadeIn';
-import { ClaimVerificationPipeline } from '@/components/claims/ClaimVerificationPipeline';
+import { useState, useEffect } from 'react';
 import {
-  HERO_STATS,
-  LOSS_EVENTS,
-  HOW_IT_WORKS,
-  COVERAGE_TRIGGERS,
-  RISK_TIERS,
-  SDK_CODE,
-  STAKER_STATS,
-  TECH_STACK,
-} from '@/lib/mock-data';
+  CovRingGauge,
+  HexFlicker,
+  RevealOnView,
+  StatValue,
+  statusColor,
+} from '@/components/cov/visuals';
+import { FearBlock, LiveLosses, ProtocolFlow, StepIcon } from '@/components/cov/home-sections';
 
-// ─── Section wrapper with fade-in ───────────────────────────────────────────
-function Section({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
-  const ref = useFadeIn<HTMLElement>();
+/* ---------- hero: looping mini assessment ---------- */
+const HERO_SIGNALS = [
+  { name: 'Wallet Maturity', s: 'LOW', v: 0.12 },
+  { name: 'MEV Exposure', s: 'LOW', v: 0.18 },
+  { name: 'Portfolio Size', s: 'MODERATE', v: 0.34 },
+  { name: 'Activity Regularity', s: 'LOW', v: 0.16 },
+];
+
+function HeroDemo() {
+  const [step, setStep] = useState(0); // 0..3 scanning, 4 = verdict, 5 = hold
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setStep(5);
+      return;
+    }
+    const ms = step < HERO_SIGNALS.length ? 850 : step === HERO_SIGNALS.length ? 2600 : 2200;
+    const t = setTimeout(() => setStep((s) => (s >= 5 ? 0 : s + 1)), ms);
+    return () => clearTimeout(t);
+  }, [step]);
+
+  const done = step >= HERO_SIGNALS.length;
   return (
-    <section ref={ref} className="fade-in" style={{ maxWidth: 1100, margin: '0 auto', padding: 'var(--space-4xl) var(--space-lg)', ...style }}>
-      {children}
-    </section>
+    <div className="cov-card" style={{ padding: '22px 26px', width: '100%', maxWidth: 420 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+        <span className="cov-label" style={{ color: done ? undefined : 'var(--c-info)' }}>
+          {done ? 'Assessment complete' : 'Live assessment'}
+        </span>
+        <span style={{ flex: 1 }} />
+        <span className="cov-mono" style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>
+          Bq4N…x9Wd
+        </span>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 22, alignItems: 'center' }}>
+        <CovRingGauge value={done ? 0.182 : 0} label={done ? 'LOW' : '—'} size={128} animateIn={false} />
+        <div>
+          {HERO_SIGNALS.map((sig, i) => {
+            const st = i < step ? 'done' : i === step ? 'active' : 'pending';
+            return (
+              <div
+                key={sig.name}
+                style={{
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  gap: 8,
+                  padding: '5px 0',
+                  opacity: st === 'pending' ? 0.3 : 1,
+                  transition: 'opacity .3s',
+                }}
+              >
+                <span style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap' }}>{sig.name}</span>
+                <span style={{ flex: 1 }} />
+                {st === 'active' && <HexFlicker width={4} />}
+                {st === 'done' && (
+                  <span className="cov-mono" style={{ fontSize: 11.5, color: statusColor(sig.s) }}>
+                    {sig.v.toFixed(2)} {sig.s}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+          <div
+            style={{
+              marginTop: 8,
+              paddingTop: 10,
+              borderTop: 'var(--hairline)',
+              display: 'flex',
+              alignItems: 'baseline',
+              gap: 8,
+              minHeight: 22,
+            }}
+          >
+            {done ? (
+              <>
+                <span className="cov-label" style={{ color: 'var(--c-low)' }}>
+                  Insurable
+                </span>
+                <span style={{ flex: 1 }} />
+                <span className="cov-mono" style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+                  342 USDC / yr
+                </span>
+              </>
+            ) : (
+              <span className="cov-label cov-pulse" style={{ color: 'var(--c-info)' }}>
+                scanning 15 factors…
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
-// ─── Step icon SVGs (inline, lightweight) ───────────────────────────────────
-function StepIcon({ type }: { type: string }) {
-  const s = { width: 28, height: 28 };
-  switch (type) {
-    case 'search':
-      return (
-        <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
-          <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
-        </svg>
-      );
-    case 'shield':
-      return (
-        <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
-          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-        </svg>
-      );
-    case 'eye':
-      return (
-        <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
-          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
-        </svg>
-      );
-    case 'zap':
-      return (
-        <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
-          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-        </svg>
-      );
-    default:
-      return null;
-  }
-}
+/* ---------- page data ---------- */
+const HOME_STEPS = [
+  {
+    n: '01',
+    icon: 'assess' as const,
+    title: 'Assess',
+    body: 'The risk engine scores an agent across 15 on-chain factors in 5 categories — wallet history, execution quality, portfolio health, protocol exposure, behavioral patterns. No forms, no underwriters.',
+  },
+  {
+    n: '02',
+    icon: 'underwrite' as const,
+    title: 'Underwrite',
+    body: 'Premiums are priced deterministically from the risk surface. Eligible agents receive a quote in the same transaction; extreme-risk agents are declined with a remediation path.',
+  },
+  {
+    n: '03',
+    icon: 'settle' as const,
+    title: 'Settle',
+    body: 'Coverage is parametric. When a trigger condition is met on-chain, the payout executes in the same block — no claims process, no paperwork, no discretion.',
+  },
+  {
+    n: '04',
+    icon: 'stake' as const,
+    title: 'Stake',
+    body: 'Coverage pools are funded by stakers who deposit USDC, earn the premium flow, and absorb trigger payouts. Pool health and exposure are fully visible on-chain.',
+  },
+];
 
-// ═════════════════════════════════════════════════════════════════════════════
-// LANDING PAGE
-// ═════════════════════════════════════════════════════════════════════════════
+const HOME_TRIGGERS = [
+  { code: 'drawdown > 20%', body: 'Portfolio drawdown breaches the covered threshold within the policy window.' },
+  { code: 'exploit_flag == true', body: 'A covered protocol the agent interacts with is flagged as exploited.' },
+  { code: 'oracle_deviation > 3σ', body: 'Price feed the agent depends on deviates beyond tolerance.' },
+  { code: 'liveness_fail > 6h', body: 'Agent halts unexpectedly and misses its operational heartbeat.' },
+];
+
+const HOME_STATS = [
+  { v: 1284, label: 'Agents assessed' },
+  { v: 2.4, label: 'Coverage in force', prefix: '$', suffix: 'M', decimals: 1 },
+  { v: 411, label: 'Median payout time', suffix: 'ms' },
+  { v: 15, label: 'On-chain risk factors' },
+];
 
 export default function LandingPage() {
-  const [demoRunning, setDemoRunning] = useState(false);
-  const [demoKey, setDemoKey] = useState(0);
-
-  const runDemo = () => {
-    setDemoRunning(true);
-    setDemoKey((k) => k + 1);
-  };
-
   return (
     <div>
-      {/* ─── HERO ─────────────────────────────────────────────────────── */}
-      <section
-        className="hero-bg"
-        style={{
-          textAlign: 'center',
-          padding: 'var(--space-4xl) var(--space-lg)',
-          minHeight: '80vh',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <h1
+      {/* hero */}
+      <section className="cov-page" style={{ paddingTop: 84, paddingBottom: 64 }}>
+        <div
           style={{
-            fontSize: 'clamp(2.5rem, 5vw, 4.5rem)',
-            fontWeight: 800,
-            letterSpacing: '-0.03em',
-            lineHeight: 1.1,
-            marginBottom: 'var(--space-lg)',
-            maxWidth: 800,
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+            gap: 56,
+            alignItems: 'center',
           }}
         >
-          Your agent deserves
-          <br />a <span className="gradient-text">safety net</span>.
-        </h1>
-
-        <p
-          style={{
-            fontSize: 'clamp(1rem, 2vw, 1.25rem)',
-            color: 'var(--color-text-secondary)',
-            maxWidth: 600,
-            lineHeight: 1.6,
-            marginBottom: 'var(--space-xl)',
-          }}
-        >
-          Parametric insurance for AI agents on Solana.
-          <br />
-          Deterministic triggers. Instant payouts. Zero paperwork.
-        </p>
-
-        <div style={{ display: 'flex', gap: 'var(--space-md)', flexWrap: 'wrap', justifyContent: 'center', marginBottom: 'var(--space-3xl)' }}>
-          <Link href="/dashboard">
-            <button className="btn-glow">Get Risk Score</button>
-          </Link>
-          <Link href="/protocol">
-            <button className="btn-outline">Explore Protocol &rarr;</button>
-          </Link>
-        </div>
-
-        {/* Stats row */}
-        <div style={{ display: 'flex', gap: 'var(--space-md)', flexWrap: 'wrap', justifyContent: 'center' }}>
-          {HERO_STATS.map((stat) => (
-            <div
-              key={stat.label}
-              className="card-glow"
-              style={{
-                padding: 'var(--space-md) var(--space-xl)',
-                textAlign: 'center',
-                minWidth: 140,
-              }}
-            >
-              <div style={{ fontSize: '1.75rem', fontWeight: 800, fontFamily: 'var(--font-mono)' }}>
-                {stat.value}
+          <div>
+            <RevealOnView>
+              <div className="cov-label" style={{ color: 'var(--c-info)', marginBottom: 18 }}>
+                Parametric insurance · Solana
               </div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: 2 }}>
-                {stat.label}
+              <h1
+                style={{
+                  fontFamily: 'var(--font-display)',
+                  fontWeight: 'var(--display-weight)' as never,
+                  letterSpacing: 'var(--display-tracking)',
+                  fontSize: 'clamp(34px, 5vw, 52px)',
+                  lineHeight: 1.08,
+                  textWrap: 'balance',
+                }}
+              >
+                The coverage primitive for autonomous agents.
+              </h1>
+              <p
+                style={{
+                  fontSize: 16.5,
+                  lineHeight: 1.6,
+                  color: 'var(--text-dim)',
+                  marginTop: 22,
+                  maxWidth: 520,
+                  textWrap: 'pretty',
+                }}
+              >
+                Covantic is a programmable coverage protocol on Solana. Deterministic triggers, instant
+                payouts, zero paperwork.
+              </p>
+            </RevealOnView>
+            <RevealOnView delay={150}>
+              <div style={{ display: 'flex', gap: 12, marginTop: 32, flexWrap: 'wrap' }}>
+                <Link href="/dashboard" style={{ textDecoration: 'none' }}>
+                  <button className="cov-btn-primary" style={{ padding: '13px 24px', fontSize: 14.5 }}>
+                    Run a risk assessment
+                  </button>
+                </Link>
+                <Link href="/protocol" style={{ textDecoration: 'none' }}>
+                  <button className="cov-btn-ghost" style={{ padding: '13px 20px', fontSize: 14 }}>
+                    Read the protocol
+                  </button>
+                </Link>
+              </div>
+            </RevealOnView>
+          </div>
+          <RevealOnView delay={250} style={{ justifySelf: 'end', width: '100%', display: 'flex', justifyContent: 'flex-end' }}>
+            <HeroDemo />
+          </RevealOnView>
+        </div>
+      </section>
+
+      {/* fear: real incidents */}
+      <FearBlock />
+
+      {/* live losses */}
+      <section className="cov-page" style={{ paddingTop: 0, paddingBottom: 56 }}>
+        <LiveLosses />
+      </section>
+
+      {/* stats */}
+      <section className="cov-page" style={{ paddingTop: 0, paddingBottom: 56 }}>
+        <RevealOnView
+          className="cov-card"
+          style={{
+            padding: '26px 32px',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+            gap: 28,
+          }}
+        >
+          {HOME_STATS.map((s) => (
+            <div key={s.label} style={{ minWidth: 0 }}>
+              <StatValue value={s.v} prefix={s.prefix || ''} suffix={s.suffix || ''} decimals={s.decimals || 0} />
+              <div className="cov-label" style={{ marginTop: 8 }}>
+                {s.label}
               </div>
             </div>
+          ))}
+        </RevealOnView>
+      </section>
+
+      {/* how it works */}
+      <section className="cov-page" style={{ paddingTop: 0, paddingBottom: 56 }}>
+        <RevealOnView>
+          <div className="cov-label" style={{ color: 'var(--c-info)', marginBottom: 22 }}>
+            How it works
+          </div>
+        </RevealOnView>
+        <RevealOnView className="cov-card" delay={100} style={{ padding: '30px 28px 22px', marginBottom: 14 }}>
+          <ProtocolFlow />
+        </RevealOnView>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14 }}>
+          {HOME_STEPS.map((s, i) => (
+            <RevealOnView key={s.n} delay={i * 120} className="cov-card" style={{ padding: '24px 26px' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }}>
+                <StepIcon kind={s.icon} />
+                <div className="cov-mono" style={{ fontSize: 13, color: 'var(--c-info)' }}>
+                  {s.n}
+                </div>
+              </div>
+              <h3
+                style={{
+                  fontFamily: 'var(--font-display)',
+                  fontWeight: 'var(--display-weight)' as never,
+                  fontSize: 24,
+                  letterSpacing: 'var(--display-tracking)',
+                  marginBottom: 10,
+                }}
+              >
+                {s.title}
+              </h3>
+              <p style={{ fontSize: 13.5, lineHeight: 1.65, color: 'var(--text-dim)', textWrap: 'pretty' }}>{s.body}</p>
+            </RevealOnView>
           ))}
         </div>
       </section>
 
-      {/* ─── THE PROBLEM ──────────────────────────────────────────────── */}
-      <Section>
-        <h2 style={{ fontSize: 'clamp(1.5rem, 3vw, 2.25rem)', fontWeight: 800, textAlign: 'center', marginBottom: 'var(--space-sm)', letterSpacing: '-0.02em' }}>
-          AI agents manage billions.
-          <br />
-          <span style={{ color: 'var(--color-text-secondary)' }}>When things go wrong, there&apos;s no safety net.</span>
-        </h2>
-
-        {/* Loss events ticker */}
-        <div style={{ overflow: 'hidden', margin: 'var(--space-xl) 0', padding: 'var(--space-md) 0' }}>
-          <div className="ticker-track">
-            {[...LOSS_EVENTS, ...LOSS_EVENTS].map((ev, i) => (
-              <div
-                key={i}
-                style={{
-                  flexShrink: 0,
-                  padding: 'var(--space-md) var(--space-lg)',
-                  background: 'var(--color-surface)',
-                  borderRadius: 'var(--radius-lg)',
-                  border: '1px solid var(--color-border-subtle)',
-                  minWidth: 220,
-                }}
-              >
-                <div style={{ fontWeight: 600, marginBottom: 4 }}>{ev.name}</div>
-                <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--color-danger)', fontFamily: 'var(--font-mono)' }}>
-                  {ev.loss}
-                </div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: 4 }}>
-                  {ev.date} &middot; {ev.cause}
-                </div>
-              </div>
-            ))}
+      {/* triggers */}
+      <section className="cov-page" style={{ paddingTop: 0, paddingBottom: 56 }}>
+        <RevealOnView>
+          <div className="cov-label" style={{ color: 'var(--c-info)', marginBottom: 22 }}>
+            Deterministic triggers
           </div>
-        </div>
-
-        <p style={{ textAlign: 'center', fontStyle: 'italic', color: 'var(--color-text-muted)', fontSize: '0.9375rem' }}>
-          Existing insurance covers smart contracts. Nobody covers the agents.
-        </p>
-      </Section>
-
-      {/* ─── HOW IT WORKS ─────────────────────────────────────────────── */}
-      <Section>
-        <h2 style={{ fontSize: '1.75rem', fontWeight: 800, textAlign: 'center', marginBottom: 'var(--space-2xl)', letterSpacing: '-0.02em' }}>
-          How Covantic Works
-        </h2>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 'var(--space-lg)' }}>
-          {HOW_IT_WORKS.map((step) => (
-            <div key={step.step} className="card-glow" style={{ padding: 'var(--space-xl)', position: 'relative' }}>
-              {/* Step number circle */}
-              <div
-                style={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: '50%',
-                  border: '2px solid transparent',
-                  background: 'linear-gradient(var(--color-surface), var(--color-surface)) padding-box, linear-gradient(135deg, var(--color-primary-light), var(--color-secondary)) border-box',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontWeight: 700,
-                  fontSize: '0.875rem',
-                  fontFamily: 'var(--font-mono)',
-                  marginBottom: 'var(--space-md)',
-                }}
-              >
-                {step.step}
-              </div>
-
-              {/* Icon */}
-              <div style={{ color: 'var(--color-primary-light)', marginBottom: 'var(--space-sm)' }}>
-                <StepIcon type={step.icon} />
-              </div>
-
-              <h3 style={{ fontWeight: 700, fontSize: '1.125rem', marginBottom: 'var(--space-xs)' }}>
-                {step.title}
-              </h3>
-              <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem', lineHeight: 1.5 }}>
-                {step.description}
-              </p>
-            </div>
+        </RevealOnView>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 14 }}>
+          {HOME_TRIGGERS.map((tr, i) => (
+            <RevealOnView key={tr.code} delay={i * 90} className="cov-card" style={{ padding: '20px 22px' }}>
+              <code className="cov-mono" style={{ fontSize: 13, color: 'var(--accent)', display: 'block', marginBottom: 10 }}>
+                {tr.code}
+              </code>
+              <p style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text-dim)', textWrap: 'pretty' }}>{tr.body}</p>
+            </RevealOnView>
           ))}
         </div>
-      </Section>
+      </section>
 
-      {/* ─── COVERAGE TRIGGERS ────────────────────────────────────────── */}
-      <Section>
-        <h2 style={{ fontSize: '1.75rem', fontWeight: 800, textAlign: 'center', marginBottom: 'var(--space-sm)', letterSpacing: '-0.02em' }}>
-          Coverage Triggers
-        </h2>
-        <p style={{ textAlign: 'center', color: 'var(--color-text-secondary)', marginBottom: 'var(--space-2xl)', maxWidth: 500, margin: '0 auto var(--space-2xl)' }}>
-          Four parametric triggers, each verified deterministically on-chain.
-        </p>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 'var(--space-md)' }}>
-          {COVERAGE_TRIGGERS.map((trigger) => (
-            <div
-              key={trigger.name}
+      {/* CTA */}
+      <section className="cov-page" style={{ paddingTop: 0, paddingBottom: 72 }}>
+        <RevealOnView className="cov-card" style={{ padding: '40px 44px', display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
+          <div>
+            <h2
               style={{
-                padding: 'var(--space-lg)',
-                borderRadius: 'var(--radius-lg)',
-                border: `1px solid var(--color-border-subtle)`,
-                background: trigger.bg,
-                transition: 'var(--transition-base)',
+                fontFamily: 'var(--font-display)',
+                fontWeight: 'var(--display-weight)' as never,
+                fontSize: 30,
+                letterSpacing: 'var(--display-tracking)',
+                marginBottom: 8,
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-sm)' }}>
-                <div style={{ width: 8, height: 8, borderRadius: '50%', background: trigger.color }} />
-                <span style={{ fontWeight: 700, color: trigger.color }}>{trigger.name}</span>
-              </div>
-              <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', marginBottom: 'var(--space-sm)', lineHeight: 1.5 }}>
-                {trigger.condition}
-              </p>
-              <div
-                style={{
-                  fontSize: '0.6875rem',
-                  fontWeight: 700,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                  color: 'var(--color-text-muted)',
-                  padding: '2px 8px',
-                  background: 'var(--color-surface)',
-                  borderRadius: 'var(--radius-full)',
-                  display: 'inline-block',
-                }}
-              >
-                Lock: {trigger.lock}
-              </div>
-            </div>
-          ))}
-        </div>
-      </Section>
-
-      {/* ─── RISK TIERS & PRICING ─────────────────────────────────────── */}
-      <Section>
-        <h2 style={{ fontSize: '1.75rem', fontWeight: 800, textAlign: 'center', marginBottom: 'var(--space-sm)', letterSpacing: '-0.02em' }}>
-          Risk Tiers & Pricing
-        </h2>
-        <p style={{ textAlign: 'center', color: 'var(--color-text-secondary)', marginBottom: 'var(--space-2xl)', maxWidth: 400, margin: '0 auto var(--space-2xl)' }}>
-          Premiums reflect real risk.
-        </p>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--space-md)' }}>
-          {RISK_TIERS.map((tier) => (
-            <div
-              key={tier.name}
-              className="card-glow"
-              style={{ padding: 'var(--space-lg)', textAlign: 'center' }}
-            >
-              <div style={{ fontWeight: 800, fontSize: '0.75rem', letterSpacing: '0.1em', color: tier.color, marginBottom: 'var(--space-xs)' }}>
-                {tier.name}
-              </div>
-              <div style={{ fontSize: '1.75rem', fontWeight: 800, fontFamily: 'var(--font-mono)', marginBottom: 'var(--space-sm)' }}>
-                {tier.rate}
-              </div>
-              {/* Progress bar */}
-              <div style={{ height: 4, background: 'var(--color-border)', borderRadius: 2, overflow: 'hidden', marginBottom: 'var(--space-xs)' }}>
-                <div style={{ height: '100%', width: `${tier.fill}%`, background: tier.color, borderRadius: 2 }} />
-              </div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>
-                {tier.range}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <p style={{ textAlign: 'center', fontSize: '0.8125rem', color: 'var(--color-text-muted)', marginTop: 'var(--space-xl)', maxWidth: 600, margin: 'var(--space-xl) auto 0' }}>
-          15 on-chain signals: Account age &middot; Transaction patterns &middot; DeFi exposure &middot;
-          Protocol diversity &middot; Error rate &middot; Token concentration &middot; Volume history &middot;
-          MEV exposure &middot; Funding sources &middot; and more.
-        </p>
-      </Section>
-
-      {/* ─── LIVE CLAIM DEMO ──────────────────────────────────────────── */}
-      <Section>
-        <h2 style={{ fontSize: '1.75rem', fontWeight: 800, textAlign: 'center', marginBottom: 'var(--space-sm)', letterSpacing: '-0.02em' }}>
-          See it in action.
-        </h2>
-        <p style={{ textAlign: 'center', color: 'var(--color-text-secondary)', marginBottom: 'var(--space-xl)' }}>
-          Watch a claim go from detection to payout in seconds.
-        </p>
-
-        <div style={{ maxWidth: 700, margin: '0 auto' }}>
-          {!demoRunning && (
-            <div style={{ textAlign: 'center', marginBottom: 'var(--space-lg)' }}>
-              <button className="btn-glow" onClick={runDemo}>
-                &#9654; Run Demo
-              </button>
-            </div>
-          )}
-
-          {demoRunning && (
-            <div
-              style={{
-                background: 'var(--color-surface)',
-                border: '1px solid var(--color-border-subtle)',
-                borderRadius: 'var(--radius-lg)',
-                padding: 'var(--space-lg)',
-              }}
-            >
-              <ClaimVerificationPipeline key={demoKey} autoPlay onComplete={() => setDemoRunning(false)} />
-            </div>
-          )}
-        </div>
-      </Section>
-
-      {/* ─── FOR DEVELOPERS ───────────────────────────────────────────── */}
-      <Section>
-        <h2 style={{ fontSize: '1.75rem', fontWeight: 800, textAlign: 'center', marginBottom: 'var(--space-sm)', letterSpacing: '-0.02em' }}>
-          One line of code. Full coverage.
-        </h2>
-        <p style={{ textAlign: 'center', color: 'var(--color-text-secondary)', marginBottom: 'var(--space-2xl)' }}>
-          Integrate Covantic into your agent with the SDK.
-        </p>
-
-        <div
-          style={{
-            maxWidth: 600,
-            margin: '0 auto',
-            background: 'var(--color-surface)',
-            border: '1px solid var(--color-border-subtle)',
-            borderRadius: 'var(--radius-lg)',
-            padding: 'var(--space-lg)',
-            overflow: 'auto',
-          }}
-        >
-          <pre style={{ fontFamily: 'var(--font-mono)', fontSize: '0.875rem', lineHeight: 1.7, color: 'var(--color-text-secondary)' }}>
-            <code>
-              {SDK_CODE.split('\n').map((line, i) => {
-                if (line.startsWith('import') || line.startsWith('const') || line.startsWith('await'))
-                  return <div key={i}><span className="code-keyword">{line.split(' ')[0]}</span>{' '}{line.slice(line.indexOf(' ') + 1)}</div>;
-                if (line.startsWith('//'))
-                  return <div key={i} className="code-comment">{line}</div>;
-                return <div key={i}>{line || '\u00A0'}</div>;
-              })}
-            </code>
-          </pre>
-        </div>
-
-        <div style={{ display: 'flex', gap: 'var(--space-md)', justifyContent: 'center', marginTop: 'var(--space-xl)' }}>
-          <a href="https://github.com/mihailShumilov/covantic-solana-sdk" target="_blank" rel="noopener noreferrer">
-            <button className="btn-outline">SDK on GitHub &rarr;</button>
-          </a>
-        </div>
-      </Section>
-
-      {/* ─── FOR STAKERS ──────────────────────────────────────────────── */}
-      <Section>
-        <h2 style={{ fontSize: '1.75rem', fontWeight: 800, textAlign: 'center', marginBottom: 'var(--space-sm)', letterSpacing: '-0.02em' }}>
-          Earn yield by backing AI agent coverage.
-        </h2>
-
-        {/* Stats */}
-        <div style={{ display: 'flex', gap: 'var(--space-lg)', justifyContent: 'center', marginTop: 'var(--space-xl)', marginBottom: 'var(--space-xl)', flexWrap: 'wrap' }}>
-          {STAKER_STATS.map((stat) => (
-            <div key={stat.label} style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '1.75rem', fontWeight: 800, fontFamily: 'var(--font-mono)', color: 'var(--color-accent)' }}>
-                {stat.value}
-              </div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{stat.label}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Steps */}
-        <div style={{ maxWidth: 500, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
-          {[
-            'Stake USDC into the insurance pool',
-            'Premiums from agents = your yield',
-            'Claims reduce pool (capped by solvency rules)',
-            'Unstake with 48-hour cooldown',
-          ].map((text, i) => (
-            <div key={i} style={{ display: 'flex', gap: 'var(--space-md)', alignItems: 'flex-start' }}>
-              <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--color-primary-light)', fontSize: '0.875rem', flexShrink: 0 }}>
-                {i + 1}.
-              </span>
-              <span style={{ fontSize: '0.9375rem', color: 'var(--color-text-secondary)' }}>{text}</span>
-            </div>
-          ))}
-        </div>
-
-        <div style={{ textAlign: 'center', marginTop: 'var(--space-xl)' }}>
-          <Link href="/staking">
-            <button className="btn-glow">Start Staking &rarr;</button>
+              See your agent&apos;s risk surface.
+            </h2>
+            <p style={{ fontSize: 14, color: 'var(--text-dim)' }}>
+              15 factors, 5 categories, one transaction. Try the live demo assessment.
+            </p>
+          </div>
+          <span style={{ flex: 1 }} />
+          <Link href="/dashboard" style={{ textDecoration: 'none' }}>
+            <button className="cov-btn-primary" style={{ padding: '13px 24px', fontSize: 14.5 }}>
+              Run assessment
+            </button>
           </Link>
-        </div>
-
-        <p style={{ textAlign: 'center', fontSize: '0.6875rem', color: 'var(--color-text-muted)', marginTop: 'var(--space-md)' }}>
-          Protocol is in devnet. All values are simulated.
-        </p>
-      </Section>
-
-      {/* ─── BUILT WITH ───────────────────────────────────────────────── */}
-      <Section style={{ padding: 'var(--space-2xl) var(--space-lg)' }}>
-        <div
-          style={{
-            display: 'flex',
-            gap: 'var(--space-2xl)',
-            justifyContent: 'center',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-          }}
-        >
-          {TECH_STACK.map((name) => (
-            <span
-              key={name}
-              style={{
-                fontSize: '0.875rem',
-                fontWeight: 600,
-                color: 'var(--color-text-muted)',
-                letterSpacing: '0.05em',
-                transition: 'var(--transition-base)',
-              }}
-            >
-              {name}
-            </span>
-          ))}
-        </div>
-      </Section>
+        </RevealOnView>
+      </section>
     </div>
   );
 }

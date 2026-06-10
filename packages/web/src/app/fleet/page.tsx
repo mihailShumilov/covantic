@@ -143,25 +143,38 @@ export default function FleetPage() {
   const activity = data?.activity ?? [];
 
   return (
-    <div style={{ padding: 'var(--space-xl)', maxWidth: 1400, margin: '0 auto' }}>
+    <div className="cov-page" style={{ maxWidth: 1400 }}>
       <div
         style={{
           display: 'flex',
-          alignItems: 'baseline',
+          alignItems: 'flex-end',
           justifyContent: 'space-between',
-          marginBottom: 'var(--space-lg)',
+          marginBottom: 24,
           gap: 'var(--space-md)',
           flexWrap: 'wrap',
         }}
       >
         <div>
-          <h1 style={{ fontSize: '1.5rem', fontWeight: 700 }}>Agent Fleet</h1>
-          <p style={{ color: 'var(--color-text-muted)', fontSize: '0.875rem' }}>
+          <div className="cov-label" style={{ color: 'var(--c-info)', marginBottom: 8 }}>
+            Fleet
+          </div>
+          <h1
+            style={{
+              fontFamily: 'var(--font-display)',
+              fontWeight: 'var(--display-weight)' as never,
+              letterSpacing: 'var(--display-tracking)',
+              fontSize: 34,
+              marginBottom: 8,
+            }}
+          >
+            Every covered agent, on-chain.
+          </h1>
+          <p style={{ color: 'var(--text-dim)', fontSize: 13.5, lineHeight: 1.6 }}>
             Autonomous on-chain agents running every ~60s. Rogue ticks produce
             real anomalies that flow through monitor → verifier → payout.
           </p>
         </div>
-        <div style={{ color: 'var(--color-text-muted)', fontSize: '0.75rem' }}>
+        <div className="cov-mono" style={{ color: 'var(--text-faint)', fontSize: 11.5 }}>
           {loading ? 'loading…' : `polled ${timeAgo(now - 100, now)} · ${agents.length} agents`}
         </div>
       </div>

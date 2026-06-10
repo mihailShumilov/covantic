@@ -207,10 +207,22 @@ export default function StakingPage() {
   const hasStake = (position?.amountStaked ?? 0) > 0;
 
   return (
-    <div style={{ padding: 'var(--space-xl)', maxWidth: 1200, margin: '0 auto' }}>
-      <h1 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: 'var(--space-xl)' }}>
-        Staking Pool
-      </h1>
+    <div className="cov-page">
+      <div style={{ marginBottom: 24 }}>
+        <div className="cov-label" style={{ color: 'var(--c-info)', marginBottom: 8 }}>
+          Staking
+        </div>
+        <h1
+          style={{
+            fontFamily: 'var(--font-display)',
+            fontWeight: 'var(--display-weight)' as never,
+            letterSpacing: 'var(--display-tracking)',
+            fontSize: 34,
+          }}
+        >
+          Coverage pool
+        </h1>
+      </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-lg)' }}>
         <Card title="Pool Health">
