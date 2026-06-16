@@ -49,6 +49,9 @@ export function startSolvencyChecker(db: Database, redis: Redis, config: AppConf
     { every: 300_000 },
     {
       name: 'check-vault-solvency',
+      // Bound retained history — without this, every completed cron run leaks a
+      // job hash into Redis forever and eventually trips `noeviction` maxmemory.
+      opts: { removeOnComplete: { count: 100 }, removeOnFail: { count: 100 } },
     },
   );
 

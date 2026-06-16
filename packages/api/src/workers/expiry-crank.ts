@@ -55,7 +55,12 @@ export function startExpiryCrank(db: Database, redis: Redis, config: AppConfig) 
   queue.upsertJobScheduler(
     'check-expired',
     { every: EVERY_MS },
-    { name: 'check-expired-policies' },
+    {
+      name: 'check-expired-policies',
+      // Bound retained history — without this, every completed cron run leaks a
+      // job hash into Redis forever and eventually trips `noeviction` maxmemory.
+      opts: { removeOnComplete: { count: 100 }, removeOnFail: { count: 100 } },
+    },
   );
 
   const worker = new Worker(
