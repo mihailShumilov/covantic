@@ -51,7 +51,12 @@ export function startPolicyIndexer(db: Database, redis: Redis, config: AppConfig
   queue.upsertJobScheduler(
     'reconcile-policies',
     { every: RECONCILE_EVERY_MS },
-    { name: 'reconcile-policies' },
+    {
+      name: 'reconcile-policies',
+      // Bound retained history — without this, every completed cron run leaks a
+      // job hash into Redis forever and eventually trips `noeviction` maxmemory.
+      opts: { removeOnComplete: { count: 100 }, removeOnFail: { count: 100 } },
+    },
   );
 
   const worker = new Worker(
