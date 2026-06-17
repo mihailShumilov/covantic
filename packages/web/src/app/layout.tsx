@@ -8,6 +8,7 @@ import { CovanticProvider } from '@/providers/CovanticProvider';
 import '@/styles/globals.css';
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? 'https://covantic.org'),
   title: 'Covantic — Parametric Insurance for AI Agents',
   description:
     'The first programmable coverage protocol for autonomous agents on Solana. Deterministic triggers, instant payouts, zero paperwork.',
