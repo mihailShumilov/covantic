@@ -8,6 +8,13 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { RevealOnView } from './visuals';
+import {
+  LOSS_ANCHORS,
+  distinctSources,
+  getMarketStat,
+  type LossAnchor,
+  type SourceRef,
+} from '@/data/lossStats';
 
 /* ============ ANIMATED STEP ICONS (How it works) ============ */
 
@@ -69,35 +76,69 @@ export function StepIcon({ kind }: { kind: 'assess' | 'underwrite' | 'settle' | 
 }
 
 /* ============ FEAR BLOCK: real incidents ============ */
+/* Every figure below is sourced from src/data/lossStats.ts (single source of
+   truth for external statistics). Do not hardcode loss figures here. */
 
-const INCIDENTS = [
-  { name: 'Drift Protocol', amount: '$286M', meta: 'Apr 2026 · Governance exploit — drained in 12 minutes' },
-  { name: 'Stream Finance · xUSD', amount: '$285M', meta: 'Nov 2025 · Stablecoin collapse, fragile oracles' },
-  { name: 'Cream Finance', amount: '$130M', meta: 'Oct 2021 · Oracle manipulation' },
-  { name: 'Mango Markets', amount: '$100M+', meta: 'Oct 2022 · Oracle manipulation' },
-  { name: 'KiloEx', amount: '$7.5M', meta: 'Apr 2025 · Oracle access-control exploit' },
-  { name: 'aixbt', amount: '$106K', meta: 'Mar 2025 · Prompt injection — agent sent 55.5 ETH itself' },
-  { name: 'Freysa', amount: '$47K', meta: 'Nov 2024 · Agent talked into releasing funds' },
-];
-
-function IncidentCard({ inc }: { inc: (typeof INCIDENTS)[number] }) {
+function IncidentCard({ inc }: { inc: LossAnchor }) {
   return (
-    <div className="cov-card" style={{ padding: '20px 24px', width: 280, flexShrink: 0, marginRight: 14 }}>
-      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>{inc.name}</div>
+    <div className="cov-card" style={{ padding: '20px 24px', width: 288, flexShrink: 0, marginRight: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+        <span style={{ fontSize: 15, fontWeight: 700 }}>{inc.name}</span>
+        <span style={{ flex: 1 }} />
+        <span className="cov-mono" style={{ fontSize: 10.5, color: 'var(--text-faint)', letterSpacing: '0.08em' }}>
+          {inc.chain}
+        </span>
+      </div>
       <div className="cov-mono" style={{ fontSize: 27, fontWeight: 700, color: 'var(--c-critical)', letterSpacing: '-0.02em', marginBottom: 8 }}>
         {inc.amount}
       </div>
-      <div style={{ fontSize: 12.5, color: 'var(--text-dim)' }}>{inc.meta}</div>
+      <div style={{ fontSize: 12.5, color: 'var(--text-dim)', marginBottom: 8 }}>
+        {inc.date} · {inc.cause}
+      </div>
+      <div className="cov-mono" style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>
+        — {inc.source.name}, {inc.source.year}
+      </div>
     </div>
   );
 }
 
+function SourceFootnote({ sources }: { sources: SourceRef[] }) {
+  return (
+    <p
+      className="cov-mono"
+      style={{ textAlign: 'center', fontSize: 11, color: 'var(--text-faint)', marginTop: 16, padding: '0 36px', lineHeight: 1.6 }}
+    >
+      Sources:{' '}
+      {sources.map((s, i) => (
+        <span key={s.name}>
+          {i > 0 && ' · '}
+          {s.url ? (
+            <a href={s.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-dim)' }}>
+              {s.name}
+            </a>
+          ) : (
+            <span style={{ color: 'var(--text-dim)' }}>{s.name}</span>
+          )}{' '}
+          ({s.year})
+        </span>
+      ))}
+    </p>
+  );
+}
+
 export function FearBlock() {
+  // Verified base-rate headline (CertiK Hack3d) + distinct citations for the marquee.
+  const frequency = getMarketStat('incident-frequency');
+  const sources = distinctSources([
+    ...LOSS_ANCHORS.map((a) => a.source),
+    ...(frequency ? [frequency.source] : []),
+  ]);
+
   return (
     <section style={{ padding: '40px 0 64px' }}>
       <RevealOnView style={{ textAlign: 'center', padding: '0 36px', marginBottom: 12 }}>
         <div className="cov-label" style={{ color: 'var(--c-critical)', marginBottom: 18, whiteSpace: 'normal' }}>
-          $286M drained from Solana&apos;s largest perp DEX in 12 minutes — April 2026
+          $286M drained from Drift, Solana&apos;s largest perp DEX — 1 April 2026
         </div>
         <h2
           style={{
@@ -124,11 +165,16 @@ export function FearBlock() {
         >
           When things go wrong, there&apos;s no safety net.
         </h2>
+        {frequency && (
+          <p style={{ fontSize: 14.5, color: 'var(--text-dim)', marginTop: 16, textWrap: 'pretty' }}>
+            {frequency.value} {frequency.label}.
+          </p>
+        )}
       </RevealOnView>
       <RevealOnView delay={150}>
         <div className="cov-marquee" style={{ padding: '28px 0 8px' }}>
           <div className="cov-marquee-track">
-            {[...INCIDENTS, ...INCIDENTS].map((inc, i) => (
+            {[...LOSS_ANCHORS, ...LOSS_ANCHORS].map((inc, i) => (
               <IncidentCard key={`${inc.name}-${i}`} inc={inc} />
             ))}
           </div>
@@ -136,8 +182,10 @@ export function FearBlock() {
       </RevealOnView>
       <RevealOnView delay={250}>
         <p style={{ textAlign: 'center', fontStyle: 'italic', fontSize: 14.5, color: 'var(--text-dim)', marginTop: 26, padding: '0 36px' }}>
-          Existing insurance covers smart contracts. Nobody covers the agents.
+          Existing cover — Nexus Mutual, Amulet, Neptune Mutual — insures the smart contract, not the
+          agent. The owner absorbs 100% of the loss.
         </p>
+        <SourceFootnote sources={sources} />
       </RevealOnView>
     </section>
   );

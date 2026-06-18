@@ -7,13 +7,8 @@ export const HERO_STATS = [
   { label: 'Solvency Ratio', value: '312%' },
 ] as const;
 
-export const LOSS_EVENTS = [
-  { name: 'Drift Protocol', loss: '$286M', date: 'Apr 2026', cause: 'Governance exploit' },
-  { name: 'Wormhole Bridge', loss: '$325M', date: 'Feb 2022', cause: 'Missing signer check' },
-  { name: 'KiloEx', loss: '$117M', date: 'Apr 2025', cause: 'Oracle manipulation' },
-  { name: 'Mango Markets', loss: '$115M', date: 'Oct 2022', cause: 'Oracle manipulation' },
-  { name: 'Lobstar Wilde', loss: '$250K', date: 'Feb 2026', cause: 'Decimal parsing error' },
-] as const;
+// Real-world loss anchors moved to the single source of truth for verified,
+// source-backed statistics: see src/data/lossStats.ts (`LOSS_ANCHORS`).
 
 export const HOW_IT_WORKS = [
   {
