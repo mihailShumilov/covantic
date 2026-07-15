@@ -155,6 +155,11 @@ services:
   nginx:
     image: nginx:alpine
     container_name: covantic-nginx
+    # Reload every 6h so certbot-renewed certs (written to the certbot-etc
+    # volume) get picked up automatically. `certbot renew` has no deploy hook
+    # to signal this container, so without this loop nginx keeps serving the
+    # stale cert from memory until a manual restart -> TLS expiry outage.
+    command: /bin/sh -c "trap exit TERM; while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g 'daemon off;'"
     ports:
       - "80:80"
       - "443:443"
