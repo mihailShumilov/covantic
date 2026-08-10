@@ -16,6 +16,14 @@ src/
     fleet/page.tsx        — Fleet agents + scrolling activity feed (polls /api/fleet every 6s).
                             Distinguishes runner-side `error` (red) from on-chain `meta.err`
                             via `describeOnChainErr` (muted, expected outcome for `fail` rows).
+    hire/page.tsx         — Commercial co-founder role. Server component; contact handles
+                            live in the single `CONTACT` const at the top of the file.
+  public/
+    pitch.html            — Pitch deck. A self-contained export (own stage runtime, inlined
+                            fonts/assets) served outside the app shell: next.config.ts
+                            rewrites `/pitch` → `/pitch.html`. Not an app route — link to it
+                            with a plain <a>, never next/link. Regenerate by re-exporting the
+                            deck, then re-apply the two edits noted at the top of the file.
   components/
     ui/                   — Button, Card, Badge, Spinner, Modal
     layout/Header.tsx     — Nav (Dashboard / Fleet / Protocol / Staking / Claims / Demo) + WalletButton

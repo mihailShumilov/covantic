@@ -1,3 +1,7 @@
+import Link from 'next/link';
+
+const LINK_STYLE = { fontSize: 11.5, color: 'var(--text-faint)' } as const;
+
 export function Footer() {
   return (
     <footer
@@ -16,12 +20,19 @@ export function Footer() {
         Covantic Protocol · Colosseum Frontier 2026
       </span>
       <span style={{ flex: 1 }} />
+      <Link className="cov-mono" href="/hire" style={LINK_STYLE}>
+        Hiring
+      </Link>
+      {/* Served as a standalone export from public/ — not an app route, so <a>. */}
+      <a className="cov-mono" href="/pitch" style={LINK_STYLE}>
+        Pitch deck
+      </a>
       <a
         className="cov-mono"
         href="https://github.com/mihailShumilov/ai-agent-insurance"
         target="_blank"
         rel="noopener noreferrer"
-        style={{ fontSize: 11.5, color: 'var(--text-faint)' }}
+        style={LINK_STYLE}
       >
         GitHub
       </a>

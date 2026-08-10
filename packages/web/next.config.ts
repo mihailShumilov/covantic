@@ -18,6 +18,11 @@ const nextConfig: NextConfig = {
       tls: { browser: './empty-module.js' },
     },
   },
+  // The pitch deck is a self-contained export (its own stage runtime, inlined
+  // fonts and assets) — it is served as-is from public/, outside the app shell.
+  async rewrites() {
+    return [{ source: '/pitch', destination: '/pitch.html' }];
+  },
   webpack: (config) => {
     // Fallback for webpack builds (next build --webpack)
     config.resolve.fallback = {
