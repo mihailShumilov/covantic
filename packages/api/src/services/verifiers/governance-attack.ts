@@ -41,6 +41,7 @@ export function verifyGovernanceAttack(
 
   if (!programs.governance) {
     return {
+      outcome: 'rejected',
       verified: false,
       lossAmount: 0,
       confidence: 0,
@@ -55,6 +56,7 @@ export function verifyGovernanceAttack(
 
   if (tx.transactionError) {
     return {
+      outcome: 'rejected',
       verified: false,
       lossAmount: 0,
       confidence: 0,
@@ -77,6 +79,7 @@ export function verifyGovernanceAttack(
 
   if (biggestSolDelta < 10_000_000 && !hasTokenSwing) {
     return {
+      outcome: 'rejected',
       verified: false,
       lossAmount: 0,
       confidence: 0,
@@ -92,6 +95,7 @@ export function verifyGovernanceAttack(
   const payoutRaw = Math.floor(coverageRaw * DEFAULT_GOVERNANCE_PAYOUT_RATIO);
   const lossAmount = capToCoverage(payoutRaw, coverageRaw);
   return {
+    outcome: lossAmount > 0 ? 'confirmed' : 'rejected',
     verified: lossAmount > 0,
     lossAmount,
     confidence: lossAmount > 0 ? 0.55 : 0,

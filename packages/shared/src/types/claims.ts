@@ -9,7 +9,27 @@ export enum ClaimStatus {
   Rejected = 'rejected',
   /** Payout attempt failed (e.g. insufficient vault balance, RPC error). */
   Failed = 'failed',
+  /** Verification could not reach a conclusion — a price source was
+   *  unavailable, references disagreed, or the trigger tx was not yet
+   *  indexed. The claim is retried with backoff; it is NEVER auto-rejected,
+   *  because "we could not check" is not "there was no loss". */
+  Indeterminate = 'indeterminate',
+  /** Escalated to a human/committee adjuster after repeated indeterminate
+   *  verification, or because the evidence supports a loss but not strongly
+   *  enough for the auto-pay lane. */
+  Review = 'review',
 }
+
+/** Claim statuses that count as "open" — a policy may hold at most one
+ *  claim in any of these states (enforced by the `claims_open_unique`
+ *  partial index in db/custom-constraints.ts). Keep the two in sync. */
+export const OPEN_CLAIM_STATUSES: readonly ClaimStatus[] = [
+  ClaimStatus.Pending,
+  ClaimStatus.Verifying,
+  ClaimStatus.Approved,
+  ClaimStatus.Indeterminate,
+  ClaimStatus.Review,
+] as const;
 
 /** Insurance claim */
 export interface Claim {
@@ -85,6 +105,12 @@ export interface VerificationData {
   details?: Record<string, unknown>;
   /** Stringified error from a failed payout attempt */
   payoutError?: string;
+  /** Terminal verdict from the verifier: confirmed | rejected | indeterminate */
+  outcome?: string;
+  /** sha256 of the canonical evidence bundle the verdict was derived from */
+  bundleHash?: string;
+  /** Number of verification attempts made so far (indeterminate retries) */
+  verifyAttempts?: number;
   /** Open-ended overflow for verifier-specific fields */
   [key: string]: unknown;
 }

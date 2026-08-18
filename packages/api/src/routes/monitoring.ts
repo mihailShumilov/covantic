@@ -9,6 +9,7 @@ import {
 } from '@covantic/shared';
 import { monitoringEvents, policies } from '../db/schema.js';
 import { TransactionMonitor } from '../services/transaction-monitor.js';
+import { buildPriceOracle } from '../services/oracle/factory.js';
 import { publishAlert } from '../services/alert-bus.js';
 import { readMonitorMetrics } from '../utils/monitor-metrics.js';
 
@@ -80,7 +81,12 @@ function staticTokenMatches(
 }
 
 export async function monitoringRoutes(app: FastifyInstance) {
-  const monitor = new TransactionMonitor(app.db, app.redis, app.config.ALERT_HMAC_SECRET);
+  const monitor = new TransactionMonitor(
+    app.db,
+    app.redis,
+    app.config.ALERT_HMAC_SECRET,
+    buildPriceOracle(),
+  );
 
   /** GET /api/monitoring/events — Recent monitoring events */
   app.get('/api/monitoring/events', async (request, reply) => {

@@ -2,9 +2,12 @@ import { inArray } from 'drizzle-orm';
 import { PolicyState } from '@covantic/shared';
 import type { Database } from '../config/database.js';
 import { policies, monitoringEvents } from '../db/schema.js';
+import type { EnhancedTransaction } from '../utils/helius.js';
 import { logger } from '../utils/logger.js';
 import type Redis from 'ioredis';
 import { publishAlert } from './alert-bus.js';
+import { screenForOracleDeviation } from './oracle/prefilter.js';
+import type { PriceOracle } from './oracle/types.js';
 import { incrementMetric } from '../utils/monitor-metrics.js';
 
 /**
@@ -24,10 +27,36 @@ import { incrementMetric } from '../utils/monitor-metrics.js';
 const LARGE_TRANSFER_THRESHOLD_UI = 1_000; // 1,000 USDC — triggers warning
 const CRITICAL_TRANSFER_THRESHOLD_UI = 10_000; // 10,000 USDC — triggers critical
 
-/** Minimal shape we read from the Helius enhanced transaction envelope. */
+/** How specifically each anomaly type names what went wrong. The most
+ *  specific one wins the single open-claim slot a policy has. */
+const ANOMALY_SPECIFICITY: Record<string, number> = {
+  oracle_deviation: 3,
+  failed_tx: 2,
+  large_transfer: 1,
+};
+
+function specificity(type: string): number {
+  return ANOMALY_SPECIFICITY[type] ?? 0;
+}
+
+/**
+ * Helius enhanced transaction envelope.
+ *
+ * Widened from the three fields the size/failure checks needed once price
+ * screening arrived: deciding whether a swap was filled badly requires the
+ * balance deltas and the invoked programs, not just the transfer amounts.
+ */
 interface WebhookTransaction {
   signature?: string;
   transactionError?: unknown;
+  /** Block time, unix seconds — the instant every price lookup anchors to. */
+  timestamp?: number;
+  slot?: number;
+  fee?: number;
+  feePayer?: string;
+  instructions?: unknown;
+  accountData?: unknown;
+  nativeTransfers?: unknown;
   tokenTransfers?: Array<{ fromUserAccount?: string; tokenAmount?: number }>;
 }
 
@@ -55,6 +84,11 @@ export class TransactionMonitor {
     private db: Database,
     private redis: Redis,
     private alertSecret: string,
+    /** Multi-source pricer used to screen swaps. Optional so the monitor
+     *  still runs without it — but with it absent, oracle manipulation is
+     *  invisible to the pipeline, which is the state this whole change set
+     *  exists to fix. */
+    private priceOracle?: PriceOracle,
   ) {}
 
   async processWebhook(payload: WebhookTransaction[]): Promise<void> {
@@ -136,7 +170,7 @@ export class TransactionMonitor {
       const agentAddress = transfer.fromUserAccount;
       if (!agentAddress || !insuredActive.has(agentAddress)) continue;
 
-      const anomalies = this.detectAnomalies(tx, agentAddress);
+      const anomalies = await this.detectAnomalies(tx, agentAddress);
 
       for (const anomaly of anomalies) {
         await this.db.insert(monitoringEvents).values({
@@ -171,10 +205,10 @@ export class TransactionMonitor {
     }
   }
 
-  private detectAnomalies(
+  private async detectAnomalies(
     tx: WebhookTransaction,
     agentAddress: string,
-  ): Array<{ type: string; severity: string; details: Record<string, unknown> }> {
+  ): Promise<Array<{ type: string; severity: string; details: Record<string, unknown> }>> {
     const anomalies: Array<{ type: string; severity: string; details: Record<string, unknown> }> =
       [];
     const tokenTransfers = tx.tokenTransfers ?? [];
@@ -199,6 +233,35 @@ export class TransactionMonitor {
       });
     }
 
-    return anomalies;
+    // Price screening. Without this the protocol sells cover against oracle
+    // manipulation and has no way to notice it happening.
+    if (this.priceOracle && !tx.transactionError) {
+      // Helius sends the full enhanced transaction; the schema above keeps
+      // unknown fields via passthrough, so the extra structure the screen
+      // needs is present at runtime even though the validated type is loose.
+      // Both `reconstructExecution` and `classifyPrograms` tolerate every
+      // field being absent, so a thin payload degrades to "not a swap"
+      // rather than throwing.
+      const screen = await screenForOracleDeviation(
+        tx as unknown as EnhancedTransaction,
+        agentAddress,
+        this.priceOracle,
+      );
+      if (screen.flagged) {
+        anomalies.push({
+          type: 'oracle_deviation',
+          severity: screen.severity,
+          details: { screenReason: screen.reason, ...screen.detail },
+        });
+      }
+    }
+
+    // Order matters more than it looks. A policy may hold only one open claim
+    // (`claims_open_unique`), so whichever anomaly is published first decides
+    // the trigger type for the whole incident. A large swap raises both
+    // `large_transfer` and `oracle_deviation`; filing it as AgentError would
+    // send it to a verifier that rejects DEX trades outright, and the
+    // manipulation evidence would never be looked at.
+    return anomalies.sort((a, b) => specificity(b.type) - specificity(a.type));
   }
 }

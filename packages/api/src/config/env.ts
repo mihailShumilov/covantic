@@ -16,6 +16,21 @@ const envSchema = z.object({
 
   SOLANA_RPC_URL: z.string().url(),
   SOLANA_NETWORK: z.enum(['devnet', 'mainnet-beta', 'localnet']).default('devnet'),
+
+  /**
+   * Settle oracle-manipulation payouts through `verify_and_payout_v2`, which
+   * makes the program verify a guardian-signed Pyth price instead of taking
+   * the oracle's word for it.
+   *
+   * Defaults to off because the instruction only exists in program builds
+   * from this change forward — enabling it against an older deployment makes
+   * every payout fail. Turn it on after redeploying, and expect claims that
+   * cannot be proven to go to review rather than falling back to the
+   * unverified path.
+   */
+  ORACLE_PROOF_ENABLED: z
+    .preprocess((v) => (typeof v === 'string' ? v.toLowerCase() === 'true' : v), z.boolean())
+    .default(false),
   PROGRAM_ID: z.string().min(32),
   ORACLE_KEYPAIR_PATH: z.string(),
 

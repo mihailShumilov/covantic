@@ -22,13 +22,15 @@
     "seed:demo": "tsx scripts/seed-demo.ts",
     "demo:exploit": "tsx scripts/simulate-exploit.ts",
     "demo:run": "tsx scripts/run-demo.ts",
-    "test:e2e": "COVANTIC_E2E=1 vitest run tests/e2e.test.ts"
+    "test:e2e": "COVANTIC_E2E=1 vitest run tests/e2e.test.ts",
+    "claim:replay": "tsx scripts/claim-replay.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.30.1",
     "@covantic/shared": "workspace:*",
     "@fastify/cors": "^10.0.0",
     "@fastify/websocket": "^11.0.0",
+    "@pythnetwork/pyth-solana-receiver": "^0.16.0",
     "@solana/spl-token": "^0.4.0",
     "@solana/web3.js": "^1.95.0",
     "bullmq": "^5.0.0",

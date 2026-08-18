@@ -45,18 +45,49 @@ const KNOWN_RISKY_PATTERNS = [
   'memo', // Often used in scam txs
 ];
 
-/** Flash loan / leverage programs */
+/** Flash loan / leverage programs.
+ *
+ *  Every entry must be a valid 32-byte base58 pubkey. An entry that is not
+ *  simply never matches, and the detector it feeds fails silently — which is
+ *  exactly what happened to the Kamino id here, whose old value
+ *  ('KLend2g3cP87ber8pJ3wQWZaFFi6TGDKP1UvqWu3n') is one byte short and was
+ *  therefore dead weight in this set from the day it was added. */
 const FLASH_LOAN_PROGRAMS = new Set([
   'So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo', // Solend
-  'MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA', // Marginfi
-  'DjVE6JNiYqPL2QXyCUUh8rNjHrbz9hXHNYt99MQ59qw1', // Drift
-  'KLend2g3cP87ber8pJ3wQWZaFFi6TGDKP1UvqWu3n', // Kamino
+  'MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA', // MarginFi v2
+  'DjVE6JNiYqPL2QXyCUUh8rNjHrbz9hXHNYt99MQ59qw1', // Drift (legacy)
+  'dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH', // Drift v2
+  'KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD', // Kamino Lend
+]);
+
+/** Lending and perpetuals venues — the programs that *read* an oracle to
+ *  value collateral or mark a position.
+ *
+ *  This is the attack surface the swap-shaped detector cannot see. Inflating
+ *  a collateral price and borrowing against it never looks like a mispriced
+ *  swap, because no swap happens; the loss shows up as a loan the protocol
+ *  should never have written. Overlaps FLASH_LOAN_PROGRAMS on purpose — the
+ *  same program can fund the squeeze and price the collateral. */
+const LENDING_PROGRAMS = new Set([
+  'So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo', // Solend
+  'MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA', // MarginFi v2
+  'KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD', // Kamino Lend
+  'dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH', // Drift v2 (perps)
+  '4MangoMjqJ2firMokCjjGgoK8d4MXcrgL7XJaL3w6fVg', // Mango v4
+  'PERPHjGBqRHArX4DySjwM6UJHiR3sWAatqfdBS2qQJu', // Jupiter Perpetuals
 ]);
 
 /** Helius Enhanced Transaction type */
 export interface EnhancedTransaction {
   signature: string;
+  /** Block time, unix seconds. Every retrospective price lookup is anchored
+   *  to this value, so a missing or implausible timestamp must stop
+   *  verification rather than silently fall back to "now". */
   timestamp: number;
+  /** Solana slot. Helius returns it; it was missing from this type, which is
+   *  why slot-indexed evidence (pool state at slot-1 / slot / slot+1) had
+   *  nothing to key off. */
+  slot?: number;
   type: string;
   source: string;
   fee: number;
@@ -229,4 +260,10 @@ export class HeliusClient {
   }
 }
 
-export { KNOWN_DEX_PROGRAMS, KNOWN_BRIDGE_PROGRAMS, KNOWN_RISKY_PATTERNS, FLASH_LOAN_PROGRAMS };
+export {
+  KNOWN_DEX_PROGRAMS,
+  KNOWN_BRIDGE_PROGRAMS,
+  KNOWN_RISKY_PATTERNS,
+  FLASH_LOAN_PROGRAMS,
+  LENDING_PROGRAMS,
+};

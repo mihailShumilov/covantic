@@ -45,6 +45,7 @@ pnpm webhook:sync        # Register/refresh the Helius webhook for all insured a
 pnpm agent:create|fund|trigger        # Throwaway agent keypair CLI (real on-chain activity)
 pnpm fleet:bootstrap|start|status     # Autonomous fleet of policy-covered agents
 pnpm stake:vault [--amount N]         # Stake USDC into the vault (lift solvency ratio)
+pnpm --filter api claim:replay <id>   # Re-derive a stored claim verdict from its evidence
 ```
 
 Filter to single package: `pnpm --filter api dev`, `pnpm --filter web dev`
@@ -76,6 +77,8 @@ Filter to single package: `pnpm --filter api dev`, `pnpm --filter web dev`
 - Risk tiers: LOW(0), MEDIUM(1), HIGH(2), EXTREME(3) → 100/250/500 bps annual
 - Solvency thresholds: Emergency<50%, Critical 50-100%, Caution 100-200%, Healthy≥200%
 - Trigger types: Exploit(1), OracleManipulation(2), AgentError(3), GovernanceAttack(4)
+- Claim statuses: pending, verifying, approved, paying, paid, rejected, failed,
+  indeterminate, review — the last two are OPEN states (see `OPEN_CLAIM_STATUSES`)
 - Lock periods: exploit=0s, oracle_manipulation=1h, agent_error=6h, governance_attack=2h
 - Unstake cooldown: 48 hours
 - Attestation max validity: 3600 s (`ATTESTATION_MAX_VALIDITY_SECONDS`)
@@ -102,6 +105,15 @@ Filter to single package: `pnpm --filter api dev`, `pnpm --filter web dev`
   error) and silently breaks every verifier's `triggerTxSignature` lookup. Always pass
   `SOLANA_NETWORK` into `new HeliusClient(apiKey, cluster)`. The retired
   `api.helius.xyz/v0` host must not come back.
+- Claim verification is three-valued: `confirmed | rejected | indeterminate`. An
+  unavailable price source, an unindexed trigger tx, or references that disagree
+  must produce `indeterminate` (retry, then review) — never `rejected`. Closing a
+  claim is a statement that the evidence contradicts it.
+- Oracle-manipulation verdicts are produced by a **pure** `adjudicate(bundle)` in
+  `services/oracle/adjudicate.ts`. No I/O, no `Date.now()`, no randomness: the
+  same evidence must yield the same verdict forever, which is what
+  `pnpm claim:replay` and the on-chain evidence hash rely on. Bump
+  `ADJUDICATOR_VERSION` when behaviour changes rather than editing quietly.
 - Fleet `fail` actions **must land on-chain** with a real signature + non-null `meta.err`.
   `executeFail` uses `sendRawTransaction({ skipPreflight: true })` + explicit
   `confirmTransaction`; strategies live in `packages/api/src/services/fleet/failures.ts`.
@@ -110,5 +122,5 @@ Filter to single package: `pnpm --filter api dev`, `pnpm --filter web dev`
 
 ## Git
 
-- Remote: `git@github.com:mihailShumilov/ai-agent-insurance.git`
+- Remote: `git@github.com:mihailShumilov/covantic.git`
 - No AI attribution in commits or docs

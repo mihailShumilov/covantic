@@ -20,6 +20,8 @@ export const PDA_SEEDS = {
   VAULT_TOKEN: 'covantic_vault_token',
   /** One attestation PDA per agent address. See program state/risk_attestation.rs. */
   ATTESTATION: 'covantic_attestation',
+  /** One evidence record per policy, written by verify_and_payout_v2. */
+  CLAIM_EVIDENCE: 'covantic_claim_evidence',
 } as const;
 
 /**

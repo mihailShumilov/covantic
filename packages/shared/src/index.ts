@@ -22,7 +22,7 @@ export type {
   PipelineStep,
   VerificationData,
 } from './types/claims.js';
-export { ClaimStatus, VerificationStep, StepStatus } from './types/claims.js';
+export { ClaimStatus, VerificationStep, StepStatus, OPEN_CLAIM_STATUSES } from './types/claims.js';
 
 export type { StakerPositionResponse } from './types/staking.js';
 
@@ -68,6 +68,17 @@ export {
   generateDemoTxSignature,
   policyIdToBytes,
 } from './constants.js';
+
+// Token registry
+export type { TokenKind, TokenMeta } from './tokens.js';
+export {
+  MINT_REGISTRY,
+  NATIVE_SOL_PSEUDO_MINT,
+  WRAPPED_SOL_MINT,
+  lookupMint,
+  isStableMint,
+  canonicalMint,
+} from './tokens.js';
 
 // Utils
 export {

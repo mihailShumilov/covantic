@@ -86,3 +86,20 @@ pub struct AttestationUpserted {
     pub issued_at: i64,
     pub expires_at: i64,
 }
+
+/// Event: a payout was verified against a guardian-signed price on chain.
+///
+/// Emitted alongside `ClaimPaid` on the proven path. Indexers can use its
+/// presence to tell a payout the chain checked from one it merely permitted.
+#[event]
+pub struct ClaimProofVerified {
+    pub policy_id: u64,
+    pub feed_id: [u8; 32],
+    pub reference_price: i64,
+    pub executed_price: i64,
+    pub deviation_bps: u32,
+    pub max_provable_loss: u64,
+    pub payout_amount: u64,
+    pub bundle_hash: [u8; 32],
+    pub price_publish_time: i64,
+}

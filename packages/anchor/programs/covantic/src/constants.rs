@@ -104,3 +104,40 @@ pub const CANCEL_PENALTY_BPS: u16 = 2000;
 /// Signatures are persisted as Base58-encoded UTF-8 bytes (87-88 chars).
 /// 88 leaves a 1-byte pad for future-proofing.
 pub const MAX_TRIGGER_TX_SIG_LEN: usize = 88;
+
+/// Seed for the ClaimEvidenceRecord PDA — one per policy.
+pub const CLAIM_EVIDENCE_SEED: &[u8] = b"covantic_claim_evidence";
+
+/// Exponent every price evidence submission must use.
+///
+/// Pyth publishes USD feeds at 1e-8. Pinning it means the program never has
+/// to rescale between the signed price and the committed execution, and a
+/// mismatched exponent — the classic way to be wrong by a factor of a
+/// hundred million — is rejected instead of silently accepted.
+pub const PRICE_EVIDENCE_EXPO: i32 = -8;
+
+/// How far the signed price may sit from the transaction it is pricing.
+///
+/// Pyth publishes several times a second, so a legitimate lookup lands within
+/// a second or two. Anything wider is pricing the trade against a different
+/// moment in the market.
+pub const MAX_PRICE_EVIDENCE_SKEW: i64 = 5;
+
+/// Oldest a trigger transaction may be relative to the claim filed for it.
+///
+/// Bounds how far back the oracle may reach for a favourable price. Seven
+/// days is generous for an automated pipeline that files within minutes,
+/// while still ruling out mining the historical record for a moment when
+/// some feed happened to dislocate.
+pub const MAX_CLAIM_EVIDENCE_LAG: i64 = 7 * 24 * 3600;
+
+/// Smallest deviation that can support a proven payout, in basis points.
+///
+/// Mirrors the off-chain floor. Its job here is different, though: off chain
+/// it filters noise, while on chain it is a hard limit on what a compromised
+/// oracle key can extract from a normal, honest fill.
+pub const MIN_PROVABLE_DEVIATION_BPS: u32 = 50;
+
+/// Upper bound on subject token decimals, so the scaling exponent cannot be
+/// driven somewhere that overflows.
+pub const MAX_SUBJECT_DECIMALS: u8 = 18;

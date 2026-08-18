@@ -103,6 +103,22 @@ pub enum CovanticError {
     #[msg("Invalid attestation validity window (must be > 0 and <= 1 hour)")]
     InvalidAttestationValidity,
 
+    // -- Price Evidence Errors --
+    #[msg("Price evidence is malformed, for the wrong feed, or at the wrong exponent")]
+    InvalidPriceEvidence,
+
+    #[msg("Signed price was not published close enough to the trigger transaction")]
+    PriceEvidenceSkew,
+
+    #[msg("Trigger transaction falls outside the policy's claim window")]
+    PriceEvidenceOutOfWindow,
+
+    #[msg("Deviation from the signed reference price is below the provable minimum")]
+    DeviationBelowMinimum,
+
+    #[msg("Payout exceeds the loss the signed price can account for")]
+    PayoutExceedsProvenLoss,
+
     // -- Math Errors --
     #[msg("Arithmetic overflow")]
     MathOverflow,

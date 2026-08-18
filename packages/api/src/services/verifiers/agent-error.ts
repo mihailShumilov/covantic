@@ -53,6 +53,7 @@ export function verifyAgentError(
   // 1. Self-transfer guard
   if (isSelfTransfer(tx, agentAddress)) {
     return {
+      outcome: 'rejected',
       verified: false,
       lossAmount: 0,
       confidence: 0,
@@ -74,6 +75,7 @@ export function verifyAgentError(
     const flatLossRaw = uiToRaw(1);
     const lossAmount = capToCoverage(flatLossRaw, coverageRaw);
     return {
+      outcome: lossAmount >= MIN_LOSS_RAW ? 'confirmed' : 'rejected',
       verified: lossAmount >= MIN_LOSS_RAW,
       lossAmount,
       confidence: lossAmount > 0 ? 0.6 : 0,
@@ -100,6 +102,7 @@ export function verifyAgentError(
   if (outflowUi >= LARGE_USDC_UI) {
     if (programs.dex && !programs.bridge && !programs.flashLoan) {
       return {
+        outcome: 'rejected',
         verified: false,
         lossAmount: 0,
         confidence: 0,
@@ -125,6 +128,7 @@ export function verifyAgentError(
 
     const lossAmount = capToCoverage(netOutflowRaw, coverageRaw);
     return {
+      outcome: lossAmount >= MIN_LOSS_RAW ? 'confirmed' : 'rejected',
       verified: lossAmount >= MIN_LOSS_RAW,
       lossAmount,
       confidence: lossAmount > 0 ? confidence : 0,
@@ -142,6 +146,7 @@ export function verifyAgentError(
   //    is the key signal the stub was missing: a policy-eating event that
   //    doesn't actually produce loss).
   return {
+    outcome: 'rejected',
     verified: false,
     lossAmount: 0,
     confidence: 0,

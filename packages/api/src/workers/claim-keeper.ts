@@ -18,21 +18,37 @@ import {
 
 // Anchor's ESM export of BN tripping up on named imports; pull from default.
 const { BN } = anchorPkg;
+import type { Connection } from '@solana/web3.js';
 import type { Database } from '../config/database.js';
 import type { AppConfig } from '../config/env.js';
-import { claims, policies } from '../db/schema.js';
+import { createSolanaConnection } from '../config/solana.js';
+import { claimEvidence, claims, policies } from '../db/schema.js';
+import { ADJUDICATOR_VERSION } from '../services/oracle/adjudicate.js';
+import { bundleHash, verdictHash } from '../services/oracle/hash.js';
 import { logger } from '../utils/logger.js';
 import { HeliusClient } from '../utils/helius.js';
-import { PythClient } from '../utils/pyth.js';
+import type { ConsensusPricer } from '../services/oracle/consensus.js';
+import { buildPriceOracle } from '../services/oracle/factory.js';
+import { ProofPoster } from '../services/oracle/proof-poster.js';
 import {
   createCovanticProgram,
   type CovanticProgram,
 } from '../utils/program.js';
 import { verifyClaim, type VerificationResult } from '../services/claim-oracle.js';
+import type { ProofInputs } from '../services/verifiers/oracle-manipulation.js';
 import { ALERT_CHANNEL, verifyAlert } from '../services/alert-bus.js';
 
 const PROCESS_QUEUE = 'claim-keeper';
 const PAYOUT_QUEUE = 'claim-payout';
+
+/**
+ * How many times an indeterminate verdict is retried before a human is
+ * asked. Sources recover in seconds and indexers catch up in minutes, so a
+ * claim that is still unresolvable after this many attempts has a problem
+ * retrying will not fix.
+ */
+const MAX_VERIFY_ATTEMPTS = 5;
+
 
 /** Monitoring event types the keeper reacts to, mapped to on-chain triggers. */
 const EVENT_TO_TRIGGER: Record<string, TriggerType | undefined> = {
@@ -99,7 +115,12 @@ export function startClaimKeeper(db: Database, redis: Redis, config: AppConfig) 
   }
 
   const helius = new HeliusClient(config.HELIUS_API_KEY, config.SOLANA_NETWORK);
-  const pyth = new PythClient();
+  const priceOracle = buildPriceOracle();
+  // Used to cross-check the trigger transaction's block time against the
+  // indexer. Every retrospective price lookup hangs off that timestamp, so
+  // taking a single indexer's word for it is a single point of failure.
+  const connection = createSolanaConnection(config.SOLANA_RPC_URL);
+  const proofPoster = new ProofPoster(connection, programCtx);
 
   const processQueue = new Queue<ClaimJobPayload>(PROCESS_QUEUE, {
     connection: redis,
@@ -113,7 +134,17 @@ export function startClaimKeeper(db: Database, redis: Redis, config: AppConfig) 
   const processWorker = new Worker<ClaimJobPayload>(
     PROCESS_QUEUE,
     async (job) => {
-      await processClaim(job.data.claimId, db, redis, programCtx, helius, pyth, payoutQueue, config);
+      await processClaim(job.data.claimId, {
+        db,
+        redis,
+        programCtx,
+        helius,
+        priceOracle,
+        connection,
+        processQueue,
+        payoutQueue,
+        config,
+      });
     },
     { connection: redis, concurrency: 2 },
   );
@@ -121,7 +152,7 @@ export function startClaimKeeper(db: Database, redis: Redis, config: AppConfig) 
   const payoutWorker = new Worker<PayoutJobPayload>(
     PAYOUT_QUEUE,
     async (job) => {
-      await executePayout(job.data.claimId, db, redis, programCtx);
+      await executePayout(job.data.claimId, db, redis, programCtx, config, proofPoster);
     },
     { connection: redis, concurrency: 1 },
   );
@@ -177,7 +208,7 @@ async function ingestAlert(
   // Only honour the simulated flag in non-production environments. Even on
   // the signed bus, a stray dev payload must never trigger a real payout.
   const requestedSimulated = Boolean(payload.simulated ?? payload.data?.simulated);
-  const simulated = requestedSimulated && config.NODE_ENV !== 'production';
+  const simulated = requestedSimulated && syntheticAllowed(config);
 
   if (!agentAddress || !eventType) {
     logger.debug({ raw }, 'claim-keeper skipping malformed alert');
@@ -275,6 +306,7 @@ function syntheticVerification(
   const lockPeriod = lockByTrigger[triggerType] ?? LOCK_PERIODS.EXPLOIT;
 
   return {
+    outcome: 'confirmed',
     verified: true,
     lossAmount: Math.floor(coverageAmount * SYNTHETIC_PAYOUT_RATIO),
     confidence: 1.0,
@@ -283,20 +315,47 @@ function syntheticVerification(
   };
 }
 
+/** Mainnet USDC. Its presence means real money regardless of what NODE_ENV
+ *  claims. */
+const MAINNET_USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+
+/**
+ * Whether the synthetic (demo) verifier may run.
+ *
+ * The synthetic path pays 80% of coverage at confidence 1.0 without looking
+ * at anything on-chain, so the gate around it is the only thing standing
+ * between a stray demo alert and a real payout. One environment variable is
+ * too thin a barrier for that: a misconfigured NODE_ENV on a mainnet
+ * deployment would be enough. The cluster and the USDC mint must also both
+ * say "not real money".
+ */
+function syntheticAllowed(config: AppConfig): boolean {
+  return (
+    config.NODE_ENV !== 'production' &&
+    config.SOLANA_NETWORK !== 'mainnet-beta' &&
+    config.USDC_MINT !== MAINNET_USDC_MINT
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Verification + submit_claim
 // ---------------------------------------------------------------------------
 
-async function processClaim(
-  claimId: string,
-  db: Database,
-  redis: Redis,
-  programCtx: CovanticProgram,
-  helius: HeliusClient,
-  pyth: PythClient,
-  payoutQueue: Queue<PayoutJobPayload>,
-  config: AppConfig,
-): Promise<void> {
+interface ProcessDeps {
+  db: Database;
+  redis: Redis;
+  programCtx: CovanticProgram;
+  helius: HeliusClient;
+  priceOracle: ConsensusPricer;
+  connection: Connection;
+  processQueue: Queue<ClaimJobPayload>;
+  payoutQueue: Queue<PayoutJobPayload>;
+  config: AppConfig;
+}
+
+async function processClaim(claimId: string, deps: ProcessDeps): Promise<void> {
+  const { db, redis, programCtx, helius, priceOracle, connection, processQueue, payoutQueue, config } =
+    deps;
   const claim = await loadClaim(claimId, db);
   if (!claim) return;
 
@@ -318,9 +377,7 @@ async function processClaim(
   const verificationData = (claim.verificationData ?? {}) as VerificationData;
   const isDemoSignature = claim.triggerTxSignature.startsWith(DEMO_TX_SIGNATURE_PREFIX);
   const simulated =
-    verificationData.simulated === true &&
-    isDemoSignature &&
-    config.NODE_ENV !== 'production';
+    verificationData.simulated === true && isDemoSignature && syntheticAllowed(config);
 
   let result: VerificationResult;
   if (simulated) {
@@ -332,15 +389,27 @@ async function processClaim(
       claim.agentAddress,
       policy.coverageAmount,
       helius,
-      pyth,
-      { usdcMint: config.USDC_MINT },
+      priceOracle,
+      { usdcMint: config.USDC_MINT, connection },
     );
   }
 
-  if (!result.verified || result.lossAmount <= 0) {
+  const attempt = (claim.verifyAttempts ?? 0) + 1;
+  await recordEvidence(claim, attempt, result, db);
+
+  // "We could not check" is not "there was no loss". An unavailable price
+  // source, an unindexed transaction, or references that disagree all land
+  // here and get retried; only evidence that actually contradicts the claim
+  // closes it.
+  if (result.outcome === 'indeterminate') {
+    await handleIndeterminate(claim, attempt, result, db, redis, processQueue);
+    return;
+  }
+
+  if (result.outcome === 'rejected' || result.lossAmount <= 0) {
     await rejectClaim(
       claim,
-      { reason: 'verification_failed', details: result.details },
+      { reason: 'verification_failed', outcome: result.outcome, details: result.details },
       db,
       redis,
     );
@@ -358,8 +427,12 @@ async function processClaim(
       payoutAmount: result.lossAmount,
       verificationData: mergeVerificationData(claim.verificationData, {
         ...result.details,
+        outcome: result.outcome,
         confidence: result.confidence,
+        verifyAttempts: attempt,
       }),
+      verifyAttempts: attempt,
+      reviewReason: null,
       verifiedAt: new Date(),
       lockExpiresAt,
       updatedAt: new Date(),
@@ -405,6 +478,8 @@ async function executePayout(
   db: Database,
   redis: Redis,
   programCtx: CovanticProgram,
+  config: AppConfig,
+  proofPoster: ProofPoster,
 ): Promise<void> {
   const claim = await loadClaim(claimId, db);
   if (!claim) return;
@@ -452,13 +527,50 @@ async function executePayout(
     if (reloaded) await broadcastClaim(reloaded, redis);
   }
 
-  try {
-    const payoutSig = await verifyAndPayoutOnChain(
-      programCtx,
-      policy.holderAddress,
-      BigInt(claim.policyId),
-      BigInt(payoutAmount),
+  const proofPlan = planProvenSettlement(claim, config);
+  if (proofPlan.kind === 'unprovable') {
+    // Fail closed. Falling back to the unverified instruction here would make
+    // the whole proven path decorative: an attacker who can stop a proof from
+    // being built would simply get the legacy behaviour back.
+    logger.warn(
+      { claimId: claim.id, reason: proofPlan.reason },
+      'claim-keeper: proof required but unavailable, escalating instead of paying',
     );
+    await db
+      .update(claims)
+      .set({
+        status: 'review',
+        reviewReason: proofPlan.reason.slice(0, 128),
+        verificationData: mergeVerificationData(claim.verificationData, {
+          reason: proofPlan.reason,
+        }),
+        updatedAt: new Date(),
+      })
+      .where(eq(claims.id, claim.id));
+    const escalated = await loadClaim(claim.id, db);
+    if (escalated) await broadcastClaim(escalated, redis);
+    return;
+  }
+
+  try {
+    const payoutSig =
+      proofPlan.kind === 'proven'
+        ? (
+            await proofPoster.settle({
+              holderAddress: policy.holderAddress,
+              policyId: BigInt(claim.policyId),
+              payoutAmount: BigInt(payoutAmount),
+              triggerBlockTime: proofPlan.triggerBlockTime,
+              proof: proofPlan.proof,
+              bundleHash: proofPlan.bundleHash,
+            })
+          ).at(-1)!
+        : await verifyAndPayoutOnChain(
+            programCtx,
+            policy.holderAddress,
+            BigInt(claim.policyId),
+            BigInt(payoutAmount),
+          );
 
     await db
       .update(claims)
@@ -473,7 +585,10 @@ async function executePayout(
     const paid = await loadClaim(claim.id, db);
     if (paid) await broadcastClaim(paid, redis);
 
-    logger.info({ claimId: claim.id, payoutSig }, 'claim-keeper: payout executed');
+    logger.info(
+      { claimId: claim.id, payoutSig, proven: proofPlan.kind === 'proven' },
+      'claim-keeper: payout executed',
+    );
   } catch (err) {
     logger.error({ err, claimId: claim.id }, 'claim-keeper: payout failed');
     await db
@@ -490,6 +605,50 @@ async function executePayout(
     if (failed) await broadcastClaim(failed, redis);
     throw err; // let BullMQ retry per JOB_OPTS.attempts
   }
+}
+
+/**
+ * Which settlement path this claim takes.
+ *
+ * `proven`    — the chain verifies a guardian-signed price before releasing funds.
+ * `legacy`    — the pre-proof instruction; the chain trusts the oracle's amount.
+ * `unprovable`— proof is required for this trigger but the inputs are missing.
+ */
+type SettlementPlan =
+  | { kind: 'proven'; proof: ProofInputs; triggerBlockTime: number; bundleHash: string }
+  | { kind: 'legacy' }
+  | { kind: 'unprovable'; reason: string };
+
+function planProvenSettlement(claim: ClaimRow, config: AppConfig): SettlementPlan {
+  if (!config.ORACLE_PROOF_ENABLED) return { kind: 'legacy' };
+  // Only oracle manipulation has a price to prove. Exploits and governance
+  // attacks are not price claims and there is nothing for the receiver to
+  // check, so they keep the legacy path.
+  if (claim.triggerType !== TriggerType.OracleManipulation) return { kind: 'legacy' };
+
+  const data = (claim.verificationData ?? {}) as VerificationData & {
+    proof?: ProofInputs;
+    blockTime?: number;
+    bundleHash?: string;
+  };
+  if (data.simulated === true) return { kind: 'legacy' };
+
+  if (!data.proof?.signedUpdateHex) {
+    return { kind: 'unprovable', reason: 'no_signed_price_evidence' };
+  }
+  if (typeof data.blockTime !== 'number') {
+    return { kind: 'unprovable', reason: 'no_trigger_block_time' };
+  }
+  if (!data.bundleHash) {
+    return { kind: 'unprovable', reason: 'no_bundle_hash' };
+  }
+
+  return {
+    kind: 'proven',
+    proof: data.proof,
+    triggerBlockTime: data.blockTime,
+    bundleHash: data.bundleHash,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -585,6 +744,101 @@ async function setClaimStatus(
   await db.update(claims).set({ status, updatedAt: new Date() }).where(eq(claims.id, claim.id));
   const reloaded = await loadClaim(claim.id, db);
   if (reloaded) await broadcastClaim(reloaded, redis);
+}
+
+/**
+ * Persist the evidence a verdict was derived from.
+ *
+ * Written before any state transition and on every attempt, including the
+ * ones that resolve nothing: the trail of what each retry saw is how a stuck
+ * claim gets diagnosed. Evidence storage must never be able to break the
+ * pipeline, so failures here are logged and swallowed.
+ */
+async function recordEvidence(
+  claim: ClaimRow,
+  attempt: number,
+  result: VerificationResult,
+  db: Database,
+): Promise<void> {
+  if (!result.evidence) return;
+  try {
+    const bundle = result.evidence as unknown as Record<string, unknown>;
+    const hash = bundleHash(bundle);
+    const verdict = {
+      outcome: result.outcome,
+      lossAmount: result.lossAmount,
+      confidence: result.confidence,
+      lockPeriod: result.lockPeriod,
+      details: result.details,
+    };
+    await db.insert(claimEvidence).values({
+      claimId: claim.id,
+      attempt,
+      bundle,
+      bundleHash: hash,
+      verdict,
+      verdictHash: verdictHash(hash, verdict),
+      adjudicatorVersion: ADJUDICATOR_VERSION,
+    });
+  } catch (err) {
+    logger.error(
+      { err, claimId: claim.id, attempt },
+      'claim-keeper: failed to persist claim evidence',
+    );
+  }
+}
+
+/**
+ * Park an unresolvable claim and try again later, or hand it to a human.
+ *
+ * The retry delay comes from the verifier, which knows what it was waiting
+ * on: an indexer catching up needs seconds, a missing price feed needs a
+ * code change. Past MAX_VERIFY_ATTEMPTS the claim moves to `review` — still
+ * open, still counted against the policy, but no longer spinning.
+ */
+async function handleIndeterminate(
+  claim: ClaimRow,
+  attempt: number,
+  result: VerificationResult,
+  db: Database,
+  redis: Redis,
+  processQueue: Queue<ClaimJobPayload>,
+): Promise<void> {
+  const reason = String(result.details.reason ?? 'indeterminate');
+  const exhausted = attempt >= MAX_VERIFY_ATTEMPTS;
+  const retryAfterSec = Math.max(1, result.retryAfterSec ?? 60);
+
+  await db
+    .update(claims)
+    .set({
+      status: exhausted ? 'review' : 'indeterminate',
+      reviewReason: reason.slice(0, 128),
+      verifyAttempts: attempt,
+      verificationData: mergeVerificationData(claim.verificationData, {
+        ...result.details,
+        outcome: result.outcome,
+        verifyAttempts: attempt,
+      }),
+      updatedAt: new Date(),
+    })
+    .where(eq(claims.id, claim.id));
+
+  const reloaded = await loadClaim(claim.id, db);
+  if (reloaded) await broadcastClaim(reloaded, redis);
+
+  if (exhausted) {
+    logger.warn(
+      { claimId: claim.id, reason, attempt },
+      'claim-keeper: verification still indeterminate after max attempts, escalating to review',
+    );
+    return;
+  }
+
+  await processQueue.add('process', { claimId: claim.id }, { delay: retryAfterSec * 1000 });
+  logger.info(
+    { claimId: claim.id, reason, attempt, retryAfterSec },
+    'claim-keeper: verification indeterminate, scheduled retry',
+  );
 }
 
 async function rejectClaim(

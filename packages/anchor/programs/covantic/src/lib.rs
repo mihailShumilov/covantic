@@ -76,6 +76,21 @@ pub mod covantic {
         verify_and_payout_handler(ctx, payout_amount)
     }
 
+    /// Verify an oracle-manipulation claim against a guardian-signed Pyth
+    /// price and execute payout.
+    ///
+    /// Prefer this over `verify_and_payout` for TRIGGER_ORACLE_MANIPULATION.
+    /// The program checks the reference price itself instead of trusting the
+    /// oracle's word for it, and records what it verified in a
+    /// `ClaimEvidenceRecord` PDA so the payout stays auditable afterwards.
+    pub fn verify_and_payout_v2(
+        ctx: Context<VerifyAndPayoutV2>,
+        payout_amount: u64,
+        evidence: PayoutEvidence,
+    ) -> Result<()> {
+        verify_and_payout_v2_handler(ctx, payout_amount, evidence)
+    }
+
     /// Mark expired policies (permissionless crank).
     pub fn expire_policy(ctx: Context<ExpirePolicy>) -> Result<()> {
         expire_policy_handler(ctx)

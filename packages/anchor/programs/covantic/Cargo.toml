@@ -19,3 +19,8 @@ idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 [dependencies]
 anchor-lang = { workspace = true }
 anchor-spl = { workspace = true }
+# Verifies Wormhole guardian signatures over Pyth price updates on chain.
+# Pinned to the 0.4 line: it constrains solana-program to <2.0, which is what
+# anchor 0.30.1 builds against. Later releases drop that ceiling and will pull
+# an incompatible solana-program.
+pyth-solana-receiver-sdk = "0.4.0" 

@@ -1,201 +1,363 @@
+import type { Connection } from '@solana/web3.js';
 import { LOCK_PERIODS } from '@covantic/shared';
 import type { EnhancedTransaction } from '../../utils/helius.js';
-import type { PythClient } from '../../utils/pyth.js';
+import { DEFAULT_MAX_SKEW_SEC } from '../../utils/pyth.js';
 import type { VerificationResult } from '../claim-oracle.js';
-import { capToCoverage, classifyPrograms, uiToRaw } from './common.js';
+import {
+  ADJUDICATOR_VERSION,
+  adjudicate,
+  pickSubjectLeg,
+  type ProofInputs,
+  type Verdict,
+} from '../oracle/adjudicate.js';
+import { reconstructExecution, type ExecutionSummary } from '../oracle/execution.js';
+import { bundleHash } from '../oracle/hash.js';
+import { collectSignatures } from '../oracle/signatures.js';
+import { resolveTxTime } from '../oracle/tx-time.js';
+import {
+  isSourceUnavailable,
+  type EvidenceBundle,
+  type PriceOracle,
+} from '../oracle/types.js';
+import { valueLegs, type ValuationFailure } from '../oracle/valuation.js';
+import {
+  classifyPrograms,
+  verdictConfirmed,
+  verdictIndeterminate,
+  verdictRejected,
+} from './common.js';
 
-/** Deviation above this fraction between the tx's implied price and the
- *  Pyth spot price triggers an OracleManipulation approval. 3% is
- *  generous enough to survive spot-vs-tx-timing noise (Pyth updates
- *  every ~400ms, tx settles in ~0.5s) without whitelisting a real
- *  manipulation (those typically push the price 10%+ for a block). */
-const DEVIATION_THRESHOLD = 0.03;
+/** Bundle schema version. Bump whenever the evidence shape changes so an old
+ *  bundle replayed against a new adjudicator is recognisably old. */
+export const BUNDLE_VERSION = '1.4.0';
 
-/** Well-known mints we can price via Pyth. Extend cautiously. */
-const PRICE_FEED_FOR_MINT: Record<string, string> = {
-  So11111111111111111111111111111111111111112: 'SOL/USD', // wrapped SOL
-  // Native SOL (appears in nativeTransfers, not tokenTransfers)
-  SOL: 'SOL/USD',
-};
-
-/** USDC mints we treat as the "stable" leg of a swap. */
-const STABLE_USDC_MINTS = new Set([
-  'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // mainnet USDC
-  '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU', // devnet USDC — keep a concrete fallback
-]);
+export interface OracleVerifierOptions {
+  /** RPC connection for the block-time cross-check. */
+  connection?: Connection | null;
+  /** Override the price/block-time agreement tolerance, seconds. */
+  maxSkewSec?: number;
+}
 
 /**
- * Verifier for TriggerType.OracleManipulation — approve when the DEX
- * swap encoded in this tx executed at a price meaningfully different
- * from Pyth spot.
+ * Verifier for TriggerType.OracleManipulation.
  *
- * Requirements for a positive verification:
- *   1. At least one DEX program in instructions.
- *   2. One in-leg + one out-leg in tokenTransfers, where one side is
- *      USDC (or equivalent stable) and the other has a Pyth feed.
- *   3. Implied price `|priced_token_amount / usdc_amount|` deviates
- *      from Pyth spot by ≥ DEVIATION_THRESHOLD.
+ * Approves when the agent's net position change in the trigger transaction is
+ * worth measurably less than what it gave up, priced against the reference
+ * **at that transaction's block time**, after subtracting what an honest
+ * trade would have cost anyway.
  *
- * Loss is the deviation in USDC terms, capped by coverage.
+ * Four things this rests on, each of which used to be wrong:
  *
- * Known limitation: Pyth Hermes gives spot only. A tx seen after the
- * price has moved naturally will score higher deviation than it deserves.
- * Callers that need higher precision should swap PythClient for the
- * Benchmarks TWAP once that wrapper exists.
+ *   1. *When.* Comparing a historical swap against a live spot price measures
+ *      market drift since execution, not the fill. Every price read here goes
+ *      through `getPriceWindow(feed, blockTime)`.
+ *   2. *What.* The position change comes from netted balance deltas, not from
+ *      picking the two largest transfers — which mis-reads multi-hop routes,
+ *      split fills, and wSOL wrapping as trades between unrelated legs.
+ *   3. *How much.* Both sides are valued independently, so any registered
+ *      pair can be compared, and the DEX fee is subtracted before anything is
+ *      called a loss.
+ *
+ * Remaining phase boundaries, stated so the current limits are explicit:
+ *   4. *Against what.* The reference is a consensus of independent sources,
+ *      not one feed. Adjudicating manipulation of a feed using only that feed
+ *      lets the attacker's price certify itself.
+ *
+ * Remaining phase boundary, stated so the current limit is explicit: no
+ * structural manipulation signature is required yet (Phase 4 — reversion,
+ * same-slot displacement, sandwich pattern, flash-loan co-occurrence). Until
+ * that lands, a confirmed verdict means "filled well off an agreed reference",
+ * which is strong but still not proof of an attack, so the confidence ceiling
+ * here stays below the auto-pay lane.
  */
 export async function verifyOracleManipulation(
   tx: EnhancedTransaction,
   agentAddress: string,
   coverageRaw: number,
-  pyth: PythClient,
+  oracle: PriceOracle,
+  options: OracleVerifierOptions = {},
 ): Promise<VerificationResult> {
   const lockPeriod = LOCK_PERIODS.ORACLE_MANIPULATION;
+  const maxSkewSec = options.maxSkewSec ?? DEFAULT_MAX_SKEW_SEC;
   const programs = classifyPrograms(tx);
 
-  if (!programs.dex) {
-    return {
-      verified: false,
-      lossAmount: 0,
-      confidence: 0,
-      details: {
-        reason: 'no_dex_interaction',
-        programs,
-        note: 'OracleManipulation requires a DEX swap in the transaction.',
-      },
-      lockPeriod,
-    };
-  }
-
-  // Identify swap legs that involve the agent.
-  const outgoing = (tx.tokenTransfers ?? []).filter((t) => t.fromUserAccount === agentAddress);
-  const incoming = (tx.tokenTransfers ?? []).filter((t) => t.toUserAccount === agentAddress);
-  if (outgoing.length === 0 || incoming.length === 0) {
-    return {
-      verified: false,
-      lossAmount: 0,
-      confidence: 0,
-      details: {
-        reason: 'incomplete_swap',
-        note: 'Agent did not both send and receive a token in this tx.',
-      },
-      lockPeriod,
-    };
-  }
-
-  // Pick the largest-leg pair as the "main" swap.
-  const sell = outgoing.reduce((a, b) => ((a.tokenAmount ?? 0) > (b.tokenAmount ?? 0) ? a : b));
-  const buy = incoming.reduce((a, b) => ((a.tokenAmount ?? 0) > (b.tokenAmount ?? 0) ? a : b));
-  const sellAmount = sell.tokenAmount ?? 0;
-  const buyAmount = buy.tokenAmount ?? 0;
-  if (sellAmount <= 0 || buyAmount <= 0) {
-    return {
-      verified: false,
-      lossAmount: 0,
-      confidence: 0,
-      details: { reason: 'zero_amount_leg', sellAmount, buyAmount },
-      lockPeriod,
-    };
-  }
-
-  // Find the USDC side and the priced side.
-  const sellIsStable = STABLE_USDC_MINTS.has(sell.mint);
-  const buyIsStable = STABLE_USDC_MINTS.has(buy.mint);
-  if (sellIsStable === buyIsStable) {
-    return {
-      verified: false,
-      lossAmount: 0,
-      confidence: 0,
-      details: {
-        reason: 'unpriceable_pair',
-        note: 'Neither or both legs are a stable USDC mint — cannot price deviation.',
-        sellMint: sell.mint,
-        buyMint: buy.mint,
-      },
-      lockPeriod,
-    };
-  }
-  const usdcLeg = sellIsStable ? sell : buy;
-  const pricedLeg = sellIsStable ? buy : sell;
-  const usdcAmountUi = usdcLeg.tokenAmount ?? 0;
-  const pricedAmountUi = pricedLeg.tokenAmount ?? 0;
-
-  const feedKey = PRICE_FEED_FOR_MINT[pricedLeg.mint];
-  if (!feedKey) {
-    return {
-      verified: false,
-      lossAmount: 0,
-      confidence: 0,
-      details: {
-        reason: 'no_pyth_feed',
-        pricedMint: pricedLeg.mint,
-        note: 'No Pyth feed registered for this mint — cannot score deviation.',
-      },
-      lockPeriod,
-    };
-  }
-
-  const spot = await pyth.getSpotPrice(feedKey);
-  if (spot == null || spot <= 0) {
-    return {
-      verified: false,
-      lossAmount: 0,
-      confidence: 0,
-      details: {
-        reason: 'pyth_unavailable',
-        feedKey,
-        note: 'Pyth Hermes returned no price; cannot verify without external reference.',
-      },
-      lockPeriod,
-    };
-  }
-
-  // Implied price: USDC per unit of priced asset. If the agent was the
-  // buyer (paid USDC, received priced token), a high implied price means
-  // overpayment (loss). If the agent was the seller, a low implied price
-  // means undersell (loss).
-  const impliedPrice = usdcAmountUi / pricedAmountUi;
-  const deviation = (impliedPrice - spot) / spot;
-  const absDeviation = Math.abs(deviation);
-
-  const agentIsBuyer = sellIsStable;
-  const lossUsdcUi = agentIsBuyer
-    ? Math.max(0, (impliedPrice - spot) * pricedAmountUi) // overpaid
-    : Math.max(0, (spot - impliedPrice) * pricedAmountUi); // undersold
-
-  if (absDeviation < DEVIATION_THRESHOLD || lossUsdcUi <= 0) {
-    return {
-      verified: false,
-      lossAmount: 0,
-      confidence: 0,
-      details: {
-        reason: 'deviation_below_threshold',
-        deviation,
-        threshold: DEVIATION_THRESHOLD,
-        impliedPrice,
-        spotPrice: spot,
-        feedKey,
-      },
-      lockPeriod,
-    };
-  }
-
-  // Confidence scales with deviation magnitude — 3% → 0.6, 10% → 0.9.
-  const confidence = Math.min(0.9, 0.6 + (absDeviation - DEVIATION_THRESHOLD) * 4.29);
-  const lossAmount = capToCoverage(uiToRaw(lossUsdcUi), coverageRaw);
-
-  return {
-    verified: lossAmount > 0,
-    lossAmount,
-    confidence: lossAmount > 0 ? confidence : 0,
-    details: {
-      reason: 'price_deviation',
-      deviation,
-      impliedPrice,
-      spotPrice: spot,
-      feedKey,
-      agentRole: agentIsBuyer ? 'buyer' : 'seller',
-      lossUsdcUi,
-    },
-    lockPeriod,
+  const bundle: EvidenceBundle = {
+    version: BUNDLE_VERSION,
+    stage: 'verify',
+    triggerType: 2,
+    txSignature: tx.signature,
+    agentAddress,
+    coverageRaw,
+    slot: null,
+    blockTime: null,
+    prices: [],
+    windows: {},
+    collectedAt: Date.now(),
   };
+
+  // --- what actually happened to the agent's balance sheet -----------------
+  // Reconstructed before any branching so every outcome, including the ones
+  // that stop here, carries the position change into the evidence.
+  const execution = reconstructExecution(tx, agentAddress);
+  bundle.execution = execution;
+
+  if (!programs.dex) {
+    if (programs.lending) {
+      // A lending or perpetuals venue read an oracle to value collateral or
+      // mark a position. This is the canonical oracle attack — inflate a
+      // price, borrow against it, walk away — and it never looks like a
+      // mispriced swap, because no swap happens. The swap-shaped analysis
+      // below cannot score it, and quantifying the loss needs the protocol's
+      // own accounting, so it goes to an adjuster instead of being denied for
+      // failing to be a trade.
+      return verdictIndeterminate(
+        'lending_oracle_exposure',
+        {
+          programs,
+          execution,
+          note:
+            'Collateral or mark price was read from an oracle by a lending/perp program. ' +
+            'Protocol-specific accounting is needed to quantify the loss.',
+        },
+        lockPeriod,
+        3_600,
+        bundle,
+      );
+    }
+    return verdictRejected(
+      'no_dex_interaction',
+      { programs, note: 'OracleManipulation requires a DEX swap in the transaction.' },
+      lockPeriod,
+      bundle,
+    );
+  }
+
+  switch (execution.shape) {
+    case 'no_position_change':
+      return verdictRejected(
+        'no_position_change',
+        { execution, note: execution.note },
+        lockPeriod,
+        bundle,
+      );
+    case 'no_swap':
+      return verdictRejected(
+        'incomplete_swap',
+        { execution, note: execution.note },
+        lockPeriod,
+        bundle,
+      );
+    case 'unsupported_shape':
+      // Several mints on both sides. There is a real trade here, we just
+      // cannot reduce it to one implied price — a reviewer can, so this goes
+      // to review rather than being denied.
+      return verdictIndeterminate(
+        'unsupported_swap_shape',
+        { execution, note: execution.note },
+        lockPeriod,
+        3_600,
+        bundle,
+      );
+    default:
+      break;
+  }
+
+  // --- when did it happen --------------------------------------------------
+  const txTime = await resolveTxTime(tx, options.connection ?? null);
+  bundle.slot = txTime.slot;
+  bundle.blockTime = txTime.blockTime;
+  if (txTime.disagreementSec !== undefined) {
+    bundle.blockTimeDisagreementSec = txTime.disagreementSec;
+  }
+
+  if (txTime.blockTime === null) {
+    return verdictIndeterminate(
+      'no_block_time',
+      {
+        note: 'Could not establish when the transaction executed; refusing to price against now.',
+        heliusTimestamp: tx.timestamp ?? null,
+      },
+      lockPeriod,
+      60,
+      bundle,
+    );
+  }
+
+  // --- what it was worth ---------------------------------------------------
+  const ctx = {
+    oracle,
+    blockTime: txTime.blockTime,
+    maxSkewSec,
+    windows: bundle.windows,
+    prices: bundle.prices,
+  };
+
+  let soldValuation;
+  let boughtValuation;
+  try {
+    soldValuation = await valueLegs(execution.sold, ctx);
+    boughtValuation = await valueLegs(execution.bought, ctx);
+  } catch (err) {
+    if (isSourceUnavailable(err)) {
+      return verdictIndeterminate(
+        'price_source_unavailable',
+        {
+          source: err.source,
+          status: err.status ?? null,
+          note: 'Reference source unreachable — retrying; this is not a denial.',
+        },
+        lockPeriod,
+        err.retryAfterSec,
+        bundle,
+      );
+    }
+    throw err;
+  }
+
+  bundle.prices.sort((a, b) => a.publishTime - b.publishTime);
+
+  if (!soldValuation.ok) return valuationFailed(soldValuation.failure, lockPeriod, bundle);
+  if (!boughtValuation.ok) return valuationFailed(boughtValuation.failure, lockPeriod, bundle);
+
+  bundle.valuation = { sold: soldValuation.legs, bought: boughtValuation.legs };
+
+  // --- structural evidence -------------------------------------------------
+  // Collected, not judged: whether these signatures are enough is the
+  // adjudicator's call, and it must be able to make it again later from the
+  // bundle alone.
+  const soldValueUsd = soldValuation.legs.reduce((t, l) => t + l.valueUsd, 0);
+  const boughtValueUsd = boughtValuation.legs.reduce((t, l) => t + l.valueUsd, 0);
+  const subject = pickSubjectLeg(soldValuation.legs, boughtValuation.legs);
+
+  if (subject && soldValueUsd > 0) {
+    const otherSideUsd = subject.side === 'bought' ? soldValueUsd : boughtValueUsd;
+    bundle.signatures = await collectSignatures({
+      tx,
+      programs,
+      blockTime: txTime.blockTime,
+      slot: txTime.slot,
+      oracle,
+      subjectFeedKey: subject.leg.feedKey as string,
+      impliedPrice: otherSideUsd / subject.leg.amountUi,
+      referencePrice: subject.leg.priceUsd,
+      referenceDispersion: subject.leg.dispersion ?? 0,
+      referenceConfFraction: subject.leg.confPerUnitUsd / subject.leg.priceUsd,
+      connection: options.connection ?? null,
+    });
+  }
+
+  // --- judgement -----------------------------------------------------------
+  // Everything above gathered evidence; nothing below touches the network.
+  return toVerificationResult(adjudicate(bundle), lockPeriod, bundle);
 }
+
+/**
+ * Wrap a pure verdict in the shape the claim pipeline consumes.
+ *
+ * The lock period and the bundle are pipeline concerns, not judgement ones —
+ * keeping them out of the adjudicator is what lets a stored bundle be
+ * replayed with no pipeline around it.
+ */
+function toVerificationResult(
+  verdict: Verdict,
+  lockPeriod: number,
+  bundle: EvidenceBundle,
+): VerificationResult {
+  const details = {
+    ...verdict.details,
+    adjudicatorVersion: ADJUDICATOR_VERSION,
+    bundleHash: bundleHash(bundle as unknown as Record<string, unknown>),
+  };
+
+  switch (verdict.outcome) {
+    case 'confirmed':
+      return verdictConfirmed({
+        lossAmount: verdict.lossAmount,
+        confidence: verdict.confidence,
+        details,
+        lockPeriod,
+        evidence: bundle,
+      });
+    case 'indeterminate':
+      return verdictIndeterminate(
+        verdict.reason,
+        details,
+        lockPeriod,
+        verdict.retryAfterSec ?? 600,
+        bundle,
+      );
+    default:
+      return verdictRejected(verdict.reason, details, lockPeriod, bundle);
+  }
+}
+
+function valuationFailed(
+  failure: ValuationFailure,
+  lockPeriod: number,
+  bundle: EvidenceBundle,
+): VerificationResult {
+  // Every one of these is a gap on our side — an unregistered mint, a silent
+  // feed, a stalled sample. None is a finding about the trade, so none of
+  // them may close the claim.
+  switch (failure.kind) {
+    case 'no_feed':
+      return verdictIndeterminate(
+        'no_price_feed_for_mint',
+        {
+          pricedMint: failure.mint,
+          note: 'No reference feed registered for this mint — cannot score deviation.',
+        },
+        lockPeriod,
+        3_600,
+        bundle,
+      );
+    case 'no_sample':
+      return verdictIndeterminate(
+        'no_price_at_block_time',
+        { pricedMint: failure.mint, feedKey: failure.feedKey },
+        lockPeriod,
+        300,
+        bundle,
+      );
+    case 'stale':
+      return verdictIndeterminate(
+        'price_too_far_from_block_time',
+        { pricedMint: failure.mint, feedKey: failure.feedKey, skewSec: failure.skewSec },
+        lockPeriod,
+        300,
+        bundle,
+      );
+    case 'insufficient_sources':
+      // Too few independent references to rule out that the one we have is
+      // the manipulated one.
+      return verdictIndeterminate(
+        'insufficient_price_sources',
+        {
+          pricedMint: failure.mint,
+          feedKey: failure.feedKey,
+          sourceCount: failure.sourceCount,
+          required: failure.required,
+          note: 'Cannot corroborate the reference; a lone source may be the manipulated one.',
+        },
+        lockPeriod,
+        600,
+        bundle,
+      );
+    case 'sources_disagree':
+      return verdictIndeterminate(
+        'price_sources_disagree',
+        {
+          pricedMint: failure.mint,
+          feedKey: failure.feedKey,
+          dispersion: failure.dispersion,
+          limit: failure.limit,
+          note: 'References contradict each other; a median of disagreeing inputs is not evidence.',
+        },
+        lockPeriod,
+        600,
+        bundle,
+      );
+  }
+}
+
+export type { ExecutionSummary, ProofInputs };

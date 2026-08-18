@@ -1,18 +1,37 @@
+import type { Connection } from '@solana/web3.js';
 import { LOCK_PERIODS, TriggerType } from '@covantic/shared';
 import { HeliusClient } from '../utils/helius.js';
-import { PythClient } from '../utils/pyth.js';
 import { logger } from '../utils/logger.js';
+import type { EvidenceBundle, PriceOracle } from './oracle/types.js';
 import { verifyAgentError } from './verifiers/agent-error.js';
 import { verifyExploit } from './verifiers/exploit.js';
 import { verifyGovernanceAttack } from './verifiers/governance-attack.js';
 import { verifyOracleManipulation } from './verifiers/oracle-manipulation.js';
 
+/**
+ * Terminal state of a verification attempt.
+ *
+ * The three-way split is the point. A boolean forces "could not check" to
+ * masquerade as "did not happen", which is how a rate-limited price API used
+ * to permanently close valid claims.
+ */
+export type VerificationOutcome = 'confirmed' | 'rejected' | 'indeterminate';
+
 export interface VerificationResult {
+  outcome: VerificationOutcome;
+  /** Convenience mirror of `outcome === 'confirmed'`. Always set by the
+   *  builders in verifiers/common.ts so the two cannot drift. */
   verified: boolean;
   lossAmount: number;
   confidence: number;
   details: Record<string, unknown>;
   lockPeriod: number;
+  /** Set only when `outcome === 'indeterminate'` — how long to wait before
+   *  the next attempt. */
+  retryAfterSec?: number;
+  /** Everything the verdict was derived from. Persisted by the keeper so the
+   *  decision can be replayed and audited. */
+  evidence?: EvidenceBundle;
 }
 
 export interface VerifyClaimOptions {
@@ -20,6 +39,10 @@ export interface VerifyClaimOptions {
    *  outflow verifiers use authoritative balance deltas instead of
    *  summing tokenTransfers[]. */
   usdcMint?: string;
+  /** RPC connection used to cross-check the trigger transaction's block time
+   *  against the indexer. Optional: without it the indexer's value is taken
+   *  on trust and the disagreement check is skipped. */
+  connection?: Connection | null;
 }
 
 /**
@@ -37,7 +60,7 @@ export async function verifyClaim(
   agentAddress: string,
   coverageAmount: number,
   helius: HeliusClient,
-  pyth: PythClient,
+  priceOracle: PriceOracle,
   options: VerifyClaimOptions = {},
 ): Promise<VerificationResult> {
   logger.info({ triggerType, triggerTxSignature, agentAddress }, 'verifyClaim: dispatching');
@@ -51,12 +74,20 @@ export async function verifyClaim(
   });
 
   if (!tx) {
+    // Indexers lag. A signature that is not resolvable yet is not evidence
+    // that nothing happened, so this retries instead of closing the claim.
     return {
+      outcome: 'indeterminate',
       verified: false,
       lossAmount: 0,
       confidence: 0,
-      details: { reason: 'trigger_tx_not_found', triggerTxSignature },
+      details: {
+        reason: 'trigger_tx_not_found',
+        triggerTxSignature,
+        note: 'Transaction not resolvable yet — indexer lag or wrong cluster.',
+      },
       lockPeriod: lockPeriodFor(triggerType),
+      retryAfterSec: 30,
     };
   }
 
@@ -64,13 +95,16 @@ export async function verifyClaim(
     case TriggerType.Exploit:
       return verifyExploit(tx, agentAddress, coverageAmount, options.usdcMint);
     case TriggerType.OracleManipulation:
-      return verifyOracleManipulation(tx, agentAddress, coverageAmount, pyth);
+      return verifyOracleManipulation(tx, agentAddress, coverageAmount, priceOracle, {
+        connection: options.connection ?? null,
+      });
     case TriggerType.AgentError:
       return verifyAgentError(tx, agentAddress, coverageAmount, options.usdcMint);
     case TriggerType.GovernanceAttack:
       return verifyGovernanceAttack(tx, agentAddress, coverageAmount);
     default:
       return {
+        outcome: 'rejected',
         verified: false,
         lossAmount: 0,
         confidence: 0,

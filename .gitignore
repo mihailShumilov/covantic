@@ -6,6 +6,7 @@ target/
 # the API/monitor docker images need at runtime. Keeping it versioned lets
 # the server rebuild images without needing the full Rust/Anchor toolchain.
 !packages/anchor/target/
+packages/anchor/target/*
 !packages/anchor/target/idl/
 !packages/anchor/target/idl/*.json
 .env

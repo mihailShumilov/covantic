@@ -19,6 +19,7 @@ src/
     risk-scorer.ts        — 7-factor weighted risk model, Helius API integration
     claim-oracle.ts       — Dispatcher over per-trigger verifiers
     verifiers/            — exploit, oracle-manipulation, agent-error, governance-attack
+    oracle/               — Oracle-manipulation evidence spine (see below)
     transaction-monitor.ts — Helius webhook processing, anomaly detection
     alert-bus.ts          — HMAC-signed publish/subscribe over Redis `monitoring:alerts`
     attestation-publisher.ts — Oracle-signed RiskAttestation PDA publisher (lazy-init CPI)
@@ -35,6 +36,7 @@ src/
     monitoring.ts   — /api/monitoring/{events,webhook,metrics}, /api/demo/simulate-exploit
     fleet.ts        — /api/fleet
   workers/
+    oracle-watcher.ts     — Every 2min: re-screens insured agents' recent txs (webhooks drop)
     expiry-crank.ts       — Every 60s + on-boot: on-chain expire_policy for stale policies (oracle signer)
     solvency-checker.ts   — Every 5min: on-chain vault read → solvency status
     analytics-aggregator.ts — Hourly: vault snapshot
@@ -58,8 +60,48 @@ src/
     agent-wallet.ts       — create / fund / trigger CLI for throwaway agent keypairs
     fleet-{bootstrap,start,status}.ts — Autonomous fleet management
     stake-vault.ts        — Stake USDC into the vault (raise solvency ratio)
+    claim-replay.ts       — Re-derive stored verdicts from evidence; CI-gateable
     seed-demo.ts, simulate-exploit.ts, run-demo.ts, demo-common.ts — demo helpers
 ```
+
+## Oracle Module (`services/oracle/`)
+
+The evidence spine behind `TriggerType.OracleManipulation`.
+
+```
+types.ts            PricePoint / PriceWindow / PriceSource / EvidenceBundle
+price-sources/
+  pyth-hermes.ts    Historical, guardian-signed prices at a timestamp
+  cex.ts            Binance / Coinbase / Kraken minute candles
+consensus.ts        ConsensusPricer — median + dispersion across sources
+execution.ts        Net position change from accountData balance deltas
+valuation.ts        Values both sides in USD at the block time
+signatures.ts       Structural manipulation markers
+adjudicate.ts       PURE verdict function — no I/O, no clock
+prefilter.ts        Cheap webhook screen that raises `oracle_deviation`
+proof-poster.ts     Posts the signed update and calls verify_and_payout_v2
+hash.ts             Canonical JSON + bundle/verdict hashes
+factory.ts          buildPriceOracle() — the one production source set
+```
+
+### Invariants
+
+- **Every price is read at the trigger transaction's block time.** Never spot.
+  Comparing a historical swap to a live price measures market drift, not the
+  fill, and it was the single most severe bug in the original verifier.
+- **A verdict never rests on one source.** A lone feed cannot establish that a
+  feed was manipulated — it may be the manipulated one. Priced legs need three
+  agreeing sources; below that the claim goes to review.
+- **`indeterminate` is not `rejected`.** Outages, unindexed transactions,
+  missing feeds and disagreeing references all retry and then escalate. A
+  claim is only closed by evidence that contradicts it.
+- **Detection fails open, settlement fails closed.** `prefilter.ts` raises a
+  candidate when it cannot price a swap; `proof-poster.ts` failing sends the
+  claim to review rather than back to the unverified instruction.
+- **`adjudicate()` performs no I/O and reads no clock.** That is what makes
+  `pnpm claim:replay` meaningful. Tests enforce it.
+- **Anomaly ordering matters.** A policy holds one open claim, so
+  `oracle_deviation` is published ahead of `large_transfer` for the same tx.
 
 ## Fleet Module (`services/fleet/`)
 

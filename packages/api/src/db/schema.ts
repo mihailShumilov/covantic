@@ -135,6 +135,13 @@ export const claims = pgTable(
     verificationData: jsonb('verification_data'),
 
     status: varchar('status', { length: 32 }).notNull().default('pending'),
+    /** Why the claim sits in `indeterminate` or `review` — the verifier's
+     *  reason code, surfaced to the adjuster queue. */
+    reviewReason: varchar('review_reason', { length: 128 }),
+    /** Verification attempts so far. Indeterminate verdicts retry with
+     *  backoff; past the cap the claim escalates to review instead of
+     *  looping forever. */
+    verifyAttempts: integer('verify_attempts').default(0).notNull(),
     verifiedAt: timestamp('verified_at', { withTimezone: true }),
     paidAt: timestamp('paid_at', { withTimezone: true }),
     submitTxSignature: varchar('submit_tx_signature', { length: 128 }),
@@ -149,6 +156,39 @@ export const claims = pgTable(
     index('idx_claims_policy').on(table.policyId),
     index('idx_claims_status').on(table.status),
     index('idx_claims_holder').on(table.holderAddress),
+  ],
+);
+
+// Claim Evidence — the immutable inputs a verdict was derived from.
+//
+// A payout that cannot be re-derived is a payout nobody can audit. Every
+// verification attempt writes the full bundle it consulted plus the hash of
+// its canonical form, so `pnpm claim:replay <claimId>` can recompute the
+// verdict later and any divergence is visible. `bundle_hash` is the value
+// committed on-chain once trust-minimised settlement lands.
+export const claimEvidence = pgTable(
+  'claim_evidence',
+  {
+    id: uuid('id')
+      .default(sql`gen_random_uuid()`)
+      .primaryKey(),
+    claimId: uuid('claim_id').notNull(),
+    /** Attempt number this bundle belongs to — indeterminate retries each
+     *  leave their own row so the trail shows what changed between them. */
+    attempt: integer('attempt').default(1).notNull(),
+    bundle: jsonb('bundle').notNull(),
+    bundleHash: varchar('bundle_hash', { length: 64 }).notNull(),
+    verdict: jsonb('verdict').notNull(),
+    verdictHash: varchar('verdict_hash', { length: 64 }).notNull(),
+    /** Version of the code that produced the verdict. A replay under a
+     *  different version is expected to differ; under the same version it
+     *  must not. */
+    adjudicatorVersion: varchar('adjudicator_version', { length: 32 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_claim_evidence_claim').on(table.claimId),
+    index('idx_claim_evidence_bundle_hash').on(table.bundleHash),
   ],
 );
 

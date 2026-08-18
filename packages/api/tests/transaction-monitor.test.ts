@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { PolicyState } from '@covantic/shared';
 import { TransactionMonitor } from '../src/services/transaction-monitor.js';
+import type { PriceOracle, PriceWindow } from '../src/services/oracle/types.js';
 
 /**
  * Unit tests for TransactionMonitor.
@@ -299,5 +300,135 @@ describe('TransactionMonitor.processTransaction', () => {
 
     expect(db.inserted).toHaveLength(1); // only the first survived
     expect(redis.counters['covantic:metrics:monitor:error:tx']).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Oracle deviation screening
+// ---------------------------------------------------------------------------
+
+const DEX_PROGRAM = 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4';
+const WRAPPED_SOL = 'So11111111111111111111111111111111111111112';
+const USDC_MINT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+
+function mkPriceOracle(price: number): PriceOracle {
+  return {
+    async getPriceWindow(feedKey: string, targetTime: number): Promise<PriceWindow | null> {
+      if (feedKey !== 'SOL/USD') return null;
+      const anchor = {
+        value: price,
+        conf: 0,
+        publishTime: targetTime,
+        slot: 1,
+        source: 'consensus' as const,
+        feedId: feedKey,
+        raw: null,
+      };
+      return {
+        feedId: feedKey,
+        source: 'consensus',
+        targetTime,
+        before: anchor,
+        after: anchor,
+        anchor,
+        skewSec: 0,
+        contributors: [anchor],
+        dispersion: 0,
+        sourceCount: 4,
+      };
+    },
+  };
+}
+
+/** A DEX swap by the agent: pays `usdc`, receives 1 SOL. */
+function swapWebhookTx(agent: string, usdc: number) {
+  return {
+    signature: 'sig-swap',
+    timestamp: 1_700_000_000,
+    fee: 5_000,
+    feePayer: agent,
+    transactionError: null,
+    instructions: [{ programId: DEX_PROGRAM, accounts: [], data: '' }],
+    tokenTransfers: [{ fromUserAccount: agent, tokenAmount: usdc }],
+    accountData: [
+      {
+        account: 'ata1',
+        nativeBalanceChange: 0,
+        tokenBalanceChanges: [
+          {
+            mint: USDC_MINT,
+            rawTokenAmount: { tokenAmount: String(-usdc * 1e6), decimals: 6 },
+            userAccount: agent,
+          },
+        ],
+      },
+      {
+        account: 'ata2',
+        nativeBalanceChange: 0,
+        tokenBalanceChanges: [
+          {
+            mint: WRAPPED_SOL,
+            rawTokenAmount: { tokenAmount: '1000000000', decimals: 9 },
+            userAccount: agent,
+          },
+        ],
+      },
+      { account: agent, nativeBalanceChange: -5_000, tokenBalanceChanges: [] },
+    ],
+  };
+}
+
+describe('TransactionMonitor — oracle deviation screening', () => {
+  let db: FakeDb;
+  let redis: FakeRedis;
+
+  beforeEach(() => {
+    db = makeFakeDb([{ agentAddress: AGENT_A, policyId: 1, state: PolicyState.Active }]);
+    redis = makeFakeRedis();
+  });
+
+  function monitorWith(price: number): TransactionMonitor {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return new TransactionMonitor(db as any, redis as any, ALERT_SECRET, mkPriceOracle(price));
+  }
+
+  it('raises oracle_deviation for a swap filled off the reference', async () => {
+    // Before this screen existed, `oracle_deviation` was produced by nothing
+    // in production — the demo endpoint was its only source.
+    await monitorWith(200).processWebhook([swapWebhookTx(AGENT_A, 250)]);
+
+    const types = db.inserted.map((i) => (i.values as Record<string, unknown>).eventType);
+    expect(types).toContain('oracle_deviation');
+  });
+
+  it('files the manipulation classification ahead of the size alert', async () => {
+    // A large swap trips both detectors, but a policy holds only one open
+    // claim. Filing it as `large_transfer` routes it to a verifier that
+    // rejects DEX trades outright, and the price evidence is never examined.
+    await monitorWith(200).processWebhook([swapWebhookTx(AGENT_A, 2_500)]);
+
+    const types = db.inserted.map((i) => (i.values as Record<string, unknown>).eventType);
+    expect(types).toContain('large_transfer');
+    expect(types[0]).toBe('oracle_deviation');
+  });
+
+  it('stays quiet when the swap was filled at the reference', async () => {
+    await monitorWith(250).processWebhook([swapWebhookTx(AGENT_A, 250)]);
+    const types = db.inserted.map((i) => (i.values as Record<string, unknown>).eventType);
+    expect(types).not.toContain('oracle_deviation');
+  });
+
+  it('screens nothing when no price oracle is wired in', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const monitor = new TransactionMonitor(db as any, redis as any, ALERT_SECRET);
+    await monitor.processWebhook([swapWebhookTx(AGENT_A, 250)]);
+    const types = db.inserted.map((i) => (i.values as Record<string, unknown>).eventType);
+    expect(types).not.toContain('oracle_deviation');
+  });
+
+  it('leaves an uninsured agent alone', async () => {
+    db.lookupRows = [];
+    await monitorWith(200).processWebhook([swapWebhookTx(AGENT_B, 250)]);
+    expect(db.inserted).toHaveLength(0);
   });
 });

@@ -8,7 +8,8 @@ interface Props {
   autoPlay?: boolean;
   onComplete?: () => void;
   /**
-   * Live claim status string ('pending' | 'verifying' | 'approved' | 'paid'
+   * Live claim status string ('pending' | 'verifying' | 'indeterminate'
+   * | 'review' | 'approved' | 'paid'
    * | 'rejected' | 'failed'). When set, the pipeline renders step states
    * derived from the claim instead of animating. Ignored if autoPlay is true
    * so the marketing demo keeps its animation.
@@ -72,6 +73,15 @@ function stepsForStatus(status: string): PipelineStep[] {
     case 'rejected':
       base[0].status = StepStatus.Success;
       base[1].status = StepStatus.Failed;
+      return base;
+    // Verification could not conclude — a price source was down, the trigger
+    // tx was not indexed yet, or references disagreed. The claim is still
+    // being worked, so the step stays in progress rather than showing as a
+    // failure the holder would read as a denial.
+    case 'indeterminate':
+    case 'review':
+      base[0].status = StepStatus.Success;
+      base[1].status = StepStatus.Processing;
       return base;
     case 'failed':
       base[0].status = StepStatus.Success;
