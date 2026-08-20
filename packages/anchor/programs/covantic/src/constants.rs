@@ -223,3 +223,58 @@ pub const GOVERNANCE_DRAIN_WINDOW: i64 = 30 * 60;
 /// limit on what a compromised oracle key can extract by pointing this
 /// instruction at an agent whose empty account happens to have changed hands.
 pub const MIN_PROVABLE_GOVERNANCE_LOSS: u64 = 1_000_000;
+
+/// Seed for the PolicyAgentMandate PDA — one per policy.
+pub const AGENT_MANDATE_SEED: &[u8] = b"covantic_agent_mandate";
+
+/// Seed for the AgentErrorEvidenceRecord PDA — one per policy.
+pub const AGENT_ERROR_EVIDENCE_SEED: &[u8] = b"covantic_agent_error_evidence";
+
+/// How long an agent mandate must sit before it can support a claim.
+///
+/// Same value and same mechanism as `GOVERNANCE_BASELINE_DELAY`, and a
+/// separate constant because the two answer different questions — who may
+/// control the agent, and what the agent may do — and one may need retuning
+/// without the other.
+///
+/// The delay is what stops the obvious abuse. Without it a holder could watch
+/// an ordinary loss happen and then declare, retroactively, a mandate narrow
+/// enough to have been breached by it. With it, that manoeuvre has to be
+/// committed to on chain, in public, an hour before an incident the holder
+/// must then arrange to happen.
+pub const MANDATE_DECLARATION_DELAY: i64 = 3600;
+
+/// How many destinations a holder may declare as permitted for their agent.
+/// Fixed so the account's size — and the stack cost of loading it — are
+/// bounded.
+pub const MAX_MANDATE_COUNTERPARTIES: usize = 8;
+
+/// How many programs a holder may declare as permitted. Same reason.
+pub const MAX_MANDATE_PROGRAMS: usize = 8;
+
+/// Smallest mandate breach that can support a proven agent-error payout, in
+/// USDC base units.
+///
+/// Off chain a floor filters noise; here its job is different. It is a hard
+/// limit on what a compromised oracle key can extract by pointing this
+/// instruction at a policy whose agent merely spent slightly more than its
+/// declared cap.
+pub const MIN_PROVABLE_MANDATE_BREACH: u64 = 1_000_000;
+
+/// Oldest a balance checkpoint may be, **measured at the moment the claim was
+/// filed**, and still describe "before the breach".
+///
+/// Same value as `MAX_CHECKPOINT_AGE` and `MAX_AUTHORITY_CHECKPOINT_AGE`: all
+/// three readings come off one crank on one tick, and giving them different
+/// allowances would let a payout be proven against a "before" that meant
+/// different moments.
+///
+/// The *reference point* is `policy.claim_submitted_at`, following the
+/// governance path rather than the exploit one, and here that is not a
+/// refinement but a necessity. `verify_and_payout_exploit` compares against
+/// `now`, which silently folds its one-hour lock into a two-hour allowance
+/// and leaves an hour of slack. `LOCK_AGENT_ERROR` is six hours — three times
+/// the entire allowance — so the same comparison would make **every**
+/// agent-error payout unsatisfiable, not merely fragile. Do not "align" this
+/// with the exploit path.
+pub const MAX_MANDATE_CHECKPOINT_AGE: i64 = 2 * 3600;

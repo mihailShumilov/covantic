@@ -17,6 +17,9 @@ type ClaimRow = typeof claims.$inferSelect;
  *                    reads on the account now (governance attack). The only
  *                    path where the chain establishes the covered *event*
  *                    rather than merely bounding its size.
+ * `proven_mandate` — the chain measures the drop and checks how far it landed
+ *                    outside an operating envelope the holder declared and
+ *                    which matured before the claim was filed (agent error).
  * `legacy`         — the pre-proof instruction; the chain trusts the amount.
  * `unprovable`     — proof is required for this trigger but an input is
  *                    missing. Fails closed, to review.
@@ -25,6 +28,7 @@ export type SettlementPlan =
   | { kind: 'proven_price'; proof: ProofInputs; triggerBlockTime: number; bundleHash: string }
   | { kind: 'proven_balance'; bundleHash: string }
   | { kind: 'proven_authority'; bundleHash: string }
+  | { kind: 'proven_mandate'; bundleHash: string }
   | { kind: 'legacy' }
   | { kind: 'unprovable'; reason: string };
 
@@ -33,6 +37,9 @@ export function planProvenSettlement(claim: ClaimRow, config: AppConfig): Settle
     proof?: ProofInputs;
     blockTime?: number;
     bundleHash?: string;
+    /** Agent error only: whether the breach the verdict rests on is one the
+     *  program can re-derive for itself. */
+    breachProvable?: boolean;
   };
   // The demo path never touches a real transaction, so there is nothing on
   // chain for either proof instruction to read.
@@ -77,8 +84,27 @@ export function planProvenSettlement(claim: ClaimRow, config: AppConfig): Settle
     return { kind: 'proven_authority', bundleHash: data.bundleHash };
   }
 
-  // Agent error has no proof path: neither a signed price, nor a measurable
-  // balance drop, nor a declared authority set establishes "the agent did
-  // something costly to itself".
+  if (claim.triggerType === TriggerType.AgentError) {
+    if (!config.AGENT_ERROR_PROOF_ENABLED) return { kind: 'legacy' };
+    if (!data.bundleHash) return { kind: 'unprovable', reason: 'no_bundle_hash' };
+    // The dimension check the other three paths do not need.
+    //
+    // A mandate has five dimensions and the program can re-derive two of them:
+    // it reads the covered account's balance, so it can check the outflow cap
+    // and the retention floor. It cannot inspect a *past* transaction, so a
+    // breach of the counterparty or program allowlists produces no overshoot
+    // for it to measure — and `verify_and_payout_agent_error` refuses to
+    // settle one rather than paying on an assertion it cannot check.
+    //
+    // Routing such a claim to the proven path anyway would send a transaction
+    // that reverts with `OutflowWithinMandate`, and the keeper marks a failed
+    // payout `failed` rather than `review` — turning a valid claim a human
+    // should look at into a dead one. So it fails closed here instead.
+    if (data.breachProvable !== true) {
+      return { kind: 'unprovable', reason: 'breach_not_chain_checkable' };
+    }
+    return { kind: 'proven_mandate', bundleHash: data.bundleHash };
+  }
+
   return { kind: 'legacy' };
 }

@@ -60,6 +60,29 @@ const envSchema = z.object({
     .preprocess((v) => (typeof v === 'string' ? v.toLowerCase() === 'true' : v), z.boolean())
     .default(false),
   /**
+   * Route agent-error payouts through `verify_and_payout_agent_error`, which
+   * measures the balance drop itself and refuses to pay more than the amount
+   * by which it exceeded an operating envelope the holder declared.
+   *
+   * Defaults to off for the same reason as the other three, plus one that is
+   * specific to this path and worth knowing before turning it on. It depends
+   * on **both** a holder declaration and a fresh balance checkpoint, and those
+   * two fail differently:
+   *
+   *   - No mandate resolves to `review` before any RPC call, so enabling the
+   *     flag early is harmless for policies that have not declared — the same
+   *     migration the governance flag has.
+   *   - A **missing or stale checkpoint** makes the on-chain call revert, and
+   *     the keeper marks a failed payout `failed`, not `review`.
+   *
+   * So this flag inherits the dangerous half. Do not enable it unless the
+   * `exploit-watcher` crank — which writes `checkpoint_balance` — is confirmed
+   * running, or valid claims become dead ones.
+   */
+  AGENT_ERROR_PROOF_ENABLED: z
+    .preprocess((v) => (typeof v === 'string' ? v.toLowerCase() === 'true' : v), z.boolean())
+    .default(false),
+  /**
    * Cap on automatic payouts in a rolling hour, in USDC lamports. Zero
    * disables the breaker.
    *

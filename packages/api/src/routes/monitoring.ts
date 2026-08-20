@@ -13,6 +13,9 @@ import { TransactionMonitor } from '../services/transaction-monitor.js';
 import { buildPriceOracle } from '../services/oracle/factory.js';
 import { publishAlert } from '../services/alert-bus.js';
 import { readMonitorMetrics } from '../utils/monitor-metrics.js';
+import { MandateReader } from '../services/agent-error/mandate.js';
+import { createCovanticProgram } from '../utils/program.js';
+import { logger } from '../utils/logger.js';
 
 /** Stripped-down shape we require from the Helius enhanced-transaction
  *  payload. Everything else is ignored, including fields we'd otherwise
@@ -81,12 +84,44 @@ function staticTokenMatches(
   return timingSafeEqual(providedBuf, expectedBuf);
 }
 
+/**
+ * Build a mandate reader, or `undefined` when the program cannot be loaded.
+ *
+ * Returning `undefined` rather than throwing is what keeps monitoring alive on
+ * a deployment that cannot reach the program: the screen then reports the
+ * mandate as *unreadable* rather than *undeclared*, which is the difference
+ * between failing open and silently deciding nobody has coverage.
+ */
+function buildMandateReader(config: FastifyInstance['config']): MandateReader | undefined {
+  try {
+    return new MandateReader(createCovanticProgram(config, { withOracle: false }));
+  } catch (err) {
+    logger.warn({ err }, 'monitoring: mandate reader unavailable; screening will fail open');
+    return undefined;
+  }
+}
+
 export async function monitoringRoutes(app: FastifyInstance) {
+  // The mandate reader is optional and built lazily: a deployment with no
+  // oracle keypair still monitors, it simply cannot read the declared
+  // envelopes — and the screen fails open in that case rather than treating
+  // every agent as having declared nothing.
+  const mandateReader = buildMandateReader(app.config);
+
   const monitor = new TransactionMonitor(
     app.db,
     app.redis,
     app.config.ALERT_HMAC_SECRET,
     buildPriceOracle(),
+    mandateReader
+      ? (holderAddress, policyId) =>
+          mandateReader.readMandate(
+            holderAddress,
+            BigInt(policyId),
+            Math.floor(Date.now() / 1000),
+          )
+      : undefined,
+    app.config.USDC_MINT,
   );
 
   /** GET /api/monitoring/events — Recent monitoring events */

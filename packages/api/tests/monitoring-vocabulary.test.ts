@@ -57,6 +57,29 @@ describe('monitoring event vocabulary', () => {
     expect(triggerForEvent(MonitoringEventType.BalanceDropUnexplained)).toBeUndefined();
   });
 
+  it('leaves the two size-and-failure signals unmapped, on purpose', () => {
+    // Both used to route to AgentError, and both are the same mistake in
+    // different clothes: neither says anything about whether the movement was
+    // permitted, which is what the trigger now covers.
+    //
+    // The cost was concrete. `failed_tx` fired on every deliberate fleet
+    // failure, opened a claim, confirmed on an invented 1 USDC, landed in
+    // `review` — an OPEN status — and from then on `claims_open_unique`
+    // silently rejected every further alert for that policy, including a real
+    // exploit. `large_transfer` would have done the same thing once the
+    // verifier started answering "no mandate declared" instead of guessing.
+    expect(triggerForEvent(MonitoringEventType.FailedTx)).toBeUndefined();
+    expect(triggerForEvent(MonitoringEventType.LargeTransfer)).toBeUndefined();
+
+    // Still declared, still raised, still alerted on — just not claimable.
+    expect(Object.hasOwn(EVENT_TO_TRIGGER, MonitoringEventType.FailedTx)).toBe(true);
+    expect(Object.hasOwn(EVENT_TO_TRIGGER, MonitoringEventType.LargeTransfer)).toBe(true);
+  });
+
+  it('routes only the mandate-relative signal to the agent-error trigger', () => {
+    expect(triggerForEvent(MonitoringEventType.AgentError)).toBe(TriggerType.AgentError);
+  });
+
   it('treats an unrecognised event type as unhandled rather than asserting it', () => {
     expect(isKnownEventType('governance_change')).toBe(false);
     expect(triggerForEvent('governance_change')).toBeUndefined();

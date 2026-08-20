@@ -24,7 +24,8 @@
     "demo:run": "tsx scripts/run-demo.ts",
     "test:e2e": "COVANTIC_E2E=1 vitest run tests/e2e.test.ts",
     "claim:replay": "tsx scripts/claim-replay.ts",
-    "gov:declare": "tsx scripts/declare-governance-baseline.ts"
+    "gov:declare": "tsx scripts/declare-governance-baseline.ts",
+    "mandate:declare": "tsx scripts/declare-agent-mandate.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",

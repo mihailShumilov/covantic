@@ -1,4 +1,5 @@
 pub mod cancel_policy;
+pub mod declare_agent_mandate;
 pub mod checkpoint_authority;
 pub mod checkpoint_balance;
 pub mod claim_rewards;
@@ -13,11 +14,13 @@ pub mod unstake;
 pub mod update_config;
 pub mod upsert_attestation;
 pub mod verify_and_payout;
+pub mod verify_and_payout_agent_error;
 pub mod verify_and_payout_exploit;
 pub mod verify_and_payout_governance;
 pub mod verify_and_payout_v2;
 
 pub use cancel_policy::*;
+pub use declare_agent_mandate::*;
 pub use checkpoint_authority::*;
 pub use checkpoint_balance::*;
 pub use claim_rewards::*;
@@ -32,6 +35,7 @@ pub use unstake::*;
 pub use update_config::*;
 pub use upsert_attestation::*;
 pub use verify_and_payout::*;
+pub use verify_and_payout_agent_error::*;
 pub use verify_and_payout_exploit::*;
 pub use verify_and_payout_governance::*;
 pub use verify_and_payout_v2::*;

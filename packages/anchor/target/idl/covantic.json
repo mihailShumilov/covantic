@@ -880,6 +880,133 @@
       ]
     },
     {
+      "name": "declare_agent_mandate",
+      "docs": [
+        "Declare (or refresh) the operating envelope that is legitimate for an",
+        "agent. Holder-signed, and it matures on a delay for the same reason",
+        "the governance baseline does — a mandate that could be written and",
+        "claimed against in the same breath would prove nothing.",
+        "",
+        "This is what makes an agent-error claim provable at all. The trigger",
+        "covers a loss the agent caused with its *own* authority, so there is",
+        "no unauthorised signer to point at and no change of control to",
+        "observe; without the holder saying in advance what the agent was",
+        "permitted to do, the chain has nothing to check."
+      ],
+      "discriminator": [
+        223,
+        213,
+        161,
+        242,
+        150,
+        86,
+        153,
+        15
+      ],
+      "accounts": [
+        {
+          "name": "holder",
+          "docs": [
+            "The policyholder. Nobody else may say what their agent is permitted to",
+            "do — least of all the oracle, whose discretion this account exists to",
+            "constrain."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "policy",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy.holder",
+                "account": "InsurancePolicy"
+              },
+              {
+                "kind": "account",
+                "path": "policy.policy_id",
+                "account": "InsurancePolicy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mandate",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  97,
+                  103,
+                  101,
+                  110,
+                  116,
+                  95,
+                  109,
+                  97,
+                  110,
+                  100,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "mandate",
+          "type": {
+            "defined": {
+              "name": "AgentMandate"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "declare_governance_baseline",
       "docs": [
         "Declare (or refresh) the authority set that is legitimate for an",
@@ -2156,6 +2283,396 @@
       ]
     },
     {
+      "name": "verify_and_payout_agent_error",
+      "docs": [
+        "Verify an agent-error claim against the holder's declared mandate and",
+        "a balance drop the program measures, and execute payout.",
+        "",
+        "Prefer this over `verify_and_payout` for TRIGGER_AGENT_ERROR. The",
+        "program re-reads the covered token account, compares the drop against",
+        "an envelope the holder signed for before the claim was filed, and",
+        "refuses to pay more than the overshoot. It settles only breaches it",
+        "can measure: a movement to an undeclared destination produces no",
+        "overshoot and goes to a reviewer rather than being paid on the",
+        "oracle's word."
+      ],
+      "discriminator": [
+        28,
+        111,
+        113,
+        195,
+        196,
+        181,
+        253,
+        219
+      ],
+      "accounts": [
+        {
+          "name": "oracle",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "policy",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy.holder",
+                "account": "InsurancePolicy"
+              },
+              {
+                "kind": "account",
+                "path": "policy.policy_id",
+                "account": "InsurancePolicy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_account",
+          "writable": true
+        },
+        {
+          "name": "holder_token_account",
+          "writable": true
+        },
+        {
+          "name": "covered_token_account",
+          "docs": [
+            "The covered account, re-read at payout time.",
+            "",
+            "Derived by Anchor from the policy's own agent address, exactly as in",
+            "`checkpoint_balance`. This is what makes the drop a measurement rather",
+            "than an assertion: the caller cannot point the subtraction at an",
+            "account of its choosing.",
+            "",
+            "`associated_token::authority` is correct *here*, unlike on the",
+            "governance path: an agent error is by definition something the agent",
+            "did while still owning its account, so the owner-equality check this",
+            "compiles into is a constraint rather than an obstacle. A policy whose",
+            "account has changed hands is a governance claim, and this instruction",
+            "failing to load it is the right outcome."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "policy.agent_address",
+                "account": "InsurancePolicy"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "usdc_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "mandate",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  97,
+                  103,
+                  101,
+                  110,
+                  116,
+                  95,
+                  109,
+                  97,
+                  110,
+                  100,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "checkpoint",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  99,
+                  104,
+                  101,
+                  99,
+                  107,
+                  112,
+                  111,
+                  105,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "evidence_record",
+          "docs": [
+            "Immutable record of what was measured. `init` rather than",
+            "`init_if_needed`: one policy, one proven payout, and a second attempt",
+            "should fail loudly rather than overwrite the first."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  97,
+                  103,
+                  101,
+                  110,
+                  116,
+                  95,
+                  101,
+                  114,
+                  114,
+                  111,
+                  114,
+                  95,
+                  101,
+                  118,
+                  105,
+                  100,
+                  101,
+                  110,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "payout_amount",
+          "type": "u64"
+        },
+        {
+          "name": "evidence",
+          "type": {
+            "defined": {
+              "name": "AgentErrorPayoutEvidence"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "verify_and_payout_exploit",
       "docs": [
         "Verify an exploit claim against a balance drop the program measures",
@@ -2996,6 +3513,19 @@
   ],
   "accounts": [
     {
+      "name": "AgentErrorEvidenceRecord",
+      "discriminator": [
+        93,
+        5,
+        236,
+        60,
+        3,
+        112,
+        4,
+        104
+      ]
+    },
+    {
       "name": "ClaimEvidenceRecord",
       "discriminator": [
         99,
@@ -3074,6 +3604,19 @@
       ]
     },
     {
+      "name": "PolicyAgentMandate",
+      "discriminator": [
+        204,
+        90,
+        117,
+        203,
+        57,
+        57,
+        196,
+        75
+      ]
+    },
+    {
       "name": "PolicyAuthorityCheckpoint",
       "discriminator": [
         168,
@@ -3140,6 +3683,32 @@
     }
   ],
   "events": [
+    {
+      "name": "AgentErrorProofVerified",
+      "discriminator": [
+        41,
+        246,
+        155,
+        198,
+        133,
+        9,
+        253,
+        64
+      ]
+    },
+    {
+      "name": "AgentMandateDeclared",
+      "discriminator": [
+        111,
+        78,
+        148,
+        104,
+        84,
+        223,
+        209,
+        102
+      ]
+    },
     {
       "name": "AttestationUpserted",
       "discriminator": [
@@ -3597,11 +4166,408 @@
     },
     {
       "code": 6049,
+      "name": "AgentMandateMissing",
+      "msg": "No agent mandate has been declared for this policy"
+    },
+    {
+      "code": 6050,
+      "name": "AgentMandateNotMatured",
+      "msg": "Agent mandate had not matured when the claim was filed"
+    },
+    {
+      "code": 6051,
+      "name": "InvalidAgentMandate",
+      "msg": "Agent mandate is malformed — declare a real spending envelope"
+    },
+    {
+      "code": 6052,
+      "name": "TooManyMandateCounterparties",
+      "msg": "Too many declared counterparties for the agent mandate"
+    },
+    {
+      "code": 6053,
+      "name": "TooManyMandatePrograms",
+      "msg": "Too many declared programs for the agent mandate"
+    },
+    {
+      "code": 6054,
+      "name": "OutflowWithinMandate",
+      "msg": "The observed outflow stayed inside the declared mandate"
+    },
+    {
+      "code": 6055,
+      "name": "BreachBelowMinimum",
+      "msg": "Mandate breach is below the provable minimum"
+    },
+    {
+      "code": 6056,
+      "name": "PayoutExceedsProvenBreach",
+      "msg": "Payout exceeds the mandate breach the program measured"
+    },
+    {
+      "code": 6057,
       "name": "MathOverflow",
       "msg": "Arithmetic overflow"
     }
   ],
   "types": [
+    {
+      "name": "AgentErrorEvidenceRecord",
+      "docs": [
+        "On-chain record of an agent-error payout the program bounded itself.",
+        "",
+        "The counterpart to `ExploitEvidenceRecord` and `GovernanceEvidenceRecord`,",
+        "recording the same kind of thing: the numbers the *program* derived, not",
+        "the ones it was handed. `observed_drop` is a subtraction between two",
+        "balances read from a constrained account, and `breach_excess` is the",
+        "amount by which that drop exceeded an envelope the holder signed for —",
+        "so anyone can recompute the bound from the checkpoint, the mandate, and",
+        "the payout.",
+        "",
+        "`breach_kind` names which declared bound was crossed — the single-outflow",
+        "cap or the retention floor. Both are quantitative and both were re-derived",
+        "on chain; a breach of the mandate's counterparty or program allowlists",
+        "produces no overshoot and is never settled here, because the program cannot",
+        "inspect a past transaction to check one."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "policy_id",
+            "type": "u64"
+          },
+          {
+            "name": "holder",
+            "type": "pubkey"
+          },
+          {
+            "name": "covered_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "declared_max_single_outflow",
+            "docs": [
+              "The envelope in force when the claim was filed."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "declared_min_retained_balance",
+            "type": "u64"
+          },
+          {
+            "name": "mandate_effective_at",
+            "type": "i64"
+          },
+          {
+            "name": "checkpoint_amount",
+            "type": "u64"
+          },
+          {
+            "name": "checkpoint_slot",
+            "type": "u64"
+          },
+          {
+            "name": "checkpoint_unix_timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "current_amount",
+            "type": "u64"
+          },
+          {
+            "name": "observed_drop",
+            "docs": [
+              "`checkpoint_amount - current_amount`, computed here."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "breach_excess",
+            "docs": [
+              "How far outside the declared envelope the drop landed. Always > 0 on a",
+              "settled claim: this is the bound."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "breach_kind",
+            "docs": [
+              "Which declared bound was crossed. See `BREACH_OUTFLOW_CAP` /",
+              "`BREACH_RETAINED_FLOOR` in the instruction module."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "max_provable_loss",
+            "type": "u64"
+          },
+          {
+            "name": "payout_amount",
+            "type": "u64"
+          },
+          {
+            "name": "bundle_hash",
+            "docs": [
+              "sha256 of the canonical off-chain evidence bundle."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "verified_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AgentErrorPayoutEvidence",
+      "docs": [
+        "What the oracle commits to when claiming an agent-error loss.",
+        "",
+        "Deliberately short, and shorter than it looks like it should be. Everything",
+        "that could be asserted about *magnitude* has been removed — the program",
+        "derives that itself below. What remains is a commitment to the off-chain",
+        "evidence, which is the part the chain cannot check and therefore the part",
+        "that must be permanently on the record."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bundle_hash",
+            "docs": [
+              "sha256 of the canonical off-chain evidence bundle."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "AgentErrorProofVerified",
+      "docs": [
+        "Event: an agent-error payout the program bounded against a declared",
+        "mandate.",
+        "",
+        "Its presence — not the fact that a flag was set — is what separates a",
+        "payout the chain checked from one it merely permitted. `breach_excess` is",
+        "the bound the program derived: how far the measured drop landed outside an",
+        "envelope the holder signed for, and the most the payout could have been."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "policy_id",
+            "type": "u64"
+          },
+          {
+            "name": "covered_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "declared_max_single_outflow",
+            "type": "u64"
+          },
+          {
+            "name": "declared_min_retained_balance",
+            "type": "u64"
+          },
+          {
+            "name": "mandate_effective_at",
+            "type": "i64"
+          },
+          {
+            "name": "checkpoint_amount",
+            "type": "u64"
+          },
+          {
+            "name": "current_amount",
+            "type": "u64"
+          },
+          {
+            "name": "observed_drop",
+            "type": "u64"
+          },
+          {
+            "name": "breach_excess",
+            "type": "u64"
+          },
+          {
+            "name": "breach_kind",
+            "type": "u8"
+          },
+          {
+            "name": "max_provable_loss",
+            "type": "u64"
+          },
+          {
+            "name": "payout_amount",
+            "type": "u64"
+          },
+          {
+            "name": "bundle_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "AgentMandate",
+      "docs": [
+        "What the holder commits to about how their agent is permitted to operate."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "max_single_outflow",
+            "docs": [
+              "Largest single outflow the agent may make, in base units of the",
+              "covered mint."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_window_outflow",
+            "docs": [
+              "Largest cumulative outflow over `window_seconds`."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "window_seconds",
+            "type": "i64"
+          },
+          {
+            "name": "min_retained_balance",
+            "docs": [
+              "Balance the agent must never take the covered account below."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "allowed_counterparties",
+            "docs": [
+              "Destinations the agent may send value to. Capped at",
+              "{@link MAX_MANDATE_COUNTERPARTIES}."
+            ],
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "allowed_programs",
+            "docs": [
+              "Programs the agent may move value through. Capped at",
+              "{@link MAX_MANDATE_PROGRAMS}."
+            ],
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "manifest_hash",
+            "docs": [
+              "sha256 of the off-chain mandate covering anything richer."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "AgentMandateDeclared",
+      "docs": [
+        "Event: a holder declared (or refreshed) the operating envelope for their",
+        "agent.",
+        "",
+        "`effective_at` is the field that matters to an observer: it is when the",
+        "mandate becomes usable as proof, and the gap to `declared_at` is what stops",
+        "a holder from declaring, after an ordinary loss, an envelope narrow enough",
+        "to have been breached by it."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "policy_id",
+            "type": "u64"
+          },
+          {
+            "name": "holder",
+            "type": "pubkey"
+          },
+          {
+            "name": "max_single_outflow",
+            "type": "u64"
+          },
+          {
+            "name": "max_window_outflow",
+            "type": "u64"
+          },
+          {
+            "name": "window_seconds",
+            "type": "i64"
+          },
+          {
+            "name": "min_retained_balance",
+            "type": "u64"
+          },
+          {
+            "name": "counterparty_count",
+            "type": "u8"
+          },
+          {
+            "name": "program_count",
+            "type": "u8"
+          },
+          {
+            "name": "manifest_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "declared_at",
+            "type": "i64"
+          },
+          {
+            "name": "effective_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
     {
       "name": "AttestationUpserted",
       "docs": [
@@ -4919,6 +5885,181 @@
                 32
               ]
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "PolicyAgentMandate",
+      "docs": [
+        "The operating envelope the holder declares for their agent.",
+        "",
+        "This account is what makes an agent-error claim provable at all, and the",
+        "reason is worth stating plainly because it is not the same reason the",
+        "other three triggers work.",
+        "",
+        "`verify_and_payout_v2` works because Pyth hands the chain a",
+        "guardian-signed statement about a past price. `verify_and_payout_exploit`",
+        "works because the program can read a balance twice and subtract.",
+        "`verify_and_payout_governance` works because the holder declares who may",
+        "control the agent, so authorisation becomes a set-membership test.",
+        "",
+        "None of those help here. An agent error is a loss the agent caused *with",
+        "its own authority* — precisely the case the exploit path rejects as",
+        "`agent_authorized_movement`. Nothing on chain distinguishes a mistake from",
+        "a decision, because the distinction lives in the holder's intent, and no",
+        "instruction can read intent.",
+        "",
+        "So this account does not try to. It has the holder pre-commit to the",
+        "envelope their agent is permitted to operate in, and then \"was this a",
+        "mistake?\" becomes \"did the agent act outside what its owner declared?\" —",
+        "a comparison of numbers the program holds.",
+        "",
+        "**What that costs, stated once here.** It narrows the covered event. An",
+        "agent that loses money *inside* its declared envelope is not covered,",
+        "because its owner said that was permitted. The narrowing is the mechanism,",
+        "not a concession: it is the same trade `GovernanceBaseline` made when it",
+        "replaced \"was this authorised?\" with \"is this in the declared set?\".",
+        "",
+        "Three properties carry the weight:",
+        "",
+        "**Maturity.** `effective_at` sits `MANDATE_DECLARATION_DELAY` in the",
+        "future, and `verify_and_payout_agent_error` refuses a mandate that had not",
+        "matured before the claim was filed. Without it a holder could watch an",
+        "ordinary loss happen and then declare, retroactively, a mandate narrow",
+        "enough to have been breached by it.",
+        "",
+        "**Retention.** `prev_*` keeps the declaration this one replaced, for the",
+        "same reason `PolicyBalanceCheckpoint` does: a refresh landing between the",
+        "incident and the claim must not erase the only usable \"before\".",
+        "",
+        "**A floor under the numbers the chain can check.** Only the quantitative",
+        "dimensions — `max_single_outflow`, `min_retained_balance` — are re-checked",
+        "on chain against a balance the program reads for itself. The categorical",
+        "ones cannot be: the program cannot inspect the destination or the program",
+        "set of a *past* transaction. Those live in the allowlists below for the",
+        "off-chain verifier, and are recorded rather than enforced. Pretending",
+        "otherwise would be worse than committing to them and leaving the check to",
+        "a reader who can perform it."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "policy_id",
+            "type": "u64"
+          },
+          {
+            "name": "holder",
+            "type": "pubkey"
+          },
+          {
+            "name": "max_single_outflow",
+            "docs": [
+              "Largest single outflow, in base units of the covered mint, the agent is",
+              "permitted to make. **Re-checked on chain.**"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_window_outflow",
+            "docs": [
+              "Largest cumulative outflow over `window_seconds`. Recorded, not",
+              "enforced: the program holds one balance reading per policy and cannot",
+              "sum a window of transfers from it."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "window_seconds",
+            "type": "i64"
+          },
+          {
+            "name": "min_retained_balance",
+            "docs": [
+              "Balance the agent must never take the covered account below.",
+              "**Re-checked on chain.**"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "allowed_counterparties",
+            "docs": [
+              "Destinations the agent may send value to. Fixed-size so the account's",
+              "rent and the stack cost of loading it are bounded;",
+              "`counterparty_count` says how many slots are real, because the zero",
+              "pubkey must never read as a permitted one."
+            ],
+            "type": {
+              "array": [
+                "pubkey",
+                8
+              ]
+            }
+          },
+          {
+            "name": "counterparty_count",
+            "type": "u8"
+          },
+          {
+            "name": "allowed_programs",
+            "docs": [
+              "Programs the agent may move value through. Same shape, same reason."
+            ],
+            "type": {
+              "array": [
+                "pubkey",
+                8
+              ]
+            }
+          },
+          {
+            "name": "program_count",
+            "type": "u8"
+          },
+          {
+            "name": "manifest_hash",
+            "docs": [
+              "sha256 of the off-chain mandate covering anything richer than the",
+              "fields above — per-venue caps, slippage bounds, rate limits.",
+              "Committed, not interpreted."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "declared_at",
+            "type": "i64"
+          },
+          {
+            "name": "effective_at",
+            "docs": [
+              "When this declaration becomes usable as proof."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "prev_max_single_outflow",
+            "docs": [
+              "The declaration this one replaced."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "prev_min_retained_balance",
+            "type": "u64"
+          },
+          {
+            "name": "prev_effective_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
           }
         ]
       }

@@ -187,3 +187,49 @@ pub struct GovernanceProofVerified {
     pub payout_amount: u64,
     pub bundle_hash: [u8; 32],
 }
+
+/// Event: a holder declared (or refreshed) the operating envelope for their
+/// agent.
+///
+/// `effective_at` is the field that matters to an observer: it is when the
+/// mandate becomes usable as proof, and the gap to `declared_at` is what stops
+/// a holder from declaring, after an ordinary loss, an envelope narrow enough
+/// to have been breached by it.
+#[event]
+pub struct AgentMandateDeclared {
+    pub policy_id: u64,
+    pub holder: Pubkey,
+    pub max_single_outflow: u64,
+    pub max_window_outflow: u64,
+    pub window_seconds: i64,
+    pub min_retained_balance: u64,
+    pub counterparty_count: u8,
+    pub program_count: u8,
+    pub manifest_hash: [u8; 32],
+    pub declared_at: i64,
+    pub effective_at: i64,
+}
+
+/// Event: an agent-error payout the program bounded against a declared
+/// mandate.
+///
+/// Its presence — not the fact that a flag was set — is what separates a
+/// payout the chain checked from one it merely permitted. `breach_excess` is
+/// the bound the program derived: how far the measured drop landed outside an
+/// envelope the holder signed for, and the most the payout could have been.
+#[event]
+pub struct AgentErrorProofVerified {
+    pub policy_id: u64,
+    pub covered_account: Pubkey,
+    pub declared_max_single_outflow: u64,
+    pub declared_min_retained_balance: u64,
+    pub mandate_effective_at: i64,
+    pub checkpoint_amount: u64,
+    pub current_amount: u64,
+    pub observed_drop: u64,
+    pub breach_excess: u64,
+    pub breach_kind: u8,
+    pub max_provable_loss: u64,
+    pub payout_amount: u64,
+    pub bundle_hash: [u8; 32],
+}

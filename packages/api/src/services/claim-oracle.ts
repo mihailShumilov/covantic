@@ -2,11 +2,15 @@ import type { Connection } from '@solana/web3.js';
 import { LOCK_PERIODS, TriggerType } from '@covantic/shared';
 import { HeliusClient } from '../utils/helius.js';
 import { logger } from '../utils/logger.js';
+import type { AgentErrorEvidenceBundle } from './agent-error/types.js';
 import type { ExploitEvidenceBundle } from './exploit/types.js';
 import type { GovernanceEvidenceBundle } from './governance/types.js';
 import type { EvidenceBundle, PriceOracle } from './oracle/types.js';
 import type { CohortLookup } from './exploit/signatures.js';
-import { verifyAgentError } from './verifiers/agent-error.js';
+import {
+  verifyAgentError,
+  type AgentErrorVerifierOptions,
+} from './verifiers/agent-error.js';
 import { verifyExploit } from './verifiers/exploit.js';
 import {
   verifyGovernanceAttack,
@@ -27,7 +31,8 @@ export type VerificationOutcome = 'confirmed' | 'rejected' | 'indeterminate';
 export type AnyEvidenceBundle =
   | EvidenceBundle
   | ExploitEvidenceBundle
-  | GovernanceEvidenceBundle;
+  | GovernanceEvidenceBundle
+  | AgentErrorEvidenceBundle;
 
 export interface VerificationResult {
   outcome: VerificationOutcome;
@@ -73,6 +78,20 @@ export interface VerifyClaimOptions {
    * `declare_governance_baseline` is deployed, and never a rejection.
    */
   governance?: Omit<GovernanceVerifierOptions, 'connection' | 'holderAddress' | 'cohort'>;
+  /**
+   * Lookups only the agent-error path needs: the holder's declared operating
+   * envelope, and the agent's own outflow history.
+   *
+   * Injected for the same reason the governance ones are — so `claim-oracle`
+   * stays free of database and Anchor-program coupling, and so a corpus test
+   * can drive the verifier with neither. Absent, an agent-error claim resolves
+   * to review, which is the correct behaviour before `declare_agent_mandate`
+   * is deployed and never a rejection.
+   */
+  agentError?: Omit<
+    AgentErrorVerifierOptions,
+    'connection' | 'holderAddress' | 'coveredMint'
+  >;
 }
 
 /**
@@ -133,7 +152,12 @@ export async function verifyClaim(
         connection: options.connection ?? null,
       });
     case TriggerType.AgentError:
-      return verifyAgentError(tx, agentAddress, coverageAmount, options.usdcMint);
+      return verifyAgentError(tx, agentAddress, coverageAmount, priceOracle, {
+        ...(options.agentError ?? {}),
+        connection: options.connection ?? null,
+        holderAddress: options.holderAddress,
+        coveredMint: options.usdcMint,
+      });
     case TriggerType.GovernanceAttack:
       return verifyGovernanceAttack(tx, agentAddress, coverageAmount, priceOracle, {
         ...(options.governance ?? {}),

@@ -13,7 +13,12 @@ import type { PriceOracle, PriceWindow } from '../src/services/oracle/types.js';
  * implements that chain plus `insert(...).values(...)`.
  */
 
-type PolicyRow = { agentAddress: string; policyId: number; state: number };
+type PolicyRow = {
+  agentAddress: string;
+  holderAddress: string;
+  policyId: number;
+  state: number;
+};
 
 interface FakeDb {
   /** Fault injection hook, called once per query. */
@@ -52,9 +57,18 @@ function makeFakeDb(lookupRows: PolicyRow[]): FakeDb {
     },
   }));
 
+  // `values()` returns a thenable that also carries `onConflictDoNothing`,
+  // because the monitor now writes two shapes: monitoring events, which are
+  // awaited directly, and outflow observations, which are idempotent.
   db.insert.mockImplementation((table: unknown) => ({
-    values: async (values: unknown) => {
+    values: (values: unknown) => {
       db.inserted.push({ table, values });
+      const done = Promise.resolve();
+      return {
+        onConflictDoNothing: () => done,
+        then: done.then.bind(done),
+        catch: done.catch.bind(done),
+      };
     },
   }));
 
@@ -86,9 +100,18 @@ function makeFakeRedis(): FakeRedis {
   return redis;
 }
 
+/** Monitoring-event rows only. The monitor also records outflow
+ *  observations, which are history rather than findings. */
+function events(db: FakeDb): Array<Record<string, unknown>> {
+  return db.inserted
+    .map((i) => i.values as Record<string, unknown>)
+    .filter((v) => typeof v.eventType === 'string');
+}
+
 const ALERT_SECRET = 'test-alert-secret';
 const AGENT_A = 'AgentAddressAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 const AGENT_B = 'AgentAddressBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB';
+const HOLDER = 'HolderAddressCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC';
 
 // Helius Enhanced Transactions deliver `tokenAmount` as a decimal-aware
 // UI amount (e.g. `2000.0` for a 2,000 USDC transfer), matching what the
@@ -97,6 +120,17 @@ const AGENT_B = 'AgentAddressBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB';
 const LARGE = 2_000;
 const CRITICAL = 20_000;
 const SUB_THRESHOLD = 500;
+
+/** Registered mint. The screen values a movement *per mint*, so a fixture
+ *  without one is not a transfer it can reason about — which is the bug the
+ *  `junk airdrop` case below pins down. */
+const USDC_MINT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const JUNK_MINT = 'Di91ieQpSMN8TA6Y4rKyAkTBK7AsJVXHk7ouYUDrZ5Jp';
+
+/** One outgoing transfer in the shape Helius actually delivers. */
+function out(from: string, tokenAmount: number, mint = USDC_MINT) {
+  return { fromUserAccount: from, tokenAmount, mint };
+}
 
 describe('TransactionMonitor.processTransaction', () => {
   let db: FakeDb;
@@ -111,17 +145,17 @@ describe('TransactionMonitor.processTransaction', () => {
   });
 
   it('matches an active policy and writes event + publishes alert', async () => {
-    db.lookupRows = [{ agentAddress: AGENT_A, policyId: 1, state: PolicyState.Active }];
+    db.lookupRows = [{ agentAddress: AGENT_A, holderAddress: HOLDER, policyId: 1, state: PolicyState.Active }];
 
     await monitor.processWebhook([
       {
         signature: 'sig-active-large',
-        tokenTransfers: [{ fromUserAccount: AGENT_A, tokenAmount: LARGE }],
+        tokenTransfers: [out(AGENT_A, LARGE)],
       },
     ]);
 
-    expect(db.inserted).toHaveLength(1);
-    const row = db.inserted[0]!.values as Record<string, unknown>;
+    expect(events(db)).toHaveLength(1);
+    const row = events(db)[0]!;
     expect(row.agentAddress).toBe(AGENT_A);
     expect(row.eventType).toBe('large_transfer');
     expect(row.severity).toBe('warning');
@@ -135,48 +169,48 @@ describe('TransactionMonitor.processTransaction', () => {
   });
 
   it('escalates to critical severity above the critical threshold', async () => {
-    db.lookupRows = [{ agentAddress: AGENT_A, policyId: 1, state: PolicyState.Active }];
+    db.lookupRows = [{ agentAddress: AGENT_A, holderAddress: HOLDER, policyId: 1, state: PolicyState.Active }];
 
     await monitor.processWebhook([
       {
         signature: 'sig-critical',
-        tokenTransfers: [{ fromUserAccount: AGENT_A, tokenAmount: CRITICAL }],
+        tokenTransfers: [out(AGENT_A, CRITICAL)],
       },
     ]);
 
-    const row = db.inserted[0]!.values as Record<string, unknown>;
+    const row = events(db)[0]!;
     expect(row.severity).toBe('critical');
     expect(redis.counters['covantic:metrics:monitor:anomaly:critical']).toBe(1);
     expect(redis.counters['covantic:metrics:monitor:anomaly:warning'] ?? 0).toBe(0);
   });
 
   it('skips when the policy exists but is Expired', async () => {
-    db.lookupRows = [{ agentAddress: AGENT_A, policyId: 1, state: PolicyState.Expired }];
+    db.lookupRows = [{ agentAddress: AGENT_A, holderAddress: HOLDER, policyId: 1, state: PolicyState.Expired }];
 
     await monitor.processWebhook([
       {
         signature: 'sig-expired',
-        tokenTransfers: [{ fromUserAccount: AGENT_A, tokenAmount: LARGE }],
+        tokenTransfers: [out(AGENT_A, LARGE)],
       },
     ]);
 
-    expect(db.inserted).toHaveLength(0);
+    expect(events(db)).toHaveLength(0);
     expect(redis.publishes).toHaveLength(0);
     expect(redis.counters['covantic:metrics:monitor:skipped:inactive_policy']).toBe(1);
     expect(redis.counters['covantic:metrics:monitor:matched:active'] ?? 0).toBe(0);
   });
 
   it('skips when the policy is ClaimPending (not Active)', async () => {
-    db.lookupRows = [{ agentAddress: AGENT_A, policyId: 1, state: PolicyState.ClaimPending }];
+    db.lookupRows = [{ agentAddress: AGENT_A, holderAddress: HOLDER, policyId: 1, state: PolicyState.ClaimPending }];
 
     await monitor.processWebhook([
       {
         signature: 'sig-claim-pending',
-        tokenTransfers: [{ fromUserAccount: AGENT_A, tokenAmount: LARGE }],
+        tokenTransfers: [out(AGENT_A, LARGE)],
       },
     ]);
 
-    expect(db.inserted).toHaveLength(0);
+    expect(events(db)).toHaveLength(0);
     expect(redis.counters['covantic:metrics:monitor:skipped:inactive_policy']).toBe(1);
   });
 
@@ -186,11 +220,11 @@ describe('TransactionMonitor.processTransaction', () => {
     await monitor.processWebhook([
       {
         signature: 'sig-uninsured',
-        tokenTransfers: [{ fromUserAccount: AGENT_A, tokenAmount: LARGE }],
+        tokenTransfers: [out(AGENT_A, LARGE)],
       },
     ]);
 
-    expect(db.inserted).toHaveLength(0);
+    expect(events(db)).toHaveLength(0);
     expect(redis.counters['covantic:metrics:monitor:skipped:uninsured']).toBe(1);
     expect(redis.counters['covantic:metrics:monitor:skipped:inactive_policy'] ?? 0).toBe(0);
   });
@@ -202,23 +236,23 @@ describe('TransactionMonitor.processTransaction', () => {
       { signature: 'sig-empty', tokenTransfers: [] },
     ]);
 
-    expect(db.inserted).toHaveLength(0);
+    expect(events(db)).toHaveLength(0);
     expect(redis.publishes).toHaveLength(0);
     expect(redis.counters['covantic:metrics:monitor:skipped:no_addresses']).toBe(1);
     expect(db.select).not.toHaveBeenCalled();
   });
 
   it('does not flag a sub-threshold transfer as anomalous', async () => {
-    db.lookupRows = [{ agentAddress: AGENT_A, policyId: 1, state: PolicyState.Active }];
+    db.lookupRows = [{ agentAddress: AGENT_A, holderAddress: HOLDER, policyId: 1, state: PolicyState.Active }];
 
     await monitor.processWebhook([
       {
         signature: 'sig-small',
-        tokenTransfers: [{ fromUserAccount: AGENT_A, tokenAmount: SUB_THRESHOLD }],
+        tokenTransfers: [out(AGENT_A, SUB_THRESHOLD)],
       },
     ]);
 
-    expect(db.inserted).toHaveLength(0);
+    expect(events(db)).toHaveLength(0);
     expect(redis.publishes).toHaveLength(0);
     expect(redis.counters['covantic:metrics:monitor:matched:active']).toBe(1);
     expect(redis.counters['covantic:metrics:monitor:anomaly:warning'] ?? 0).toBe(0);
@@ -230,65 +264,109 @@ describe('TransactionMonitor.processTransaction', () => {
   // the entire claim pipeline went silent on live traffic. Keep this test
   // to prevent the unit drift from coming back.
   it('fires large_transfer for a realistic UI-decimal Helius payload', async () => {
-    db.lookupRows = [{ agentAddress: AGENT_A, policyId: 1, state: PolicyState.Active }];
+    db.lookupRows = [{ agentAddress: AGENT_A, holderAddress: HOLDER, policyId: 1, state: PolicyState.Active }];
 
     await monitor.processWebhook([
       {
         signature: 'sig-real-helius',
-        tokenTransfers: [{ fromUserAccount: AGENT_A, tokenAmount: 2_000 }],
+        tokenTransfers: [out(AGENT_A, 2_000)],
       },
     ]);
 
-    expect(db.inserted).toHaveLength(1);
-    const row = db.inserted[0]!.values as Record<string, unknown>;
+    expect(events(db)).toHaveLength(1);
+    const row = events(db)[0]!;
     expect(row.eventType).toBe('large_transfer');
-    const details = row.details as { amountUi?: number };
-    expect(details.amountUi).toBe(2_000);
+    const details = row.details as { outflowUi?: number };
+    expect(details.outflowUi).toBe(2_000);
     expect(redis.counters['covantic:metrics:monitor:anomaly:warning']).toBe(1);
   });
 
+  // Regression: the threshold summed `tokenAmount` across every transfer with
+  // no reference to the mint, so a number reasoned about as dollars was
+  // compared against a count of tokens. 1,001 units of a worthless airdrop
+  // fired it; 0.4 WBTC did not.
+  it('does not fire on a large *count* of a worthless token', async () => {
+    db.lookupRows = [
+      { agentAddress: AGENT_A, holderAddress: HOLDER, policyId: 1, state: PolicyState.Active },
+    ];
+
+    await monitor.processWebhook([
+      {
+        signature: 'sig-junk-airdrop',
+        tokenTransfers: [out(AGENT_A, 50_000, JUNK_MINT)],
+      },
+    ]);
+
+    // Flagged, but as an *unpriceable* movement rather than a large one:
+    // detection fails open, so a mint the registry does not know still reaches
+    // a human. What must not happen is it being counted as 50,000 dollars.
+    const rows = events(db);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.eventType).toBe('large_transfer');
+    expect((rows[0]!.details as { screenReason?: string }).screenReason).toBe(
+      'unpriceable_outflow',
+    );
+    expect(redis.counters['covantic:metrics:monitor:anomaly:critical'] ?? 0).toBe(0);
+  });
+
+  // Regression: detection ran inside the per-transfer loop, so a transaction
+  // with several outgoing legs produced one copy of every anomaly per leg —
+  // each its own row and its own alert for the same event.
+  it('raises one anomaly per agent per transaction, not per transfer', async () => {
+    db.lookupRows = [
+      { agentAddress: AGENT_A, holderAddress: HOLDER, policyId: 1, state: PolicyState.Active },
+    ];
+
+    await monitor.processWebhook([
+      {
+        signature: 'sig-multi-leg',
+        tokenTransfers: [out(AGENT_A, LARGE), out(AGENT_A, LARGE), out(AGENT_A, LARGE)],
+      },
+    ]);
+
+    expect(events(db)).toHaveLength(1);
+    expect(redis.publishes).toHaveLength(1);
+  });
+
   it('records a failed_tx anomaly for an active policy', async () => {
-    db.lookupRows = [{ agentAddress: AGENT_A, policyId: 1, state: PolicyState.Active }];
+    db.lookupRows = [{ agentAddress: AGENT_A, holderAddress: HOLDER, policyId: 1, state: PolicyState.Active }];
 
     await monitor.processWebhook([
       {
         signature: 'sig-failed',
         transactionError: { InstructionError: [0, 'Custom'] },
-        tokenTransfers: [{ fromUserAccount: AGENT_A, tokenAmount: 10 }],
+        tokenTransfers: [out(AGENT_A, 10)],
       },
     ]);
 
-    expect(db.inserted).toHaveLength(1);
-    const row = db.inserted[0]!.values as Record<string, unknown>;
+    expect(events(db)).toHaveLength(1);
+    const row = events(db)[0]!;
     expect(row.eventType).toBe('failed_tx');
     expect(row.severity).toBe('warning');
   });
 
   it('processes only the agent(s) with Active policy when multiple addresses appear', async () => {
     db.lookupRows = [
-      { agentAddress: AGENT_A, policyId: 1, state: PolicyState.Active },
-      { agentAddress: AGENT_B, policyId: 2, state: PolicyState.Expired },
+      { agentAddress: AGENT_A, holderAddress: HOLDER, policyId: 1, state: PolicyState.Active },
+      { agentAddress: AGENT_B, holderAddress: HOLDER, policyId: 2, state: PolicyState.Expired },
     ];
 
     await monitor.processWebhook([
       {
         signature: 'sig-mixed',
-        tokenTransfers: [
-          { fromUserAccount: AGENT_A, tokenAmount: LARGE },
-          { fromUserAccount: AGENT_B, tokenAmount: LARGE },
-        ],
+        tokenTransfers: [out(AGENT_A, LARGE), out(AGENT_B, LARGE)],
       },
     ]);
 
-    expect(db.inserted).toHaveLength(1);
-    const row = db.inserted[0]!.values as Record<string, unknown>;
+    expect(events(db)).toHaveLength(1);
+    const row = events(db)[0]!;
     expect(row.agentAddress).toBe(AGENT_A);
     expect(redis.counters['covantic:metrics:monitor:matched:active']).toBe(1);
     expect(redis.counters['covantic:metrics:monitor:skipped:inactive_policy']).toBe(1);
   });
 
   it('counts per-transaction errors and continues the batch', async () => {
-    db.lookupRows = [{ agentAddress: AGENT_A, policyId: 1, state: PolicyState.Active }];
+    db.lookupRows = [{ agentAddress: AGENT_A, holderAddress: HOLDER, policyId: 1, state: PolicyState.Active }];
 
     // Each transaction issues two queries: the policy lookup, then the
     // balance-baseline read. The baseline read is deliberately fail-safe —
@@ -305,15 +383,15 @@ describe('TransactionMonitor.processTransaction', () => {
     await monitor.processWebhook([
       {
         signature: 'sig-ok',
-        tokenTransfers: [{ fromUserAccount: AGENT_A, tokenAmount: LARGE }],
+        tokenTransfers: [out(AGENT_A, LARGE)],
       },
       {
         signature: 'sig-boom',
-        tokenTransfers: [{ fromUserAccount: AGENT_A, tokenAmount: LARGE }],
+        tokenTransfers: [out(AGENT_A, LARGE)],
       },
     ]);
 
-    expect(db.inserted).toHaveLength(1); // only the first survived
+    expect(events(db)).toHaveLength(1); // only the first survived
     expect(redis.counters['covantic:metrics:monitor:error:tx']).toBe(1);
   });
 });
@@ -324,7 +402,6 @@ describe('TransactionMonitor.processTransaction', () => {
 
 const DEX_PROGRAM = 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4';
 const WRAPPED_SOL = 'So11111111111111111111111111111111111111112';
-const USDC_MINT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 
 function mkPriceOracle(price: number): PriceOracle {
   return {
@@ -398,7 +475,7 @@ describe('TransactionMonitor — oracle deviation screening', () => {
   let redis: FakeRedis;
 
   beforeEach(() => {
-    db = makeFakeDb([{ agentAddress: AGENT_A, policyId: 1, state: PolicyState.Active }]);
+    db = makeFakeDb([{ agentAddress: AGENT_A, holderAddress: HOLDER, policyId: 1, state: PolicyState.Active }]);
     redis = makeFakeRedis();
   });
 
@@ -444,6 +521,6 @@ describe('TransactionMonitor — oracle deviation screening', () => {
   it('leaves an uninsured agent alone', async () => {
     db.lookupRows = [];
     await monitorWith(200).processWebhook([swapWebhookTx(AGENT_B, 250)]);
-    expect(db.inserted).toHaveLength(0);
+    expect(events(db)).toHaveLength(0);
   });
 });

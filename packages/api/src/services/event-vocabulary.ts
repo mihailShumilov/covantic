@@ -23,8 +23,38 @@ export const EVENT_TO_TRIGGER: Record<MonitoringEventType, TriggerType | undefin
   [MonitoringEventType.OracleDeviation]: TriggerType.OracleManipulation,
   [MonitoringEventType.AgentError]: TriggerType.AgentError,
   [MonitoringEventType.GovernanceAttack]: TriggerType.GovernanceAttack,
-  [MonitoringEventType.LargeTransfer]: TriggerType.AgentError,
-  [MonitoringEventType.FailedTx]: TriggerType.AgentError,
+
+  // Intentionally unmapped, not missing — and this one is the change that
+  // makes the trigger coherent. `large_transfer` says a movement was big. It
+  // says nothing about whether it was permitted, and after this change the
+  // covered event *is* "outside the envelope the holder declared", so a signal
+  // that cannot reference a declaration cannot describe the event.
+  //
+  // Leaving it mapped would have re-introduced, by a different route, exactly
+  // the blockage `failed_tx` caused below: every ≥1,000-USD movement by an
+  // agent with no mandate would open a claim, resolve `no_mandate_declared`
+  // → `review`, and then occupy the policy's single open-claim slot
+  // indefinitely. The monitor still raises it, records it and alerts on it;
+  // it simply no longer files a claim nothing can adjudicate.
+  [MonitoringEventType.LargeTransfer]: undefined,
+
+  // Intentionally unmapped, not missing. A reverted transaction moved no
+  // funds; what it cost is fees. Until this became `undefined` the chain ran:
+  // the fleet lands deliberate failures on chain, the monitor raised
+  // `failed_tx` for each one, the keeper inserted a claim row before any
+  // verification, the verifier confirmed it at 0.6 on a flat invented 1 USDC,
+  // and the confidence lane parked it in `review` — an OPEN status. From that
+  // point `claims_open_unique` rejected every further alert for the policy,
+  // including a genuine exploit or governance takeover, with an `info` log as
+  // the only trace.
+  //
+  // So one failed transaction blocked all claim origination for that policy
+  // until a human cleared the queue. Fee burn is still recorded as a
+  // monitoring event and still feeds the risk score; it is simply not a
+  // covered loss. If it ever becomes one it will be as a declared window
+  // quantity measured against real lamport spend, not as a flat number
+  // invented per reverted transaction.
+  [MonitoringEventType.FailedTx]: undefined,
 
   // Intentionally unmapped, not missing. The exploit watcher raises this when
   // an agent's balance fell against its last checkpoint with no transaction

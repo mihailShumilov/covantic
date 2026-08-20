@@ -11,7 +11,8 @@ src/
     redis.ts            — ioredis connection
     solana.ts           — @solana/web3.js Connection, loadKeypair()
   db/
-    schema.ts           — 6 tables: agents, riskAssessments, policies, claims, monitoringEvents, vaultSnapshots
+    schema.ts           — agents, riskAssessments, policies, claims, claimEvidence,
+                          monitoringEvents, agentBalanceSnapshots, agentOutflowEvents, vaultSnapshots
     custom-constraints.ts — Drizzle migrator extensions (partial unique indexes, etc.)
     migrate.ts          — Drizzle migrator
     seed.ts             — Demo data
@@ -21,6 +22,7 @@ src/
     verifiers/            — exploit, oracle-manipulation, agent-error, governance-attack
     oracle/               — Oracle-manipulation evidence spine (see below)
     governance/           — Governance-attack evidence spine (see below)
+    agent-error/          — Agent-error evidence spine (see below)
     event-vocabulary.ts   — MonitoringEventType → TriggerType, the one contract
     transaction-monitor.ts — Helius webhook processing, anomaly detection
     alert-bus.ts          — HMAC-signed publish/subscribe over Redis `monitoring:alerts`
@@ -64,6 +66,7 @@ src/
     stake-vault.ts        — Stake USDC into the vault (raise solvency ratio)
     claim-replay.ts       — Re-derive stored verdicts from evidence; CI-gateable
     declare-governance-baseline.ts — Holder-signed authority manifest (pnpm gov:declare)
+    declare-agent-mandate.ts       — Holder-signed operating envelope (pnpm mandate:declare)
     seed-demo.ts, simulate-exploit.ts, run-demo.ts, demo-common.ts — demo helpers
 ```
 
@@ -147,6 +150,53 @@ proof-poster.ts     Calls verify_and_payout_governance
   DAO program. `programs` is carried in the bundle as an audit trail only.
 - **Detection is pull-path only**, by design — nothing this screen needs
   exists in the Helius payload. See the note at the top of `prefilter.ts`.
+
+## Agent Error Module (`services/agent-error/`)
+
+The evidence spine behind `TriggerType.AgentError`.
+
+```
+types.ts            MandateView / OutflowBaselineView / AgentErrorEvidenceBundle
+mandate.ts          Reads the holder's declared envelope from chain (reader only)
+breach.ts           PURE — where a movement fell against the five declared dimensions
+baseline.ts         The agent's own outflow history; the "100x average" rule's data
+prefilter.ts        Value-denominated, mandate-relative webhook screen
+adjudicate.ts       PURE verdict function — no I/O, no clock
+proof-poster.ts     Calls verify_and_payout_agent_error
+```
+
+### Invariants
+
+- **The covered event is a breach of a declaration, not an inference.** An
+  agent error is a loss the agent caused with its *own* authority — the case
+  `adjudicateExploit` rejects as `agent_authorized_movement` — so every
+  forensic trace says the agent meant it. The holder declares the envelope in
+  advance (`declare_agent_mandate`, holder-signed, matures after an hour) and
+  the verdict is a comparison against their own statement.
+- **No declaration ⇒ review, never rejection.** Same three states as the
+  governance baseline: `undefined` is an outage and retries, `null` is a policy
+  that predates the mechanism and goes to a human, and only a *matured*
+  declaration can support a claim.
+- **The payout is the overshoot, not the loss.** The first slice of any breach
+  is risk the holder declared they would run, so the mandate is a deductible
+  they authored — and it is what gives the chain an arithmetic bound.
+- **Two of the five dimensions are chain-checkable, three are not.** The
+  program reads the covered account's balance, so it re-derives the outflow cap
+  and the retention floor. It cannot inspect a past transaction, so the window
+  cap and both allowlists live off chain. `MandateBreachReport.provable`
+  carries that distinction to `planProvenSettlement`, which fails a
+  categorical-only breach closed rather than sending a transaction that would
+  revert.
+- **An empty allowlist is silence, not prohibition.** Reading a blank field as
+  "nothing is permitted" would make every ordinary transfer a covered event —
+  the retired verifier's failure mode reached from the opposite direction.
+- **The outflow history is never a verdict input on its own.** "Unusual for
+  this agent" is a reason to look, not a reason to pay. It feeds detection and
+  confidence, plus the one guard that catches a mandate contradicting the
+  agent's own record.
+- **Only `agent_error` opens a claim.** `large_transfer` and `failed_tx` are
+  raised, recorded and alerted on, and both map to `undefined` in
+  `EVENT_TO_TRIGGER`. See the note there for what leaving them mapped cost.
 
 ## Fleet Module (`services/fleet/`)
 

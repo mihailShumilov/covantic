@@ -11,6 +11,7 @@ import {
   PolicyState,
   SYNTHETIC_PAYOUT_RATIO,
   TriggerType,
+  canonicalMint,
   generateDemoTxSignature,
   policyIdToBytes,
   type VerificationData,
@@ -25,6 +26,8 @@ import { createSolanaConnection } from '../config/solana.js';
 import { claimEvidence, claims, policies } from '../db/schema.js';
 import { ADJUDICATOR_VERSION } from '../services/oracle/adjudicate.js';
 import { EXPLOIT_ADJUDICATOR_VERSION } from '../services/exploit/adjudicate.js';
+import { AGENT_ERROR_ADJUDICATOR_VERSION } from '../services/agent-error/adjudicate.js';
+import { GOVERNANCE_ADJUDICATOR_VERSION } from '../services/governance/adjudicate.js';
 import { bundleHash, verdictHash } from '../services/oracle/hash.js';
 import { logger } from '../utils/logger.js';
 import { HeliusClient } from '../utils/helius.js';
@@ -35,6 +38,9 @@ import { CheckpointWriter } from '../services/exploit/checkpoint.js';
 import { ExploitProofPoster } from '../services/exploit/proof-poster.js';
 import { AuthorityCheckpointWriter } from '../services/governance/checkpoint.js';
 import { GovernanceProofPoster } from '../services/governance/proof-poster.js';
+import { MandateReader } from '../services/agent-error/mandate.js';
+import { AgentErrorProofPoster } from '../services/agent-error/proof-poster.js';
+import { loadOutflowBaseline } from '../services/agent-error/baseline.js';
 import { loadBalanceSnapshotAt, readAgentBalances } from '../services/exploit/baseline.js';
 import { GOVERNANCE_BASELINE_MAX_LEAD_SEC } from '../services/governance/conjunction.js';
 import {
@@ -131,6 +137,8 @@ export function startClaimKeeper(db: Database, redis: Redis, config: AppConfig) 
   );
   const authorityCheckpoints = new AuthorityCheckpointWriter(programCtx);
   const governanceProofPoster = new GovernanceProofPoster(programCtx, authorityCheckpoints);
+  const mandates = new MandateReader(programCtx);
+  const agentErrorProofPoster = new AgentErrorProofPoster(programCtx, mandates);
 
   const processQueue = new Queue<ClaimJobPayload>(PROCESS_QUEUE, {
     connection: redis,
@@ -155,6 +163,7 @@ export function startClaimKeeper(db: Database, redis: Redis, config: AppConfig) 
         payoutQueue,
         config,
         authorityCheckpoints,
+        mandates,
       });
     },
     { connection: redis, concurrency: 2 },
@@ -172,6 +181,7 @@ export function startClaimKeeper(db: Database, redis: Redis, config: AppConfig) 
         proofPoster,
         exploitProofPoster,
         governanceProofPoster,
+        agentErrorProofPoster,
       );
     },
     { connection: redis, concurrency: 1 },
@@ -372,6 +382,7 @@ interface ProcessDeps {
   payoutQueue: Queue<PayoutJobPayload>;
   config: AppConfig;
   authorityCheckpoints: AuthorityCheckpointWriter;
+  mandates: MandateReader;
 }
 
 /**
@@ -419,6 +430,148 @@ function governanceLookups(
       };
     },
   };
+}
+
+/**
+ * The chain and database reads the agent-error verifier needs but must not
+ * perform itself.
+ *
+ * Assembled here for the same reason the governance ones are: this is the only
+ * place that knows both the claim row and the program context, and keeping
+ * them out of `claim-oracle` is what lets the verifier be driven by a corpus
+ * test with neither a database nor an RPC.
+ *
+ * `claimSubmittedAt` is the claim row's creation time, which is necessarily
+ * earlier than the `policy.claim_submitted_at` the program will compare
+ * against — so a mandate accepted here is one the program will accept, never
+ * the reverse.
+ */
+function agentErrorLookups(
+  claim: ClaimRow,
+  policy: typeof policies.$inferSelect,
+  deps: ProcessDeps,
+): NonNullable<VerifyClaimOptions['agentError']> {
+  const claimSubmittedAt = Math.floor(new Date(claim.createdAt).getTime() / 1000);
+  const coveredMint = deps.config.USDC_MINT;
+  return {
+    mandate: () =>
+      deps.mandates.readMandate(policy.holderAddress, BigInt(claim.policyId), claimSubmittedAt),
+    // With no covered mint configured there is no series to summarise. `null`
+    // rather than a throw: history is corroboration, and its absence should
+    // cost a little confidence rather than stall the claim.
+    outflowBaseline: (windowSeconds: number) =>
+      coveredMint
+        ? loadOutflowBaseline(
+            deps.db,
+            claim.agentAddress,
+            canonicalMint(coveredMint),
+            new Date(claim.createdAt),
+            windowSeconds,
+          )
+        : Promise.resolve(null),
+  };
+}
+
+/**
+ * Reasons the exploit adjudicator gives that are the agent-error question in
+ * disguise.
+ *
+ * `agent_authorized_movement` is a rejection meaning "the agent moved its own
+ * money and nothing structural contradicts that", and
+ * `authorized_but_anomalous` escalates the same finding when the surrounding
+ * shape looks wrong. Both are precisely the case this other trigger covers,
+ * and both used to end the claim — closed or parked — without the agent-error
+ * question ever being asked.
+ */
+const EXPLOIT_REASONS_MEANING_AGENT_ERROR = new Set([
+  'agent_authorized_movement',
+  'authorized_but_anomalous',
+]);
+
+/**
+ * Re-file an exploit claim as an agent-error one, when that is what it is.
+ *
+ * Returns true when the claim was re-attributed and re-queued, so the caller
+ * stops processing this pass.
+ *
+ * Two constraints keep this from being a loophole rather than a repair:
+ *
+ * **Before on-chain submission only.** `oracle_submit_claim` writes
+ * `policy.trigger_type`, and after that the trigger is fixed — re-attributing
+ * then would leave the database and the chain disagreeing about what is being
+ * claimed. This runs while the claim is still `verifying`, which is the only
+ * window where the two can be kept in step.
+ *
+ * **One direction only.** Exploit → agent error is a *narrowing*: it moves the
+ * claim from a path that pays the full unauthorised loss to one that pays only
+ * the overshoot beyond a cap the holder declared. The reverse would let a
+ * mandate breach be re-filed as an exploit for a larger payout, and is
+ * deliberately not implemented. `reattributedFrom` in the verification data is
+ * what makes a second pass a no-op.
+ */
+async function reattributeToAgentError(
+  claim: ClaimRow,
+  policy: typeof policies.$inferSelect,
+  result: VerificationResult,
+  deps: ProcessDeps,
+  hasEvidence: boolean,
+): Promise<boolean> {
+  if (claim.triggerType !== TriggerType.Exploit) return false;
+  const reason = typeof result.details.reason === 'string' ? result.details.reason : '';
+  if (!EXPLOIT_REASONS_MEANING_AGENT_ERROR.has(reason)) return false;
+
+  const data = (claim.verificationData ?? {}) as VerificationData & {
+    reattributedFrom?: number;
+  };
+  if (data.reattributedFrom !== undefined) return false;
+
+  // Only worth moving if there is something to measure the movement against.
+  // With no matured mandate the agent-error path resolves to review, which is
+  // no better than where the exploit verdict already left it — and a rejection
+  // carries more information than a second "we cannot tell".
+  const claimSubmittedAt = Math.floor(new Date(claim.createdAt).getTime() / 1000);
+  let mandate: Awaited<ReturnType<MandateReader['readMandate']>> = null;
+  try {
+    mandate = await deps.mandates.readMandate(
+      policy.holderAddress,
+      BigInt(claim.policyId),
+      claimSubmittedAt,
+    );
+  } catch (err) {
+    logger.warn(
+      { err, claimId: claim.id },
+      'claim-keeper: mandate unreadable during re-attribution; leaving the exploit verdict',
+    );
+    return false;
+  }
+  if (!mandate?.maturedBeforeClaim) return false;
+
+  await deps.db
+    .update(claims)
+    .set({
+      triggerType: TriggerType.AgentError,
+      status: 'pending',
+      verificationData: mergeVerificationData(claim.verificationData, {
+        reattributedFrom: TriggerType.Exploit,
+        reattributionReason: reason,
+        // The exploit bundle stays in `claim_evidence` under its own attempt,
+        // so the trail shows both questions being asked rather than only the
+        // one that was answered second.
+        reattributionEvidenceRecorded: hasEvidence,
+      }),
+      updatedAt: new Date(),
+    })
+    .where(eq(claims.id, claim.id));
+
+  const reloaded = await loadClaim(claim.id, deps.db);
+  if (reloaded) await broadcastClaim(reloaded, deps.redis);
+  await deps.processQueue.add('process', { claimId: claim.id });
+
+  logger.info(
+    { claimId: claim.id, reason },
+    'claim-keeper: exploit verdict re-filed as agent error against a matured mandate',
+  );
+  return true;
 }
 
 async function processClaim(claimId: string, deps: ProcessDeps): Promise<void> {
@@ -472,17 +625,27 @@ async function processClaim(claimId: string, deps: ProcessDeps): Promise<void> {
         connection,
         holderAddress: policy.holderAddress,
         governance: governanceLookups(claim, policy, deps),
+        agentError: agentErrorLookups(claim, policy, deps),
       },
     );
   }
 
   const attempt = (claim.verifyAttempts ?? 0) + 1;
-  await recordEvidence(claim, attempt, result, db);
+  const evidenceHash = await recordEvidence(claim, attempt, result, db);
 
   // "We could not check" is not "there was no loss". An unavailable price
   // source, an unindexed transaction, or references that disagree all land
   // here and get retried; only evidence that actually contradicts the claim
   // closes it.
+  // An exploit verdict that turns on "the agent authorised this" is not a dead
+  // end — it is the other trigger's opening statement. See
+  // {@link reattributeToAgentError}.
+  if (
+    await reattributeToAgentError(claim, policy, result, deps, evidenceHash !== null)
+  ) {
+    return;
+  }
+
   if (result.outcome === 'indeterminate') {
     await handleIndeterminate(claim, attempt, result, db, redis, processQueue);
     return;
@@ -509,7 +672,8 @@ async function processClaim(claimId: string, deps: ProcessDeps): Promise<void> {
     proofAvailable:
       plan.kind === 'proven_price' ||
       plan.kind === 'proven_balance' ||
-      plan.kind === 'proven_authority',
+      plan.kind === 'proven_authority' ||
+      plan.kind === 'proven_mandate',
   });
   if (lane.lane === 'review') {
     await escalateToReview(claim, lane.reason, result, db, redis);
@@ -530,6 +694,9 @@ async function processClaim(claimId: string, deps: ProcessDeps): Promise<void> {
         outcome: result.outcome,
         confidence: result.confidence,
         verifyAttempts: attempt,
+        // What every proven settlement path commits to on chain. Written here
+        // rather than by each verifier so the four cannot drift.
+        ...(evidenceHash ? { bundleHash: evidenceHash } : {}),
       }),
       verifyAttempts: attempt,
       reviewReason: null,
@@ -582,6 +749,7 @@ async function executePayout(
   proofPoster: ProofPoster,
   exploitProofPoster: ExploitProofPoster,
   governanceProofPoster: GovernanceProofPoster,
+  agentErrorProofPoster: AgentErrorProofPoster,
 ): Promise<void> {
   const claim = await loadClaim(claimId, db);
   if (!claim) return;
@@ -683,6 +851,15 @@ async function executePayout(
         break;
       case 'proven_balance':
         payoutSig = await exploitProofPoster.settle({
+          holderAddress: policy.holderAddress,
+          agentAddress: policy.agentAddress,
+          policyId: BigInt(claim.policyId),
+          payoutAmount: BigInt(payoutAmount),
+          bundleHash: proofPlan.bundleHash,
+        });
+        break;
+      case 'proven_mandate':
+        payoutSig = await agentErrorProofPoster.settle({
           holderAddress: policy.holderAddress,
           agentAddress: policy.agentAddress,
           policyId: BigInt(claim.policyId),
@@ -841,20 +1018,31 @@ async function setClaimStatus(
 }
 
 /**
- * Persist the evidence a verdict was derived from.
+ * Persist the evidence a verdict was derived from, and return its hash.
  *
  * Written before any state transition and on every attempt, including the
  * ones that resolve nothing: the trail of what each retry saw is how a stuck
  * claim gets diagnosed. Evidence storage must never be able to break the
  * pipeline, so failures here are logged and swallowed.
+ *
+ * **The hash is returned because every proof path needs it and only this
+ * function computes it.** `planProvenSettlement` requires `bundleHash` in the
+ * claim's `verificationData` before it will route to a proven instruction, and
+ * only the price verifier was folding it into its own `details`. So with
+ * `EXPLOIT_PROOF_ENABLED` or `GOVERNANCE_PROOF_ENABLED` on, every claim on
+ * those triggers would have planned `unprovable: no_bundle_hash` and gone to
+ * review — the proven path unreachable, failing closed and therefore silently.
+ * Returning it from the one place that derives it means a new trigger cannot
+ * reintroduce the gap by forgetting to copy a line.
  */
 async function recordEvidence(
   claim: ClaimRow,
   attempt: number,
   result: VerificationResult,
   db: Database,
-): Promise<void> {
-  if (!result.evidence) return;
+): Promise<string | null> {
+  if (!result.evidence) return null;
+  let hashHex: string | null = null;
   try {
     const bundle = result.evidence as unknown as Record<string, unknown>;
     const hash = bundleHash(bundle);
@@ -874,12 +1062,14 @@ async function recordEvidence(
       verdictHash: verdictHash(hash, verdict),
       adjudicatorVersion: adjudicatorVersionFor(claim.triggerType),
     });
+    hashHex = hash;
   } catch (err) {
     logger.error(
       { err, claimId: claim.id, attempt },
       'claim-keeper: failed to persist claim evidence',
     );
   }
+  return hashHex;
 }
 
 /**
@@ -930,6 +1120,10 @@ function adjudicatorVersionFor(triggerType: number): string {
       return EXPLOIT_ADJUDICATOR_VERSION;
     case TriggerType.OracleManipulation:
       return ADJUDICATOR_VERSION;
+    case TriggerType.GovernanceAttack:
+      return GOVERNANCE_ADJUDICATOR_VERSION;
+    case TriggerType.AgentError:
+      return AGENT_ERROR_ADJUDICATOR_VERSION;
     default:
       // Triggers without a pure adjudicator yet. Naming the trigger keeps the
       // row honest instead of attributing the verdict to a version that had

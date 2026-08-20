@@ -56,13 +56,32 @@ describe('confidence lanes', () => {
     // A reviewer reading "no_proof_path_for_trigger" learns something
     // different from "proof_path_unavailable" — one is a gap in coverage, the
     // other is an incident.
+    //
+    // All four declared triggers now have a proof path, so this case is
+    // reached only by a trigger value the lanes do not know about. That is
+    // worth keeping rather than deleting: the branch is what a *new* trigger
+    // lands in before its instruction exists, and it must route to a human
+    // rather than defaulting into the pay lane.
+    const unknownTrigger = 99;
+    const decision = decideLane({
+      triggerType: unknownTrigger,
+      confidence: 0.8,
+      proofAvailable: false,
+    });
+
+    expect(decision).toMatchObject({ lane: 'review', reason: 'no_proof_path_for_trigger' });
+  });
+
+  it('treats a broken proof path as an incident, not a gap in coverage', () => {
+    // The other side of the same fork, for a trigger that *does* have an
+    // instruction: proof was possible and could not be produced.
     const decision = decideLane({
       triggerType: TriggerType.AgentError,
       confidence: 0.8,
       proofAvailable: false,
     });
 
-    expect(decision).toMatchObject({ lane: 'review', reason: 'no_proof_path_for_trigger' });
+    expect(decision).toMatchObject({ lane: 'review', reason: 'proof_path_unavailable' });
   });
 
   it('would pay without a proof only above the unreachable bar', () => {

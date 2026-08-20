@@ -154,6 +154,41 @@ pub mod covantic {
         verify_and_payout_governance_handler(ctx, payout_amount, evidence)
     }
 
+    /// Declare (or refresh) the operating envelope that is legitimate for an
+    /// agent. Holder-signed, and it matures on a delay for the same reason
+    /// the governance baseline does — a mandate that could be written and
+    /// claimed against in the same breath would prove nothing.
+    ///
+    /// This is what makes an agent-error claim provable at all. The trigger
+    /// covers a loss the agent caused with its *own* authority, so there is
+    /// no unauthorised signer to point at and no change of control to
+    /// observe; without the holder saying in advance what the agent was
+    /// permitted to do, the chain has nothing to check.
+    pub fn declare_agent_mandate(
+        ctx: Context<DeclareAgentMandate>,
+        mandate: AgentMandate,
+    ) -> Result<()> {
+        declare_agent_mandate_handler(ctx, mandate)
+    }
+
+    /// Verify an agent-error claim against the holder's declared mandate and
+    /// a balance drop the program measures, and execute payout.
+    ///
+    /// Prefer this over `verify_and_payout` for TRIGGER_AGENT_ERROR. The
+    /// program re-reads the covered token account, compares the drop against
+    /// an envelope the holder signed for before the claim was filed, and
+    /// refuses to pay more than the overshoot. It settles only breaches it
+    /// can measure: a movement to an undeclared destination produces no
+    /// overshoot and goes to a reviewer rather than being paid on the
+    /// oracle's word.
+    pub fn verify_and_payout_agent_error(
+        ctx: Context<VerifyAndPayoutAgentError>,
+        payout_amount: u64,
+        evidence: AgentErrorPayoutEvidence,
+    ) -> Result<()> {
+        verify_and_payout_agent_error_handler(ctx, payout_amount, evidence)
+    }
+
     /// Mark expired policies (permissionless crank).
     pub fn expire_policy(ctx: Context<ExpirePolicy>) -> Result<()> {
         expire_policy_handler(ctx)

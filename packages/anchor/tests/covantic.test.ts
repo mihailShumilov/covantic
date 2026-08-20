@@ -48,6 +48,8 @@ const EXPLOIT_EVIDENCE_SEED = Buffer.from('covantic_exploit_evidence');
 const GOVERNANCE_BASELINE_SEED = Buffer.from('covantic_gov_baseline');
 const AUTHORITY_CHECKPOINT_SEED = Buffer.from('covantic_authority_checkpoint');
 const GOVERNANCE_EVIDENCE_SEED = Buffer.from('covantic_gov_evidence');
+const AGENT_MANDATE_SEED = Buffer.from('covantic_agent_mandate');
+const AGENT_ERROR_EVIDENCE_SEED = Buffer.from('covantic_agent_error_evidence');
 
 const USDC_DECIMALS = 6;
 const usdc = (amount: number) => new BN(amount * 10 ** USDC_DECIMALS);
@@ -103,6 +105,17 @@ function governanceEvidencePda(policy: PublicKey): [PublicKey, number] {
 function exploitEvidencePda(policy: PublicKey): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [EXPLOIT_EVIDENCE_SEED, policy.toBuffer()],
+    PROGRAM_ID,
+  );
+}
+
+function agentMandatePda(policy: PublicKey): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync([AGENT_MANDATE_SEED, policy.toBuffer()], PROGRAM_ID);
+}
+
+function agentErrorEvidencePda(policy: PublicKey): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [AGENT_ERROR_EVIDENCE_SEED, policy.toBuffer()],
     PROGRAM_ID,
   );
 }
@@ -1730,6 +1743,354 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
 
       await govPayout(policy, agent.publicKey, usdc(100)).rpc();
       await expect(govPayout(policy, agent.publicKey, usdc(100)).rpc()).rejects.toThrow();
+    });
+  });
+
+  describe('agent mandate — declaring an envelope and proving a breach', () => {
+    /**
+     * The trigger where the chain has the least to work with, and the tests
+     * are mostly about what it therefore refuses.
+     *
+     * An agent error is a loss the agent caused with its *own* authority, so
+     * there is no unauthorised signer to point at and no change of control to
+     * observe. The only thing that makes it checkable is the holder saying, in
+     * advance, what the agent was permitted to do — and the program then
+     * comparing that against a balance it reads for itself.
+     */
+
+    const CAP = usdc(10);
+    const FLOOR = usdc(5);
+
+    // The suite creates a fresh agent per case and the earlier blocks have
+    // already spent most of the admin's balance funding theirs. Topping up
+    // here keeps a failure in this block mean "the instruction refused",
+    // which is what every assertion below is actually about.
+    beforeAll(async () => {
+      await airdropSol(context, admin.publicKey);
+    });
+
+    async function setupMandatedPolicy(agentFunding: BN) {
+      const agent = Keypair.generate();
+      const agentAta = getAssociatedTokenAddressSync(usdcMint.publicKey, agent.publicKey);
+
+      const fundTx = new Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: admin.publicKey,
+          toPubkey: agent.publicKey,
+          lamports: 100_000_000,
+        }),
+        createAssociatedTokenAccountInstruction(
+          admin.publicKey,
+          agentAta,
+          agent.publicKey,
+          usdcMint.publicKey,
+        ),
+        createMintToInstruction(
+          usdcMint.publicKey,
+          agentAta,
+          admin.publicKey,
+          BigInt(agentFunding.toString()),
+        ),
+      );
+      fundTx.recentBlockhash = (await banks.getLatestBlockhash())[0];
+      fundTx.feePayer = admin.publicKey;
+      fundTx.sign(admin);
+      await banks.processTransaction(fundTx);
+
+      const [config] = configPda();
+      const [vault] = vaultPda();
+      const cfg: any = await (program.account as any).protocolConfig.fetch(config);
+      const [policy] = policyPda(holder.publicKey, cfg.policyCounter as BN);
+
+      await ensureAttestation(agent.publicKey);
+      await program.methods
+        .createPolicy(usdc(100), new BN(86_400), agent.publicKey)
+        .accountsPartial({
+          holder: holder.publicKey,
+          config,
+          vault,
+          policy,
+          holderTokenAccount: holderAta,
+          vaultTokenAccount: vaultAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        } as any)
+        .signers([holder])
+        .rpc();
+
+      return { policy, agent, agentAta };
+    }
+
+    function envelope(overrides: Record<string, unknown> = {}) {
+      return {
+        maxSingleOutflow: CAP,
+        maxWindowOutflow: usdc(50),
+        windowSeconds: new BN(3_600),
+        minRetainedBalance: FLOOR,
+        allowedCounterparties: [],
+        allowedPrograms: [],
+        manifestHash: Array.from(Buffer.alloc(32, 9)),
+        ...overrides,
+      };
+    }
+
+    async function declareMandate(
+      policy: PublicKey,
+      overrides: Record<string, unknown> = {},
+      signer: Keypair = holder,
+    ) {
+      await program.methods
+        .declareAgentMandate(envelope(overrides) as any)
+        .accountsPartial({
+          holder: signer.publicKey,
+          policy,
+          mandate: agentMandatePda(policy)[0],
+          systemProgram: SystemProgram.programId,
+        } as any)
+        .signers([signer])
+        .rpc();
+    }
+
+    async function balanceCheckpoint(policy: PublicKey, agent: PublicKey) {
+      const [config] = configPda();
+      await program.methods
+        .checkpointBalance()
+        .accountsPartial({
+          cranker: admin.publicKey,
+          config,
+          policy,
+          coveredTokenAccount: getAssociatedTokenAddressSync(usdcMint.publicKey, agent),
+          usdcMint: usdcMint.publicKey,
+          checkpoint: checkpointPda(policy)[0],
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        } as any)
+        .signers([admin])
+        .rpc();
+    }
+
+    async function spend(agent: Keypair, agentAta: PublicKey, amount: BN) {
+      const sink = getAssociatedTokenAddressSync(usdcMint.publicKey, staker2.publicKey);
+      const tx = new Transaction().add(
+        createTransferInstruction(agentAta, sink, agent.publicKey, BigInt(amount.toString())),
+      );
+      tx.recentBlockhash = (await banks.getLatestBlockhash())[0];
+      tx.feePayer = admin.publicKey;
+      tx.sign(admin, agent);
+      await banks.processTransaction(tx);
+    }
+
+    async function fileClaim(policy: PublicKey, trigger = 3) {
+      const [config] = configPda();
+      await program.methods
+        .oracleSubmitClaim(
+          trigger,
+          Buffer.from(Array.from({ length: 64 }, (_, i) => (i + 23) % 256)),
+        )
+        .accountsPartial({ oracle: oracle.publicKey, config, policy } as any)
+        .signers([oracle])
+        .rpc();
+    }
+
+    function payout(policy: PublicKey, agent: PublicKey, amount: BN) {
+      const [config] = configPda();
+      const [vault] = vaultPda();
+      return program.methods
+        .verifyAndPayoutAgentError(amount, { bundleHash: Array.from(Buffer.alloc(32, 6)) })
+        .accountsPartial({
+          oracle: oracle.publicKey,
+          config,
+          policy,
+          vault,
+          vaultTokenAccount: vaultAta,
+          holderTokenAccount: holderAta,
+          coveredTokenAccount: getAssociatedTokenAddressSync(usdcMint.publicKey, agent),
+          usdcMint: usdcMint.publicKey,
+          mandate: agentMandatePda(policy)[0],
+          checkpoint: checkpointPda(policy)[0],
+          evidenceRecord: agentErrorEvidencePda(policy)[0],
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        } as any)
+        .signers([oracle]);
+    }
+
+    it('records the declared envelope, and matures on a delay', async () => {
+      const { policy } = await setupMandatedPolicy(usdc(100));
+      await declareMandate(policy);
+
+      const m: any = await (program.account as any).policyAgentMandate.fetch(
+        agentMandatePda(policy)[0],
+      );
+      expect(m.maxSingleOutflow.toString()).toBe(CAP.toString());
+      // The delay is the mechanism: without it a holder could watch an
+      // ordinary loss happen and then declare an envelope narrow enough to
+      // have been breached by it.
+      expect(m.effectiveAt.sub(m.declaredAt).toNumber()).toBe(3_600);
+    });
+
+    it('lets only the holder declare what their agent may do', async () => {
+      // Not the oracle, whose discretion this account exists to constrain.
+      const { policy } = await setupMandatedPolicy(usdc(100));
+
+      await expect(declareMandate(policy, {}, oracle)).rejects.toThrow();
+    });
+
+    it('refuses a zero cap, which would make every movement a breach', async () => {
+      const { policy } = await setupMandatedPolicy(usdc(100));
+
+      await expect(declareMandate(policy, { maxSingleOutflow: usdc(0) })).rejects.toThrow();
+    });
+
+    it('refuses a window cap smaller than a single permitted movement', async () => {
+      const { policy } = await setupMandatedPolicy(usdc(100));
+
+      await expect(declareMandate(policy, { maxWindowOutflow: usdc(1) })).rejects.toThrow();
+    });
+
+    it('pays only the overshoot beyond the declared cap', async () => {
+      // The design decision the whole trigger rests on. The holder said 10 at
+      // a time; the agent moved 60. The first 10 is risk they declared they
+      // were willing to run, so the vault owes 50 — a deductible the holder
+      // authored themselves.
+      const { policy, agent, agentAta } = await setupMandatedPolicy(usdc(100));
+      await declareMandate(policy);
+      await balanceCheckpoint(policy, agent.publicKey);
+      await advanceClockBySeconds(context, 3_601); // mandate matures
+      await spend(agent, agentAta, usdc(60));
+      await fileClaim(policy);
+      await advanceClockBySeconds(context, 21_601); // agent-error lock
+
+      // 51 is one more than the overshoot the program measured.
+      await expect(payout(policy, agent.publicKey, usdc(51)).rpc()).rejects.toThrow();
+      await payout(policy, agent.publicKey, usdc(50)).rpc();
+
+      const record: any = await (program.account as any).agentErrorEvidenceRecord.fetch(
+        agentErrorEvidencePda(policy)[0],
+      );
+      expect(record.observedDrop.toString()).toBe(usdc(60).toString());
+      expect(record.breachExcess.toString()).toBe(usdc(50).toString());
+      expect(record.breachKind).toBe(1); // BREACH_OUTFLOW_CAP
+      expect(record.declaredMaxSingleOutflow.toString()).toBe(CAP.toString());
+
+      const pol: any = await (program.account as any).insurancePolicy.fetch(policy);
+      expect(pol.state).toBe(2); // ClaimPaid
+    });
+
+    it('measures a breach of the retention floor when the cap was not crossed', async () => {
+      // The agent kept every movement under the cap but emptied the account,
+      // which is the other quantitative promise the holder made.
+      const { policy, agent, agentAta } = await setupMandatedPolicy(usdc(9));
+      await declareMandate(policy);
+      await balanceCheckpoint(policy, agent.publicKey);
+      await advanceClockBySeconds(context, 3_601);
+      await spend(agent, agentAta, usdc(9)); // under the 10 cap, floor is 5
+      await fileClaim(policy);
+      await advanceClockBySeconds(context, 21_601);
+
+      await payout(policy, agent.publicKey, usdc(5)).rpc();
+
+      const record: any = await (program.account as any).agentErrorEvidenceRecord.fetch(
+        agentErrorEvidencePda(policy)[0],
+      );
+      expect(record.breachKind).toBe(2); // BREACH_RETAINED_FLOOR
+      expect(record.breachExcess.toString()).toBe(usdc(5).toString());
+    });
+
+    it('refuses a movement that stayed inside the declared envelope', async () => {
+      // The clean refusal, and it rests on the holder's own statement rather
+      // than on which programs happened to appear in the transaction.
+      const { policy, agent, agentAta } = await setupMandatedPolicy(usdc(100));
+      await declareMandate(policy);
+      await balanceCheckpoint(policy, agent.publicKey);
+      await advanceClockBySeconds(context, 3_601);
+      await spend(agent, agentAta, usdc(8)); // under the cap, above the floor
+      await fileClaim(policy);
+      await advanceClockBySeconds(context, 21_601);
+
+      await expect(payout(policy, agent.publicKey, usdc(8)).rpc()).rejects.toThrow();
+    });
+
+    it('refuses a breach too small to be worth an instruction', async () => {
+      const { policy, agent, agentAta } = await setupMandatedPolicy(usdc(100));
+      await declareMandate(policy);
+      await balanceCheckpoint(policy, agent.publicKey);
+      await advanceClockBySeconds(context, 3_601);
+      // 10.5 out against a 10 cap: a real overshoot, below the 1 USDC floor.
+      await spend(agent, agentAta, new BN(10_500_000));
+      await fileClaim(policy);
+      await advanceClockBySeconds(context, 21_601);
+
+      await expect(payout(policy, agent.publicKey, new BN(500_000)).rpc()).rejects.toThrow();
+    });
+
+    it('refuses a mandate that had not matured when the claim was filed', async () => {
+      // Without this a holder declares a convenient envelope after the fact
+      // and claims against it in the next instruction.
+      const { policy, agent, agentAta } = await setupMandatedPolicy(usdc(100));
+      await declareMandate(policy);
+      await balanceCheckpoint(policy, agent.publicKey);
+      await spend(agent, agentAta, usdc(60));
+      await fileClaim(policy); // filed before effective_at
+      await advanceClockBySeconds(context, 21_601);
+
+      await expect(payout(policy, agent.publicKey, usdc(50)).rpc()).rejects.toThrow();
+    });
+
+    it('refuses before the lock period has elapsed', async () => {
+      const { policy, agent, agentAta } = await setupMandatedPolicy(usdc(100));
+      await declareMandate(policy);
+      await balanceCheckpoint(policy, agent.publicKey);
+      await advanceClockBySeconds(context, 3_601);
+      await spend(agent, agentAta, usdc(60));
+      await fileClaim(policy);
+
+      await expect(payout(policy, agent.publicKey, usdc(50)).rpc()).rejects.toThrow();
+    });
+
+    it('refuses to settle a non-agent-error trigger on this path', async () => {
+      const { policy, agent, agentAta } = await setupMandatedPolicy(usdc(100));
+      await declareMandate(policy);
+      await balanceCheckpoint(policy, agent.publicKey);
+      await advanceClockBySeconds(context, 3_601);
+      await spend(agent, agentAta, usdc(60));
+      await fileClaim(policy, 1); // exploit
+      await advanceClockBySeconds(context, 21_601);
+
+      await expect(payout(policy, agent.publicKey, usdc(50)).rpc()).rejects.toThrow();
+    });
+
+    it('measures staleness against the claim, not against now', async () => {
+      // The trap this trigger would have walked straight into. The lock is six
+      // hours and the checkpoint allowance is two, so bounding the checkpoint
+      // age against `now` — as the exploit path does, where a one-hour lock
+      // leaves an hour of slack — would make every payout here unsatisfiable.
+      // This case only settles because the comparison is against
+      // `claim_submitted_at`.
+      const { policy, agent, agentAta } = await setupMandatedPolicy(usdc(100));
+      await declareMandate(policy);
+      await balanceCheckpoint(policy, agent.publicKey);
+      await advanceClockBySeconds(context, 3_601);
+      await spend(agent, agentAta, usdc(60));
+      await fileClaim(policy);
+      // Well past MAX_MANDATE_CHECKPOINT_AGE measured from `now`.
+      await advanceClockBySeconds(context, 21_601);
+
+      await payout(policy, agent.publicKey, usdc(50)).rpc();
+    });
+
+    it('pays a proven agent-error claim only once', async () => {
+      const { policy, agent, agentAta } = await setupMandatedPolicy(usdc(100));
+      await declareMandate(policy);
+      await balanceCheckpoint(policy, agent.publicKey);
+      await advanceClockBySeconds(context, 3_601);
+      await spend(agent, agentAta, usdc(60));
+      await fileClaim(policy);
+      await advanceClockBySeconds(context, 21_601);
+
+      await payout(policy, agent.publicKey, usdc(50)).rpc();
+      await expect(payout(policy, agent.publicKey, usdc(50)).rpc()).rejects.toThrow();
     });
   });
 });

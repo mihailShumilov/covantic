@@ -20,6 +20,11 @@ import { loadConfig } from '../src/config/env.js';
 import { createDbConnection } from '../src/config/database.js';
 import { claimEvidence } from '../src/db/schema.js';
 import {
+  AGENT_ERROR_ADJUDICATOR_VERSION,
+  adjudicateAgentError,
+} from '../src/services/agent-error/adjudicate.js';
+import type { AgentErrorEvidenceBundle } from '../src/services/agent-error/types.js';
+import {
   EXPLOIT_ADJUDICATOR_VERSION,
   adjudicateExploit,
 } from '../src/services/exploit/adjudicate.js';
@@ -37,6 +42,7 @@ import type { EvidenceBundle } from '../src/services/oracle/types.js';
  *  shared package for two numbers. */
 const TRIGGER_EXPLOIT = 1;
 const TRIGGER_ORACLE_MANIPULATION = 2;
+const TRIGGER_AGENT_ERROR = 3;
 const TRIGGER_GOVERNANCE_ATTACK = 4;
 
 interface ReplayEngine {
@@ -67,6 +73,11 @@ function engineFor(bundle: { triggerType?: number }): ReplayEngine | null {
       return {
         version: GOVERNANCE_ADJUDICATOR_VERSION,
         run: (b) => adjudicateGovernance(b as GovernanceEvidenceBundle),
+      };
+    case TRIGGER_AGENT_ERROR:
+      return {
+        version: AGENT_ERROR_ADJUDICATOR_VERSION,
+        run: (b) => adjudicateAgentError(b as AgentErrorEvidenceBundle),
       };
     default:
       return null;

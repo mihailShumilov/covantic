@@ -9,6 +9,7 @@ import {
   real,
   smallint,
   index,
+  uniqueIndex,
   varchar,
   jsonb,
 } from 'drizzle-orm/pg-core';
@@ -240,6 +241,45 @@ export const agentBalanceSnapshots = pgTable(
   (table) => [
     index('idx_balance_snapshot_agent_time').on(table.agentAddress, table.blockTime),
     index('idx_balance_snapshot_agent_mint').on(table.agentAddress, table.mint, table.blockTime),
+  ],
+);
+
+// Agent Outflow Events — what this agent's spending normally looks like
+//
+// One row per (agent, transaction, mint) whenever value left an insured
+// agent. Two things read it, and neither could exist without it: the rolling
+// window cap in an agent mandate, and the "transfer >100x agent average" rule
+// the coverage table has advertised since launch and which, until this table,
+// no code implemented — `agent_balance_snapshots` records *holdings*, and a
+// history of holdings cannot tell you what a normal payment looks like.
+//
+// Deliberately raw observations rather than precomputed statistics. A mandate
+// declares its own window, so the aggregation has to be computable for any
+// window rather than for one the writer picked in advance.
+//
+// Written by both the webhook monitor and the watcher sweep, which is why the
+// unique index exists: the same transaction reaching the table twice would
+// double every sum built on it.
+export const agentOutflowEvents = pgTable(
+  'agent_outflow_events',
+  {
+    id: uuid('id')
+      .default(sql`gen_random_uuid()`)
+      .primaryKey(),
+    agentAddress: varchar('agent_address', { length: 44 }).notNull(),
+    txSignature: varchar('tx_signature', { length: 128 }).notNull(),
+    /** Canonical mint, or 'SOL' for native. */
+    mint: varchar('mint', { length: 44 }).notNull(),
+    /** Net outflow of this mint, raw base units, positive. */
+    amountRaw: bigint('amount_raw', { mode: 'number' }).notNull(),
+    decimals: integer('decimals').notNull(),
+    blockTime: timestamp('block_time', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_outflow_agent_time').on(table.agentAddress, table.blockTime),
+    index('idx_outflow_agent_mint_time').on(table.agentAddress, table.mint, table.blockTime),
+    uniqueIndex('outflow_event_unique').on(table.agentAddress, table.txSignature, table.mint),
   ],
 );
 

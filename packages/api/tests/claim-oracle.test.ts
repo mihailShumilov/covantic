@@ -272,75 +272,27 @@ describe('verifyClaim — dispatcher', () => {
 });
 
 describe('AgentError verifier', () => {
-  it('rejects a self-transfer (all outflow lands in the agent)', async () => {
-    const tx = mkTx({
-      tokenTransfers: [
-        {
-          fromUserAccount: AGENT,
-          toUserAccount: AGENT,
-          fromTokenAccount: 'a',
-          toTokenAccount: 'b',
-          tokenAmount: 2_000,
-          mint: USDC_MINT,
-          tokenStandard: 'Fungible',
-        },
-      ],
-    });
-    const result = await verifyClaim(
-      TriggerType.AgentError,
-      tx.signature,
-      AGENT,
-      COVERAGE_RAW,
-      mkHelius(tx),
-      mkPricer({}),
-      { usdcMint: USDC_MINT },
-    );
-    expect(result.verified).toBe(false);
-    expect(result.details.reason).toBe('self_transfer');
-  });
+  /**
+   * Every case here used to assert the opposite, and the inversion is the
+   * point of the change.
+   *
+   * The old verifier decided on which programs appeared in a transaction: a
+   * DEX rejected outright as "legitimate trading", a flash-loan program
+   * confirmed at 0.85, a bridge at 0.5, anything unrecognised at 0.6 — and a
+   * reverted transaction confirmed at 0.6 on a flat, invented 1 USDC. So it
+   * paid for bridge transfers to the holder's own address and denied a
+   * catastrophic misrouted swap through Jupiter.
+   *
+   * The behavioural cases now live in `agent-error-corpus.test.ts`, which can
+   * supply the chain record and a declared mandate. What is left here is the
+   * dispatcher's contract: without those inputs the verifier must escalate,
+   * never decide.
+   */
 
-  it('rejects a DEX trade even with large outflow', async () => {
-    const tx = mkTx({
-      instructions: [{ programId: DEX_PROGRAM, accounts: [], data: '' }],
-      tokenTransfers: [
-        {
-          fromUserAccount: AGENT,
-          toUserAccount: OTHER_WALLET,
-          fromTokenAccount: 'a',
-          toTokenAccount: 'b',
-          tokenAmount: 2_000,
-          mint: USDC_MINT,
-          tokenStandard: 'Fungible',
-        },
-      ],
-      accountData: [
-        {
-          account: 'a',
-          nativeBalanceChange: 0,
-          tokenBalanceChanges: [
-            {
-              mint: USDC_MINT,
-              rawTokenAmount: { tokenAmount: '-2000000000', decimals: 6 },
-              userAccount: AGENT,
-            },
-          ],
-        },
-      ],
-    });
-    const result = await verifyClaim(
-      TriggerType.AgentError,
-      tx.signature,
-      AGENT,
-      COVERAGE_RAW,
-      mkHelius(tx),
-      mkPricer({}),
-      { usdcMint: USDC_MINT },
-    );
-    expect(result.verified).toBe(false);
-    expect(result.details.reason).toBe('dex_trade');
-  });
-
-  it('approves with high confidence when outflow goes through a flash-loan program', async () => {
+  it('escalates instead of deciding when the chain record is unavailable', async () => {
+    // No RPC connection, so nothing can say whether the *agent's own*
+    // authority moved the money — the fact that separates this trigger from
+    // an exploit. "We could not check" must never be recorded as a verdict.
     const tx = mkTx({
       instructions: [{ programId: FLASH_LOAN_PROGRAM, accounts: [], data: '' }],
       tokenTransfers: [
@@ -354,20 +306,8 @@ describe('AgentError verifier', () => {
           tokenStandard: 'Fungible',
         },
       ],
-      accountData: [
-        {
-          account: 'a',
-          nativeBalanceChange: 0,
-          tokenBalanceChanges: [
-            {
-              mint: USDC_MINT,
-              rawTokenAmount: { tokenAmount: '-5000000000', decimals: 6 },
-              userAccount: AGENT,
-            },
-          ],
-        },
-      ],
     });
+
     const result = await verifyClaim(
       TriggerType.AgentError,
       tx.signature,
@@ -377,59 +317,32 @@ describe('AgentError verifier', () => {
       mkPricer({}),
       { usdcMint: USDC_MINT },
     );
-    expect(result.verified).toBe(true);
-    expect(result.details.reason).toBe('large_outflow_flash_loan');
-    expect(result.lossAmount).toBe(COVERAGE_RAW); // 5k USDC capped at 1k coverage
-    expect(result.confidence).toBeCloseTo(0.85);
+
+    expect(result.outcome).toBe('indeterminate');
+    expect(result.details.reason).toBe('no_chain_record');
+    expect(result.lossAmount).toBe(0);
   });
 
-  it('approves with medium confidence through a bridge program', async () => {
+  it('no longer confirms on program membership alone', async () => {
+    // The exact transaction the old verifier paid 0.85-confidence coverage
+    // for: a flash-loan program and a large outflow. Nothing here says the
+    // movement fell outside anything the holder declared, so there is nothing
+    // to pay.
     const tx = mkTx({
-      instructions: [{ programId: BRIDGE_PROGRAM, accounts: [], data: '' }],
+      instructions: [{ programId: FLASH_LOAN_PROGRAM, accounts: [], data: '' }],
       tokenTransfers: [
         {
           fromUserAccount: AGENT,
           toUserAccount: OTHER_WALLET,
           fromTokenAccount: 'a',
           toTokenAccount: 'b',
-          tokenAmount: 2_000,
+          tokenAmount: 5_000,
           mint: USDC_MINT,
           tokenStandard: 'Fungible',
         },
       ],
-      accountData: [
-        {
-          account: 'a',
-          nativeBalanceChange: 0,
-          tokenBalanceChanges: [
-            {
-              mint: USDC_MINT,
-              rawTokenAmount: { tokenAmount: '-2000000000', decimals: 6 },
-              userAccount: AGENT,
-            },
-          ],
-        },
-      ],
     });
-    const result = await verifyClaim(
-      TriggerType.AgentError,
-      tx.signature,
-      AGENT,
-      COVERAGE_RAW,
-      mkHelius(tx),
-      mkPricer({}),
-      { usdcMint: USDC_MINT },
-    );
-    expect(result.verified).toBe(true);
-    expect(result.details.reason).toBe('large_outflow_bridge');
-    expect(result.confidence).toBeCloseTo(0.5);
-  });
 
-  it('approves fee-level loss on a failed tx', async () => {
-    const tx = mkTx({
-      transactionError: { InstructionError: [0, 'Custom'] },
-      fee: 12_000, // SOL lamports
-    });
     const result = await verifyClaim(
       TriggerType.AgentError,
       tx.signature,
@@ -439,51 +352,29 @@ describe('AgentError verifier', () => {
       mkPricer({}),
       { usdcMint: USDC_MINT },
     );
-    expect(result.verified).toBe(true);
-    expect(result.details.reason).toBe('failed_tx');
-    expect(result.lossAmount).toBeGreaterThan(0);
-    expect(result.lossAmount).toBeLessThanOrEqual(COVERAGE_RAW);
-  });
 
-  it('rejects sub-threshold outflow with no_detected_loss', async () => {
-    const tx = mkTx({
-      instructions: [{ programId: UNKNOWN_PROGRAM, accounts: [], data: '' }],
-      tokenTransfers: [
-        {
-          fromUserAccount: AGENT,
-          toUserAccount: OTHER_WALLET,
-          fromTokenAccount: 'a',
-          toTokenAccount: 'b',
-          tokenAmount: 10,
-          mint: USDC_MINT,
-          tokenStandard: 'Fungible',
-        },
-      ],
-      accountData: [
-        {
-          account: 'a',
-          nativeBalanceChange: 0,
-          tokenBalanceChanges: [
-            {
-              mint: USDC_MINT,
-              rawTokenAmount: { tokenAmount: '-10000000', decimals: 6 },
-              userAccount: AGENT,
-            },
-          ],
-        },
-      ],
-    });
-    const result = await verifyClaim(
-      TriggerType.AgentError,
-      tx.signature,
-      AGENT,
-      COVERAGE_RAW,
-      mkHelius(tx),
-      mkPricer({}),
-      { usdcMint: USDC_MINT },
-    );
     expect(result.verified).toBe(false);
-    expect(result.details.reason).toBe('no_detected_loss');
+    expect(result.lossAmount).toBe(0);
+  });
+
+  it('attaches a replayable evidence bundle to every verdict', async () => {
+    // This trigger produced no bundle at all before, so `recordEvidence`
+    // returned early on every claim and an agent-error payout was not
+    // reproducible even in principle.
+    const tx = mkTx({ tokenTransfers: [] });
+
+    const result = await verifyClaim(
+      TriggerType.AgentError,
+      tx.signature,
+      AGENT,
+      COVERAGE_RAW,
+      mkHelius(tx),
+      mkPricer({}),
+      { usdcMint: USDC_MINT },
+    );
+
+    expect(result.evidence).toBeDefined();
+    expect(result.evidence).toMatchObject({ triggerType: TriggerType.AgentError });
   });
 });
 

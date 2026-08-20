@@ -160,6 +160,31 @@ pub enum CovanticError {
     #[msg("Payout exceeds the value the program can see was lost or seized")]
     PayoutExceedsProvenGovernanceLoss,
 
+    // -- Agent Mandate Errors --
+    #[msg("No agent mandate has been declared for this policy")]
+    AgentMandateMissing,
+
+    #[msg("Agent mandate had not matured when the claim was filed")]
+    AgentMandateNotMatured,
+
+    #[msg("Agent mandate is malformed — declare a real spending envelope")]
+    InvalidAgentMandate,
+
+    #[msg("Too many declared counterparties for the agent mandate")]
+    TooManyMandateCounterparties,
+
+    #[msg("Too many declared programs for the agent mandate")]
+    TooManyMandatePrograms,
+
+    #[msg("The observed outflow stayed inside the declared mandate")]
+    OutflowWithinMandate,
+
+    #[msg("Mandate breach is below the provable minimum")]
+    BreachBelowMinimum,
+
+    #[msg("Payout exceeds the mandate breach the program measured")]
+    PayoutExceedsProvenBreach,
+
     // -- Math Errors --
     #[msg("Arithmetic overflow")]
     MathOverflow,

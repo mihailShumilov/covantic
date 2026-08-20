@@ -47,6 +47,7 @@ pnpm fleet:bootstrap|start|status     # Autonomous fleet of policy-covered agent
 pnpm stake:vault [--amount N]         # Stake USDC into the vault (lift solvency ratio)
 pnpm --filter api claim:replay <id>   # Re-derive a stored claim verdict from its evidence
 pnpm gov:declare --policy <id>        # Holder declares the agent's legitimate authority set
+pnpm mandate:declare --policy <id> --max-single <usdc>  # Holder declares the agent's operating envelope
 ```
 
 Filter to single package: `pnpm --filter api dev`, `pnpm --filter web dev`
@@ -82,6 +83,7 @@ Filter to single package: `pnpm --filter api dev`, `pnpm --filter web dev`
   indeterminate, review — the last two are OPEN states (see `OPEN_CLAIM_STATUSES`)
 - Lock periods: exploit=0s, oracle_manipulation=1h, agent_error=6h, governance_attack=2h
 - Governance baseline delay: 1 h (`GOVERNANCE_BASELINE_DELAY`); drain window: 30 min
+- Agent mandate delay: 1 h (`MANDATE_DECLARATION_DELAY`); min provable breach: 1 USDC
 - Unstake cooldown: 48 hours
 - Attestation max validity: 3600 s (`ATTESTATION_MAX_VALIDITY_SECONDS`)
 - Quote max assessment age: 600 s (stale → `ASSESSMENT_STALE`)
@@ -171,6 +173,48 @@ Filter to single package: `pnpm --filter api dev`, `pnpm --filter web dev`
   every governance payout unsatisfiable. The exploit path still measures
   against `now`; that works only because its lock is an hour, and it is
   fragile.
+- **An agent error is a breach of a declared mandate, not an inference.** The
+  trigger covers a loss the agent caused with its *own* authority — the case
+  `adjudicateExploit` rejects as `agent_authorized_movement` — so no forensic
+  evidence separates a mistake from a decision. `declare_agent_mandate` is
+  holder-signed and matures on a delay (`MANDATE_DECLARATION_DELAY`, 1 h);
+  `verify_and_payout_agent_error` refuses a mandate that had not matured
+  *before the claim was filed*. No declaration means `indeterminate → review`,
+  never a rejection.
+- **The payout is the overshoot, not the loss.** The vault owes the amount by
+  which the movement exceeded the declared cap (or fell below the declared
+  retention floor), so the mandate is a deductible the holder authors. It is
+  also what gives the chain an arithmetic bound: a compromised oracle key
+  pointed at an agent that merely spent money extracts nothing.
+- **A first mandate declaration must leave `prev_*` at zero.** `envelope_at`
+  falls back to `prev_*` when the current declaration had not matured, so
+  seeding a new declaration's predecessor with its own values and `now` — the
+  natural thing to write — makes it usable as proof the instant it is written
+  and silently disables the entire maturity delay.
+- **`verify_and_payout_agent_error` settles only breaches it can measure.** It
+  re-derives the outflow cap and the retention floor from a balance it reads;
+  it cannot inspect a past transaction, so counterparty and program allowlist
+  breaches produce no overshoot. Those confirm off chain and go to a reviewer —
+  `planProvenSettlement` fails them closed as `breach_not_chain_checkable`
+  rather than sending a transaction that would revert, because a failed payout
+  is recorded `failed`, not `review`.
+- **Checkpoint staleness on the agent-error path is measured against
+  `claim_submitted_at`, and here that is arithmetic rather than preference.**
+  `LOCK_AGENT_ERROR` is 6 h and `MAX_MANDATE_CHECKPOINT_AGE` is 2 h, so the
+  exploit path's comparison against `now` would make *every* payout on this
+  trigger unsatisfiable — not merely fragile, as it is on the governance path.
+- **`bundleHash` is folded into `verificationData` by `recordEvidence`, not by
+  each verifier.** `planProvenSettlement` refuses to route to a proven
+  instruction without it, and only the price verifier used to set it — so both
+  other proof paths would have planned `unprovable: no_bundle_hash` on every
+  claim once their flags were switched on. One writer, all four triggers.
+- **Only the mandate-relative signal opens an agent-error claim.**
+  `large_transfer` and `failed_tx` are both intentionally unmapped in
+  `EVENT_TO_TRIGGER`. A signal that cannot reference a declaration cannot
+  describe the covered event, and leaving either mapped fills the policy's
+  single open-claim slot with a claim that resolves to `review` — an OPEN
+  status — which then blocks every genuine exploit or governance alert for
+  that policy.
 - `MonitoringEventType` and `EVENT_TO_TRIGGER` (`services/event-vocabulary.ts`)
   are one contract, enforced by `Record<MonitoringEventType, …>` plus
   `tests/monitoring-vocabulary.test.ts`. Producers must use enum members, not
@@ -179,8 +223,9 @@ Filter to single package: `pnpm --filter api dev`, `pnpm --filter web dev`
 - Fleet `fail` actions **must land on-chain** with a real signature + non-null `meta.err`.
   `executeFail` uses `sendRawTransaction({ skipPreflight: true })` + explicit
   `confirmTransaction`; strategies live in `packages/api/src/services/fleet/failures.ts`.
-  A client-side serialize throw is a bug — the AgentError `failed_tx` verifier branch
-  can't see those.
+  A client-side serialize throw is a bug. Note that `failed_tx` no longer opens
+  a claim: fee burn is an operational signal, and the fleet's deliberate
+  failures were what made this trigger a denial-of-coverage vector.
 
 ## Git
 

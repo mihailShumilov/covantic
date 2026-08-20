@@ -37,6 +37,13 @@ export const PDA_SEEDS = {
   /** One governance evidence record per policy, written by
    *  verify_and_payout_governance. */
   GOVERNANCE_EVIDENCE: 'covantic_gov_evidence',
+  /** One mandate per policy — the operating envelope the holder declared for
+   *  their agent, written by the holder and matured on a delay. What
+   *  `verify_and_payout_agent_error` checks a breach against. */
+  AGENT_MANDATE: 'covantic_agent_mandate',
+  /** One agent-error evidence record per policy, written by
+   *  verify_and_payout_agent_error. */
+  AGENT_ERROR_EVIDENCE: 'covantic_agent_error_evidence',
 } as const;
 
 /**
@@ -192,3 +199,43 @@ export const GOVERNANCE_DRAIN_WINDOW_SECONDS = 30 * 60;
  * (seconds). Keep in sync with `MAX_AUTHORITY_CHECKPOINT_AGE`.
  */
 export const MAX_AUTHORITY_CHECKPOINT_AGE_SECONDS = 2 * 3600;
+
+/**
+ * How long an agent mandate must mature before it can support a claim
+ * (seconds). Keep in sync with `MANDATE_DECLARATION_DELAY` in the Anchor
+ * program.
+ *
+ * Same value and same mechanism as {@link GOVERNANCE_BASELINE_DELAY_SECONDS},
+ * and the reason it is a separate constant rather than an alias is that the
+ * two answer different questions — who may control the agent, and what the
+ * agent may do — and one may need retuning without the other.
+ *
+ * The delay is what stops the obvious abuse. Without it a holder could watch
+ * an ordinary loss happen and then declare, retroactively, a mandate narrow
+ * enough to have been breached by it. With it, that manoeuvre has to be
+ * committed to on chain, in public, an hour before an incident the holder
+ * must then arrange to happen.
+ */
+export const MANDATE_DECLARATION_DELAY_SECONDS = 3600;
+
+/**
+ * How many destinations and programs a holder may declare. Keep in sync with
+ * `MAX_MANDATE_COUNTERPARTIES` / `MAX_MANDATE_PROGRAMS` in the Anchor program.
+ *
+ * Fixed so the account's size — and the stack cost of loading it — are
+ * bounded. Anything richer goes in the off-chain manifest the on-chain
+ * `manifest_hash` commits to.
+ */
+export const MAX_MANDATE_COUNTERPARTIES = 8;
+export const MAX_MANDATE_PROGRAMS = 8;
+
+/**
+ * Smallest mandate breach that can support a proven payout, in USDC base
+ * units. Keep in sync with `MIN_PROVABLE_MANDATE_BREACH`.
+ *
+ * Off chain a floor filters noise; on chain its job is different. It is a
+ * hard limit on what a compromised oracle key can extract by pointing the
+ * instruction at a policy whose agent merely spent slightly more than its
+ * declared cap.
+ */
+export const MIN_PROVABLE_MANDATE_BREACH = 1_000_000;

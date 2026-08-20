@@ -86,6 +86,7 @@ export function hasProofPath(triggerType: number): boolean {
   return (
     triggerType === TriggerType.Exploit ||
     triggerType === TriggerType.OracleManipulation ||
-    triggerType === TriggerType.GovernanceAttack
+    triggerType === TriggerType.GovernanceAttack ||
+    triggerType === TriggerType.AgentError
   );
 }

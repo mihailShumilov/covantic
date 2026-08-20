@@ -33,6 +33,8 @@ src/
     declare_governance_baseline.rs — Holder-signed authority manifest, matures on a delay
     checkpoint_authority.rs        — Permissionless crank: records who controls the account
     verify_and_payout_governance.rs — Bounds payout by a departure the program observes
+    declare_agent_mandate.rs        — Holder-signed operating envelope, matures on a delay
+    verify_and_payout_agent_error.rs — Bounds payout by the overshoot past that envelope
 ```
 
 ## Governance Proof Path
@@ -52,6 +54,35 @@ Two constraints that must not be "simplified":
 - Checkpoint staleness is measured against `policy.claim_submitted_at`, not
   `now`. The governance lock is 2 h and the staleness allowance is 2 h, so
   measuring against `now` makes every payout unsatisfiable.
+
+## Agent Mandate Proof Path
+
+`declare_agent_mandate` is **holder-signed** and matures after
+`MANDATE_DECLARATION_DELAY` (1 h). `verify_and_payout_agent_error` re-reads the
+covered balance against `checkpoint_balance`'s reading and pays at most the
+amount by which the drop exceeded the declared cap — or by which the account
+fell below the declared retention floor.
+
+Three constraints that must not be "simplified":
+
+- **A first declaration leaves `prev_*` at zero.** `envelope_at` falls back to
+  `prev_*` when the current declaration had not matured before the claim, so
+  seeding a new declaration's predecessor with its own values and `now` makes
+  it usable as proof immediately and disables the maturity delay entirely.
+- **Checkpoint staleness is measured against `policy.claim_submitted_at`**, and
+  here it is arithmetic rather than preference: the lock is 6 h and the
+  allowance is 2 h, so the exploit path's comparison against `now` would make
+  every payout on this trigger unsatisfiable.
+- **Only measurable breaches settle.** The counterparty and program allowlists
+  are recorded, not enforced — the program cannot inspect a past transaction.
+  A breach of those alone produces no overshoot and `require!(breach_excess >
+  0)` refuses it, on purpose: paying it would mean releasing funds on the
+  oracle's unverifiable word.
+
+Unlike the governance instructions, this one *does* use
+`associated_token::authority`: an agent error is by definition something the
+agent did while still owning its account, so the owner-equality check is a
+constraint rather than an obstacle.
 
 ## Key Patterns
 
