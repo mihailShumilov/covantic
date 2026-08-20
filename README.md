@@ -37,7 +37,7 @@ agent fleet, see [`docs/MANUAL_DEMO.md`](docs/MANUAL_DEMO.md).
 
 ```
 packages/
-  anchor/   — Solana program (Rust, Anchor 0.30.1)
+  anchor/   — Solana program (Rust, Anchor 1.1.2)
   api/      — Backend (Fastify 5, Drizzle ORM, BullMQ)
   web/      — Frontend (Next.js 16, React 19)
   shared/   — Cross-package types, constants, utilities
@@ -45,7 +45,7 @@ packages/
 
 ## Tech Stack
 
-Solana (Anchor 0.30.1) · Next.js 16 · Fastify 5 · PostgreSQL 18 · Helius · Pyth · Solana Agent Kit
+Solana (Anchor 1.1.2) · Next.js 16 · Fastify 5 · PostgreSQL 18 · Helius · Pyth · Solana Agent Kit
 
 ## Coverage Triggers
 
@@ -54,7 +54,15 @@ Solana (Anchor 0.30.1) · Next.js 16 · Fastify 5 · PostgreSQL 18 · Helius · 
 | Smart Contract Exploit | Balance drop >50% in single slot | 0 hours |
 | Oracle Manipulation | Price deviation >5% from TWAP | 1 hour |
 | Critical Agent Error | Transfer >100x agent average | 6 hours |
-| Governance Attack | Admin key change + drain within 30m | 2 hours |
+| Governance Attack | Control of the agent leaves the holder's declared authority set | 2 hours |
+
+The governance trigger covers three shapes: an account seized via
+`SetAuthority`, an account frozen (the balance never moves and the agent can
+no longer use it), and an allowance granted to a stranger and drawn. The
+holder declares who may legitimately control the agent — `pnpm gov:declare` —
+and the declaration matures an hour later; a claim is proven by comparing it
+against what the program reads on the account. A loss whose conjunction with
+the takeover falls outside 30 minutes is not denied, it goes to a reviewer.
 
 ## Risk Tiers
 
@@ -78,6 +86,7 @@ pnpm fund:phantom <addr> [amount]    # Mint devnet test-USDC to a wallet
 pnpm webhook:sync        # Register/refresh the Helius webhook for all insured agents
 pnpm agent:create|fund|trigger       # Throwaway agent keypair CLI for real on-chain activity
 pnpm fleet:bootstrap|start|status    # Autonomous fleet of policy-covered agents
+pnpm gov:declare --policy <id>       # Declare the agent's legitimate authority set
 ```
 
 ## Related Docs

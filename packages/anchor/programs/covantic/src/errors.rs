@@ -119,6 +119,47 @@ pub enum CovanticError {
     #[msg("Payout exceeds the loss the signed price can account for")]
     PayoutExceedsProvenLoss,
 
+    // -- Balance Evidence Errors --
+    #[msg("No balance checkpoint exists for this policy")]
+    CheckpointMissing,
+
+    #[msg("Balance checkpoint is too old, or was taken after the claim was filed")]
+    CheckpointOutOfWindow,
+
+    #[msg("Observed balance drop is below the provable minimum")]
+    DropBelowMinimum,
+
+    #[msg("Payout exceeds the balance drop the program observed")]
+    PayoutExceedsObservedDrop,
+
+    #[msg("Covered token account does not belong to the policy's agent")]
+    InvalidCoveredAccount,
+
+    // -- Governance Evidence Errors --
+    #[msg("No governance baseline has been declared for this policy")]
+    GovernanceBaselineMissing,
+
+    #[msg("Governance baseline had not matured when the claim was filed")]
+    GovernanceBaselineNotMatured,
+
+    #[msg("Governance baseline is malformed — declare a real token owner")]
+    InvalidGovernanceBaseline,
+
+    #[msg("Too many extra authorities for the governance baseline")]
+    TooManyGovernanceAuthorities,
+
+    #[msg("No authority checkpoint exists for this policy")]
+    AuthorityCheckpointMissing,
+
+    #[msg("Authority checkpoint is too old, or was taken after the claim was filed")]
+    AuthorityCheckpointOutOfWindow,
+
+    #[msg("Control over the covered account is still inside the declared set")]
+    AuthorityWithinBaseline,
+
+    #[msg("Payout exceeds the value the program can see was lost or seized")]
+    PayoutExceedsProvenGovernanceLoss,
+
     // -- Math Errors --
     #[msg("Arithmetic overflow")]
     MathOverflow,

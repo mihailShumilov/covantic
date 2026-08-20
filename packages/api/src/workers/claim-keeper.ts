@@ -24,19 +24,33 @@ import type { AppConfig } from '../config/env.js';
 import { createSolanaConnection } from '../config/solana.js';
 import { claimEvidence, claims, policies } from '../db/schema.js';
 import { ADJUDICATOR_VERSION } from '../services/oracle/adjudicate.js';
+import { EXPLOIT_ADJUDICATOR_VERSION } from '../services/exploit/adjudicate.js';
 import { bundleHash, verdictHash } from '../services/oracle/hash.js';
 import { logger } from '../utils/logger.js';
 import { HeliusClient } from '../utils/helius.js';
 import type { ConsensusPricer } from '../services/oracle/consensus.js';
 import { buildPriceOracle } from '../services/oracle/factory.js';
 import { ProofPoster } from '../services/oracle/proof-poster.js';
+import { CheckpointWriter } from '../services/exploit/checkpoint.js';
+import { ExploitProofPoster } from '../services/exploit/proof-poster.js';
+import { AuthorityCheckpointWriter } from '../services/governance/checkpoint.js';
+import { GovernanceProofPoster } from '../services/governance/proof-poster.js';
+import { loadBalanceSnapshotAt, readAgentBalances } from '../services/exploit/baseline.js';
+import { GOVERNANCE_BASELINE_MAX_LEAD_SEC } from '../services/governance/conjunction.js';
 import {
   createCovanticProgram,
   type CovanticProgram,
 } from '../utils/program.js';
-import { verifyClaim, type VerificationResult } from '../services/claim-oracle.js';
-import type { ProofInputs } from '../services/verifiers/oracle-manipulation.js';
+import {
+  verifyClaim,
+  type VerificationResult,
+  type VerifyClaimOptions,
+} from '../services/claim-oracle.js';
+import { planProvenSettlement } from '../services/settlement-plan.js';
+import { decideLane } from '../services/confidence-lanes.js';
+import { recordAutoPayout, checkCircuitBreaker } from '../services/payout-breaker.js';
 import { ALERT_CHANNEL, verifyAlert } from '../services/alert-bus.js';
+import { triggerForEvent } from '../services/event-vocabulary.js';
 
 const PROCESS_QUEUE = 'claim-keeper';
 const PAYOUT_QUEUE = 'claim-payout';
@@ -49,16 +63,6 @@ const PAYOUT_QUEUE = 'claim-payout';
  */
 const MAX_VERIFY_ATTEMPTS = 5;
 
-
-/** Monitoring event types the keeper reacts to, mapped to on-chain triggers. */
-const EVENT_TO_TRIGGER: Record<string, TriggerType | undefined> = {
-  exploit: TriggerType.Exploit,
-  oracle_deviation: TriggerType.OracleManipulation,
-  agent_error: TriggerType.AgentError,
-  governance_attack: TriggerType.GovernanceAttack,
-  large_transfer: TriggerType.AgentError,
-  failed_tx: TriggerType.AgentError,
-};
 
 /** Shared BullMQ job options: retry up to 3 times with exponential backoff,
  *  bound retained history so failed jobs are inspectable without unbounded
@@ -121,6 +125,12 @@ export function startClaimKeeper(db: Database, redis: Redis, config: AppConfig) 
   // taking a single indexer's word for it is a single point of failure.
   const connection = createSolanaConnection(config.SOLANA_RPC_URL);
   const proofPoster = new ProofPoster(connection, programCtx);
+  const exploitProofPoster = new ExploitProofPoster(
+    programCtx,
+    new CheckpointWriter(connection, programCtx),
+  );
+  const authorityCheckpoints = new AuthorityCheckpointWriter(programCtx);
+  const governanceProofPoster = new GovernanceProofPoster(programCtx, authorityCheckpoints);
 
   const processQueue = new Queue<ClaimJobPayload>(PROCESS_QUEUE, {
     connection: redis,
@@ -144,6 +154,7 @@ export function startClaimKeeper(db: Database, redis: Redis, config: AppConfig) 
         processQueue,
         payoutQueue,
         config,
+        authorityCheckpoints,
       });
     },
     { connection: redis, concurrency: 2 },
@@ -152,7 +163,16 @@ export function startClaimKeeper(db: Database, redis: Redis, config: AppConfig) 
   const payoutWorker = new Worker<PayoutJobPayload>(
     PAYOUT_QUEUE,
     async (job) => {
-      await executePayout(job.data.claimId, db, redis, programCtx, config, proofPoster);
+      await executePayout(
+        job.data.claimId,
+        db,
+        redis,
+        programCtx,
+        config,
+        proofPoster,
+        exploitProofPoster,
+        governanceProofPoster,
+      );
     },
     { connection: redis, concurrency: 1 },
   );
@@ -215,7 +235,7 @@ async function ingestAlert(
     return;
   }
 
-  const trigger = EVENT_TO_TRIGGER[eventType];
+  const trigger = triggerForEvent(eventType);
   if (trigger === undefined) {
     logger.debug({ eventType }, 'claim-keeper ignoring unhandled event type');
     return;
@@ -351,11 +371,68 @@ interface ProcessDeps {
   processQueue: Queue<ClaimJobPayload>;
   payoutQueue: Queue<PayoutJobPayload>;
   config: AppConfig;
+  authorityCheckpoints: AuthorityCheckpointWriter;
+}
+
+/**
+ * The chain and database reads the governance verifier needs but must not
+ * perform itself.
+ *
+ * Assembled here because this is the only place that knows both the claim row
+ * and the program context. Keeping them out of `claim-oracle` is what lets
+ * the verifier be driven by a corpus test with neither a database nor an RPC.
+ *
+ * **On `claimSubmittedAt`.** The program checks the declaration matured
+ * before `policy.claim_submitted_at`, which is set by `oracle_submit_claim` —
+ * and that has not happened yet when this runs. So the comparison here uses
+ * the claim's own creation time, which is necessarily *earlier*. That makes
+ * the off-chain check strictly stricter than the on-chain one, which is the
+ * right direction: a baseline this accepts is one the program will accept,
+ * never the reverse.
+ */
+function governanceLookups(
+  claim: ClaimRow,
+  policy: typeof policies.$inferSelect,
+  deps: ProcessDeps,
+): NonNullable<VerifyClaimOptions['governance']> {
+  const claimSubmittedAt = Math.floor(new Date(claim.createdAt).getTime() / 1000);
+  return {
+    baseline: () =>
+      deps.authorityCheckpoints.readBaseline(
+        policy.holderAddress,
+        BigInt(claim.policyId),
+        claimSubmittedAt,
+      ),
+    holdingsBefore: (at: number) =>
+      loadBalanceSnapshotAt(
+        deps.db,
+        claim.agentAddress,
+        new Date(at * 1000),
+        GOVERNANCE_BASELINE_MAX_LEAD_SEC,
+      ),
+    holdingsNow: async () => {
+      const current = await readAgentBalances(deps.connection, claim.agentAddress);
+      return {
+        holdings: current.readings,
+        frozen: current.frozen,
+        blockTime: Math.floor(Date.now() / 1000),
+      };
+    },
+  };
 }
 
 async function processClaim(claimId: string, deps: ProcessDeps): Promise<void> {
-  const { db, redis, programCtx, helius, priceOracle, connection, processQueue, payoutQueue, config } =
-    deps;
+  const {
+    db,
+    redis,
+    programCtx,
+    helius,
+    priceOracle,
+    connection,
+    processQueue,
+    payoutQueue,
+    config,
+  } = deps;
   const claim = await loadClaim(claimId, db);
   if (!claim) return;
 
@@ -390,7 +467,12 @@ async function processClaim(claimId: string, deps: ProcessDeps): Promise<void> {
       policy.coverageAmount,
       helius,
       priceOracle,
-      { usdcMint: config.USDC_MINT, connection },
+      {
+        usdcMint: config.USDC_MINT,
+        connection,
+        holderAddress: policy.holderAddress,
+        governance: governanceLookups(claim, policy, deps),
+      },
     );
   }
 
@@ -413,6 +495,24 @@ async function processClaim(claimId: string, deps: ProcessDeps): Promise<void> {
       db,
       redis,
     );
+    return;
+  }
+
+  // Confidence stops being decorative here. Until this check existed every
+  // verifier computed a score and nothing compared it to anything, so a
+  // verdict the code itself called 0.6 confident released the same funds as
+  // one at 0.95.
+  const plan = planProvenSettlement(claim, config);
+  const lane = decideLane({
+    triggerType: claim.triggerType,
+    confidence: result.confidence,
+    proofAvailable:
+      plan.kind === 'proven_price' ||
+      plan.kind === 'proven_balance' ||
+      plan.kind === 'proven_authority',
+  });
+  if (lane.lane === 'review') {
+    await escalateToReview(claim, lane.reason, result, db, redis);
     return;
   }
 
@@ -480,6 +580,8 @@ async function executePayout(
   programCtx: CovanticProgram,
   config: AppConfig,
   proofPoster: ProofPoster,
+  exploitProofPoster: ExploitProofPoster,
+  governanceProofPoster: GovernanceProofPoster,
 ): Promise<void> {
   const claim = await loadClaim(claimId, db);
   if (!claim) return;
@@ -527,6 +629,18 @@ async function executePayout(
     if (reloaded) await broadcastClaim(reloaded, redis);
   }
 
+  // A rolling cap on automatic payouts. Every bound above is a claim about
+  // one claim; this is the one that survives a bound turning out to be wrong.
+  const breaker = await checkCircuitBreaker(redis, config, payoutAmount);
+  if (!breaker.ok) {
+    logger.error(
+      { claimId: claim.id, reason: breaker.reason, ...breaker.detail },
+      'claim-keeper: automatic payouts paused by circuit breaker',
+    );
+    await escalateToReview(claim, breaker.reason, null, db, redis);
+    return;
+  }
+
   const proofPlan = planProvenSettlement(claim, config);
   if (proofPlan.kind === 'unprovable') {
     // Fail closed. Falling back to the unverified instruction here would make
@@ -553,24 +667,46 @@ async function executePayout(
   }
 
   try {
-    const payoutSig =
-      proofPlan.kind === 'proven'
-        ? (
-            await proofPoster.settle({
-              holderAddress: policy.holderAddress,
-              policyId: BigInt(claim.policyId),
-              payoutAmount: BigInt(payoutAmount),
-              triggerBlockTime: proofPlan.triggerBlockTime,
-              proof: proofPlan.proof,
-              bundleHash: proofPlan.bundleHash,
-            })
-          ).at(-1)!
-        : await verifyAndPayoutOnChain(
-            programCtx,
-            policy.holderAddress,
-            BigInt(claim.policyId),
-            BigInt(payoutAmount),
-          );
+    let payoutSig: string;
+    switch (proofPlan.kind) {
+      case 'proven_price':
+        payoutSig = (
+          await proofPoster.settle({
+            holderAddress: policy.holderAddress,
+            policyId: BigInt(claim.policyId),
+            payoutAmount: BigInt(payoutAmount),
+            triggerBlockTime: proofPlan.triggerBlockTime,
+            proof: proofPlan.proof,
+            bundleHash: proofPlan.bundleHash,
+          })
+        ).at(-1)!;
+        break;
+      case 'proven_balance':
+        payoutSig = await exploitProofPoster.settle({
+          holderAddress: policy.holderAddress,
+          agentAddress: policy.agentAddress,
+          policyId: BigInt(claim.policyId),
+          payoutAmount: BigInt(payoutAmount),
+          bundleHash: proofPlan.bundleHash,
+        });
+        break;
+      case 'proven_authority':
+        payoutSig = await governanceProofPoster.settle({
+          holderAddress: policy.holderAddress,
+          agentAddress: policy.agentAddress,
+          policyId: BigInt(claim.policyId),
+          payoutAmount: BigInt(payoutAmount),
+          bundleHash: proofPlan.bundleHash,
+        });
+        break;
+      default:
+        payoutSig = await verifyAndPayoutOnChain(
+          programCtx,
+          policy.holderAddress,
+          BigInt(claim.policyId),
+          BigInt(payoutAmount),
+        );
+    }
 
     await db
       .update(claims)
@@ -585,8 +721,10 @@ async function executePayout(
     const paid = await loadClaim(claim.id, db);
     if (paid) await broadcastClaim(paid, redis);
 
+    await recordAutoPayout(redis, payoutAmount);
+
     logger.info(
-      { claimId: claim.id, payoutSig, proven: proofPlan.kind === 'proven' },
+      { claimId: claim.id, payoutSig, settlement: proofPlan.kind },
       'claim-keeper: payout executed',
     );
   } catch (err) {
@@ -605,50 +743,6 @@ async function executePayout(
     if (failed) await broadcastClaim(failed, redis);
     throw err; // let BullMQ retry per JOB_OPTS.attempts
   }
-}
-
-/**
- * Which settlement path this claim takes.
- *
- * `proven`    — the chain verifies a guardian-signed price before releasing funds.
- * `legacy`    — the pre-proof instruction; the chain trusts the oracle's amount.
- * `unprovable`— proof is required for this trigger but the inputs are missing.
- */
-type SettlementPlan =
-  | { kind: 'proven'; proof: ProofInputs; triggerBlockTime: number; bundleHash: string }
-  | { kind: 'legacy' }
-  | { kind: 'unprovable'; reason: string };
-
-function planProvenSettlement(claim: ClaimRow, config: AppConfig): SettlementPlan {
-  if (!config.ORACLE_PROOF_ENABLED) return { kind: 'legacy' };
-  // Only oracle manipulation has a price to prove. Exploits and governance
-  // attacks are not price claims and there is nothing for the receiver to
-  // check, so they keep the legacy path.
-  if (claim.triggerType !== TriggerType.OracleManipulation) return { kind: 'legacy' };
-
-  const data = (claim.verificationData ?? {}) as VerificationData & {
-    proof?: ProofInputs;
-    blockTime?: number;
-    bundleHash?: string;
-  };
-  if (data.simulated === true) return { kind: 'legacy' };
-
-  if (!data.proof?.signedUpdateHex) {
-    return { kind: 'unprovable', reason: 'no_signed_price_evidence' };
-  }
-  if (typeof data.blockTime !== 'number') {
-    return { kind: 'unprovable', reason: 'no_trigger_block_time' };
-  }
-  if (!data.bundleHash) {
-    return { kind: 'unprovable', reason: 'no_bundle_hash' };
-  }
-
-  return {
-    kind: 'proven',
-    proof: data.proof,
-    triggerBlockTime: data.blockTime,
-    bundleHash: data.bundleHash,
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -778,13 +872,69 @@ async function recordEvidence(
       bundleHash: hash,
       verdict,
       verdictHash: verdictHash(hash, verdict),
-      adjudicatorVersion: ADJUDICATOR_VERSION,
+      adjudicatorVersion: adjudicatorVersionFor(claim.triggerType),
     });
   } catch (err) {
     logger.error(
       { err, claimId: claim.id, attempt },
       'claim-keeper: failed to persist claim evidence',
     );
+  }
+}
+
+/**
+ * Park a claim for a human without closing it.
+ *
+ * Distinct from `rejectClaim` on purpose: rejection is a statement that the
+ * evidence contradicts the claim, and neither "not confident enough" nor
+ * "payouts are paused" is that statement. The claim stays open and still
+ * counts against the policy.
+ */
+async function escalateToReview(
+  claim: ClaimRow,
+  reason: string,
+  result: VerificationResult | null,
+  db: Database,
+  redis: Redis,
+): Promise<void> {
+  await db
+    .update(claims)
+    .set({
+      status: 'review',
+      reviewReason: reason.slice(0, 128),
+      verificationData: mergeVerificationData(claim.verificationData, {
+        ...(result?.details ?? {}),
+        reviewReason: reason,
+        ...(result ? { outcome: result.outcome, confidence: result.confidence } : {}),
+      }),
+      ...(result ? { lossAmount: result.lossAmount, verifiedAt: new Date() } : {}),
+      updatedAt: new Date(),
+    })
+    .where(eq(claims.id, claim.id));
+  const escalated = await loadClaim(claim.id, db);
+  if (escalated) await broadcastClaim(escalated, redis);
+
+  logger.warn({ claimId: claim.id, reason }, 'claim-keeper: claim escalated to review');
+}
+
+/**
+ * Which adjudicator produced this verdict.
+ *
+ * Recorded per trigger because each has its own pure judgement function and
+ * its own version line. Replaying a bundle under the wrong one would compare
+ * a verdict against rules that never applied to it.
+ */
+function adjudicatorVersionFor(triggerType: number): string {
+  switch (triggerType) {
+    case TriggerType.Exploit:
+      return EXPLOIT_ADJUDICATOR_VERSION;
+    case TriggerType.OracleManipulation:
+      return ADJUDICATOR_VERSION;
+    default:
+      // Triggers without a pure adjudicator yet. Naming the trigger keeps the
+      // row honest instead of attributing the verdict to a version that had
+      // nothing to do with it.
+      return `verifier-t${triggerType}`;
   }
 }
 

@@ -141,3 +141,85 @@ pub const MIN_PROVABLE_DEVIATION_BPS: u32 = 50;
 /// Upper bound on subject token decimals, so the scaling exponent cannot be
 /// driven somewhere that overflows.
 pub const MAX_SUBJECT_DECIMALS: u8 = 18;
+
+/// Seed for the PolicyBalanceCheckpoint PDA — one per policy.
+pub const CHECKPOINT_SEED: &[u8] = b"covantic_checkpoint";
+
+/// Seed for the ExploitEvidenceRecord PDA — one per policy.
+pub const EXPLOIT_EVIDENCE_SEED: &[u8] = b"covantic_exploit_evidence";
+
+/// Oldest a checkpoint may be and still describe "before the incident".
+///
+/// The crank runs every couple of minutes, so a healthy checkpoint is minutes
+/// old. Two hours is generous enough to survive a worker outage while still
+/// ruling out measuring a drain against a balance from a different afternoon.
+/// This bound *is* the exposure window of the whole mechanism: a drain that
+/// happens and is claimed with no checkpoint newer than this cannot be proven
+/// here, and goes to review instead.
+pub const MAX_CHECKPOINT_AGE: i64 = 2 * 3600;
+
+/// Smallest drop that can support a proven exploit payout, in basis points.
+///
+/// 5,000 bps is the "balance drop >50% in a single slot" the product has
+/// advertised since launch, enforced here for the first time. Its job on
+/// chain differs from the off-chain screen's: off chain a ratio decides what
+/// is worth verifying, while here it is a hard limit on what a compromised
+/// oracle key can extract from an agent that merely spent some money.
+pub const MIN_PROVABLE_DROP_BPS: u32 = 5_000;
+
+/// Seed for the GovernanceBaseline PDA — one per policy.
+pub const GOVERNANCE_BASELINE_SEED: &[u8] = b"covantic_gov_baseline";
+
+/// Seed for the PolicyAuthorityCheckpoint PDA — one per policy.
+pub const AUTHORITY_CHECKPOINT_SEED: &[u8] = b"covantic_authority_checkpoint";
+
+/// Seed for the GovernanceEvidenceRecord PDA — one per policy.
+pub const GOVERNANCE_EVIDENCE_SEED: &[u8] = b"covantic_gov_evidence";
+
+/// How many extra addresses a holder may declare as legitimate controllers,
+/// beyond the named roles. Fixed so the account's size — and the stack cost
+/// of loading it — are bounded.
+pub const MAX_GOVERNANCE_EXTRA_AUTHORITIES: usize = 4;
+
+/// How long a governance baseline must sit before it can support a claim.
+///
+/// This delay is the mechanism, not a formality. A declaration that could be
+/// written and claimed against in the same transaction would prove nothing: a
+/// stolen holder key would simply declare a convenient one first. An hour
+/// forces a fraudulent claim to pre-commit on chain, publicly, well before
+/// the incident it is meant to justify.
+pub const GOVERNANCE_BASELINE_DELAY: i64 = 3600;
+
+/// Oldest an authority checkpoint may be, **measured at the moment the claim
+/// was filed**, and still describe "before the takeover".
+///
+/// Same role and same value as `MAX_CHECKPOINT_AGE` on the balance path, and
+/// deliberately the same number: the two readings are written by one crank on
+/// one tick, and giving them different staleness allowances would let a
+/// payout be proven against a "before" that meant two different moments.
+///
+/// The *reference point* differs, though, and has to. `verify_and_payout_
+/// exploit` compares the checkpoint against `now`, which silently folds its
+/// one-hour lock into the allowance; that leaves an hour of slack and works.
+/// This trigger's lock is two hours — the whole allowance — so the same
+/// comparison would make every governance payout unsatisfiable. The bound is
+/// therefore measured against `policy.claim_submitted_at`, which is also the
+/// question actually worth asking: how stale was the reading when the
+/// incident happened, not how long settlement subsequently took.
+pub const MAX_AUTHORITY_CHECKPOINT_AGE: i64 = 2 * 3600;
+
+/// How long after a takeover a loss still counts as part of it.
+///
+/// The 30 minutes the coverage table has advertised since launch. Worth being
+/// honest about what it does: it bounds the *provable* conjunction. A drain
+/// that lands later is not denied — it goes to a reviewer, because two
+/// readings that far apart cannot establish that this takeover caused it.
+pub const GOVERNANCE_DRAIN_WINDOW: i64 = 30 * 60;
+
+/// Smallest value that can support a proven governance payout, in USDC base
+/// units (1 USDC).
+///
+/// Off chain a floor filters noise; here its job is different. It is a hard
+/// limit on what a compromised oracle key can extract by pointing this
+/// instruction at an agent whose empty account happens to have changed hands.
+pub const MIN_PROVABLE_GOVERNANCE_LOSS: u64 = 1_000_000;

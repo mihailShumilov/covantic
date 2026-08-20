@@ -19,3 +19,14 @@ docker/keys/
 test-ledger/
 pgdata/
 redisdata/
+
+# Local agent state and editor config — never shared.
+.claude/
+.idea/
+
+# Env backups written by setup-local.sh. These hold the same secrets as .env,
+# and the timestamped names slip past the `.env` rule above.
+.env.bak-*
+
+# TypeScript incremental build output.
+*.tsbuildinfo

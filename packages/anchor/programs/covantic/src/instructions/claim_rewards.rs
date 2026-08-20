@@ -35,7 +35,7 @@ pub fn claim_rewards_handler(ctx: Context<ClaimRewards>) -> Result<()> {
     let signer_seeds = &[&seeds[..]];
 
     let transfer_ctx = CpiContext::new_with_signer(
-        ctx.accounts.token_program.to_account_info(),
+        ctx.accounts.token_program.key(),
         Transfer {
             from: ctx.accounts.vault_token_account.to_account_info(),
             to: ctx.accounts.staker_token_account.to_account_info(),

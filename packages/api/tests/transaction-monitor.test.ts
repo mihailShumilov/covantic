@@ -16,6 +16,8 @@ import type { PriceOracle, PriceWindow } from '../src/services/oracle/types.js';
 type PolicyRow = { agentAddress: string; policyId: number; state: number };
 
 interface FakeDb {
+  /** Fault injection hook, called once per query. */
+  onQuery?: () => void;
   select: ReturnType<typeof vi.fn>;
   insert: ReturnType<typeof vi.fn>;
   inserted: Array<{ table: unknown; values: unknown }>;
@@ -30,10 +32,24 @@ function makeFakeDb(lookupRows: PolicyRow[]): FakeDb {
     lookupRows,
   };
 
+  // Two query shapes reach this fake: the policy lookup
+  // (`select().from().where()`) and the balance-baseline read, which adds
+  // `.orderBy().limit()`. The chainable object satisfies both, and is itself
+  // awaitable so either shape can be the terminal call.
   db.select.mockImplementation(() => ({
-    from: () => ({
-      where: async () => db.lookupRows,
-    }),
+    from: () => {
+      const chain = {
+        where: () => chain,
+        orderBy: () => chain,
+        limit: () => chain,
+        then: (resolve: (rows: PolicyRow[]) => unknown, reject: (err: unknown) => unknown) =>
+          Promise.resolve()
+            .then(() => db.onQuery?.())
+            .then(() => db.lookupRows)
+            .then(resolve, reject),
+      };
+      return chain;
+    },
   }));
 
   db.insert.mockImplementation((table: unknown) => ({
@@ -274,18 +290,17 @@ describe('TransactionMonitor.processTransaction', () => {
   it('counts per-transaction errors and continues the batch', async () => {
     db.lookupRows = [{ agentAddress: AGENT_A, policyId: 1, state: PolicyState.Active }];
 
-    // Force the second transaction to throw inside processTransaction by
-    // having the select path blow up on that call.
-    let callCount = 0;
-    db.select.mockImplementation(() => ({
-      from: () => ({
-        where: async () => {
-          callCount += 1;
-          if (callCount === 2) throw new Error('DB offline');
-          return db.lookupRows;
-        },
-      }),
-    }));
+    // Each transaction issues two queries: the policy lookup, then the
+    // balance-baseline read. The baseline read is deliberately fail-safe —
+    // detection must not stop because a baseline is missing — so the only
+    // query whose failure aborts a transaction is the policy lookup. Throw on
+    // the second transaction's, which is the third query overall.
+    const QUERIES_PER_TX = 2;
+    let queryCount = 0;
+    db.onQuery = () => {
+      queryCount += 1;
+      if (queryCount === QUERIES_PER_TX + 1) throw new Error('DB offline');
+    };
 
     await monitor.processWebhook([
       {

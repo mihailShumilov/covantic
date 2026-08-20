@@ -7,6 +7,7 @@ import { startAnalyticsAggregator } from './analytics-aggregator.js';
 import { startPolicyIndexer } from './policy-indexer.js';
 import { startClaimKeeper } from './claim-keeper.js';
 import { startOracleWatcher } from './oracle-watcher.js';
+import { startExploitWatcher } from './exploit-watcher.js';
 import { logger } from '../utils/logger.js';
 
 export function registerWorkers(db: Database, redis: Redis, config: AppConfig) {
@@ -18,6 +19,7 @@ export function registerWorkers(db: Database, redis: Redis, config: AppConfig) {
   startPolicyIndexer(db, redis, config);
   startClaimKeeper(db, redis, config);
   startOracleWatcher(db, redis, config);
+  startExploitWatcher(db, redis, config);
 
   logger.info('All background workers started');
 }

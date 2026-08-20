@@ -9,7 +9,7 @@ Agents buy insurance before DeFi operations; claims are auto-verified and paid o
 
 ```
 packages/
-  anchor/   — Solana program (Rust, Anchor 0.30.1)
+  anchor/   — Solana program (Rust, Anchor 1.1.2)
   api/      — Backend (Fastify 5, Drizzle ORM, BullMQ)
   web/      — Frontend (Next.js 16, React 19, Tailwind)
   shared/   — Cross-package types, constants, utilities
@@ -46,6 +46,7 @@ pnpm agent:create|fund|trigger        # Throwaway agent keypair CLI (real on-cha
 pnpm fleet:bootstrap|start|status     # Autonomous fleet of policy-covered agents
 pnpm stake:vault [--amount N]         # Stake USDC into the vault (lift solvency ratio)
 pnpm --filter api claim:replay <id>   # Re-derive a stored claim verdict from its evidence
+pnpm gov:declare --policy <id>        # Holder declares the agent's legitimate authority set
 ```
 
 Filter to single package: `pnpm --filter api dev`, `pnpm --filter web dev`
@@ -80,6 +81,7 @@ Filter to single package: `pnpm --filter api dev`, `pnpm --filter web dev`
 - Claim statuses: pending, verifying, approved, paying, paid, rejected, failed,
   indeterminate, review — the last two are OPEN states (see `OPEN_CLAIM_STATUSES`)
 - Lock periods: exploit=0s, oracle_manipulation=1h, agent_error=6h, governance_attack=2h
+- Governance baseline delay: 1 h (`GOVERNANCE_BASELINE_DELAY`); drain window: 30 min
 - Unstake cooldown: 48 hours
 - Attestation max validity: 3600 s (`ATTESTATION_MAX_VALIDITY_SECONDS`)
 - Quote max assessment age: 600 s (stale → `ASSESSMENT_STALE`)
@@ -114,6 +116,66 @@ Filter to single package: `pnpm --filter api dev`, `pnpm --filter web dev`
   same evidence must yield the same verdict forever, which is what
   `pnpm claim:replay` and the on-chain evidence hash rely on. Bump
   `ADJUDICATOR_VERSION` when behaviour changes rather than editing quietly.
+- Exploit verdicts are produced by a **pure** `adjudicateExploit(bundle)` in
+  `services/exploit/adjudicate.ts`, on the same contract as the oracle one:
+  no I/O, no clock, no randomness. Bump `EXPLOIT_ADJUDICATOR_VERSION` rather
+  than editing quietly. `claim-replay` dispatches on the bundle's own
+  `triggerType`, so a bundle is self-contained evidence.
+- **Authorization, not program membership, decides an exploit.** The verifier
+  asks who signed for the movement — signer flags, transfer authority,
+  delegates, `SetAuthority`/`CloseAccount`, destination control — all read from
+  `connection.getParsedTransaction`. The Helius payload cannot answer any of
+  it, so an exploit claim without a chain record is `indeterminate`, never
+  rejected. Do not reintroduce "unknown program ⇒ exploit" or "DEX present ⇒
+  not an exploit"; both were false-positive/false-negative engines.
+- **Confidence is enforced, not decorative** (`services/confidence-lanes.ts`).
+  Both adjudicators cap at 0.92, below `AUTO_PAY_CONFIDENCE` (0.95), so
+  off-chain analysis can never release funds alone — paying always needs the
+  chain's own check. That gap is the guarantee; do not close it by raising a
+  ceiling.
+- The exploit proof path is **measure, not attest**: there is no signed-history
+  oracle for balances, so `checkpoint_balance` (permissionless) records what
+  the program reads from the agent's ATA — derived via `associated_token`
+  constraints, never accepted from the caller — and `verify_and_payout_exploit`
+  re-reads it and refuses to pay more than the drop. The chain proves the money
+  left; `bundle_hash` commits to the claim about *why*, which it cannot see.
+- `balance_drop_unexplained` is **intentionally unmapped** in `EVENT_TO_TRIGGER`.
+  It means balances fell with no transaction the screen could attribute it to —
+  there is nothing to verify, so it goes to a human, not to a claim.
+- `anchor build --no-idl` is the cheap check `cargo check` cannot replace: it
+  catches BPF stack-frame overflows in `try_accounts`. Box account structs when
+  it complains.
+- **A seizure is not an exploit, and the exploit path cannot settle one.**
+  `associated_token::authority = policy.agent_address` compiles into an owner
+  equality check, so once `SetAuthority(AccountOwner)` lands, both
+  `checkpoint_balance` and `verify_and_payout_exploit` fail to load the covered
+  account — and the balance never dropped anyway. The governance instructions
+  derive it by `address = get_associated_token_address(...)` instead, which
+  still denies the caller a choice of account while allowing the owner to have
+  changed. Never "simplify" those back to `associated_token::authority`.
+- **Governance ranks above exploit in `ANOMALY_SPECIFICITY` (5 vs 4).** A
+  policy holds one open claim, so whichever anomaly is raised first decides the
+  trigger. A takeover that also drains is a takeover; filing it as an exploit
+  routes it to a verifier with nothing to say about who owns the account now,
+  and the freeze shape — where nothing moves at all — would be rejected as
+  `no_net_loss`.
+- **A governance verdict rests on a holder-signed declaration, not an
+  inference.** `declare_governance_baseline` is holder-signed and matures on a
+  delay (`GOVERNANCE_BASELINE_DELAY`, 1h); `verify_and_payout_governance`
+  refuses a baseline that had not matured *before the claim was filed*. No
+  declaration means `indeterminate → review`, never a rejection — the absence
+  of a declaration is a gap in our records, not the holder's consent.
+- **Checkpoint staleness is measured against `claim_submitted_at` on the
+  governance path**, not against `now`. The governance lock is two hours, which
+  is the entire staleness allowance, so measuring against `now` would make
+  every governance payout unsatisfiable. The exploit path still measures
+  against `now`; that works only because its lock is an hour, and it is
+  fragile.
+- `MonitoringEventType` and `EVENT_TO_TRIGGER` (`services/event-vocabulary.ts`)
+  are one contract, enforced by `Record<MonitoringEventType, …>` plus
+  `tests/monitoring-vocabulary.test.ts`. Producers must use enum members, not
+  string literals — literals are how the two drifted apart and made every
+  governance alert silently unroutable.
 - Fleet `fail` actions **must land on-chain** with a real signature + non-null `meta.err`.
   `executeFail` uses `sendRawTransaction({ skipPreflight: true })` + explicit
   `confirmTransaction`; strategies live in `packages/api/src/services/fleet/failures.ts`.

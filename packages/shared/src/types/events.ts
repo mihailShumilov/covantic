@@ -35,13 +35,37 @@ export enum VaultEvent {
   SolvencyChanged = 'solvency_changed',
 }
 
-/** Monitoring event types */
+/**
+ * The complete vocabulary of monitoring event types.
+ *
+ * This enum is the contract between the detectors that raise events and the
+ * claim keeper's `EVENT_TO_TRIGGER` map, and it is enforced as one:
+ * `tests/monitoring-vocabulary.test.ts` fails the build if any value here is
+ * missing from that map. Producers must use these members rather than string
+ * literals — literals are how the two drifted apart in the first place.
+ *
+ * What that drift cost: this enum declared `GovernanceChange = 'governance_change'`
+ * while the keeper mapped `'governance_attack'`. Anything raised under the
+ * enum's spelling would have been silently dropped as an unhandled event
+ * type, with a debug log as the only trace.
+ */
 export enum MonitoringEventType {
-  BalanceDrop = 'balance_drop',
+  /** Funds left the agent under an authority that was not the agent's. */
+  Exploit = 'exploit',
+  /** A fill sat far enough from the reference price to look manipulated. */
   OracleDeviation = 'oracle_deviation',
+  /** The agent did something costly to itself. */
+  AgentError = 'agent_error',
+  /** Control over the agent's accounts or program left the holder's set. */
+  GovernanceAttack = 'governance_attack',
   LargeTransfer = 'large_transfer',
   FailedTx = 'failed_tx',
-  GovernanceChange = 'governance_change',
+  /**
+   * Balances fell with no transaction the screen could attribute it to.
+   * Deliberately maps to no trigger: there is nothing for a verifier to
+   * verify, so it goes to a human rather than opening a claim.
+   */
+  BalanceDropUnexplained = 'balance_drop_unexplained',
 }
 
 /** Monitoring event severity */

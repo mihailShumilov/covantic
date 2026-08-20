@@ -19,15 +19,65 @@ import { desc, eq, gte } from 'drizzle-orm';
 import { loadConfig } from '../src/config/env.js';
 import { createDbConnection } from '../src/config/database.js';
 import { claimEvidence } from '../src/db/schema.js';
+import {
+  EXPLOIT_ADJUDICATOR_VERSION,
+  adjudicateExploit,
+} from '../src/services/exploit/adjudicate.js';
+import type { ExploitEvidenceBundle } from '../src/services/exploit/types.js';
+import {
+  GOVERNANCE_ADJUDICATOR_VERSION,
+  adjudicateGovernance,
+} from '../src/services/governance/adjudicate.js';
+import type { GovernanceEvidenceBundle } from '../src/services/governance/types.js';
 import { ADJUDICATOR_VERSION, adjudicate } from '../src/services/oracle/adjudicate.js';
 import { bundleHash, verdictHash } from '../src/services/oracle/hash.js';
 import type { EvidenceBundle } from '../src/services/oracle/types.js';
+
+/** Trigger enum values, mirrored so the script does not pull in the whole
+ *  shared package for two numbers. */
+const TRIGGER_EXPLOIT = 1;
+const TRIGGER_ORACLE_MANIPULATION = 2;
+const TRIGGER_GOVERNANCE_ATTACK = 4;
+
+interface ReplayEngine {
+  version: string;
+  run: (bundle: unknown) => { outcome: string; lossAmount: number; confidence: number; details: Record<string, unknown> };
+}
+
+/**
+ * Pick the adjudicator that produced a bundle.
+ *
+ * Every bundle carries its own `triggerType`, so this never has to consult
+ * the claim row — which matters, because the whole point of the exercise is
+ * that a bundle is self-contained evidence.
+ */
+function engineFor(bundle: { triggerType?: number }): ReplayEngine | null {
+  switch (bundle.triggerType) {
+    case TRIGGER_EXPLOIT:
+      return {
+        version: EXPLOIT_ADJUDICATOR_VERSION,
+        run: (b) => adjudicateExploit(b as ExploitEvidenceBundle),
+      };
+    case TRIGGER_ORACLE_MANIPULATION:
+      return {
+        version: ADJUDICATOR_VERSION,
+        run: (b) => adjudicate(b as EvidenceBundle),
+      };
+    case TRIGGER_GOVERNANCE_ATTACK:
+      return {
+        version: GOVERNANCE_ADJUDICATOR_VERSION,
+        run: (b) => adjudicateGovernance(b as GovernanceEvidenceBundle),
+      };
+    default:
+      return null;
+  }
+}
 
 interface ReplayOutcome {
   claimId: string;
   attempt: number;
   storedVersion: string;
-  status: 'match' | 'mismatch' | 'version_drift' | 'bundle_tampered';
+  status: 'match' | 'mismatch' | 'version_drift' | 'bundle_tampered' | 'not_replayable';
   storedVerdictHash: string;
   replayedVerdictHash: string;
   storedBundleHash: string;
@@ -84,12 +134,12 @@ async function main(): Promise<void> {
 }
 
 function replayOne(row: typeof claimEvidence.$inferSelect): ReplayOutcome {
-  const bundle = row.bundle as unknown as EvidenceBundle;
+  const bundle = row.bundle as unknown as Record<string, unknown>;
   const storedVerdict = row.verdict as Record<string, unknown>;
 
   // First: is the stored bundle the one that was hashed? If the evidence has
   // been altered, nothing downstream means anything.
-  const recomputedBundleHash = bundleHash(bundle as unknown as Record<string, unknown>);
+  const recomputedBundleHash = bundleHash(bundle);
   if (recomputedBundleHash !== row.bundleHash) {
     return {
       claimId: row.claimId,
@@ -104,7 +154,26 @@ function replayOne(row: typeof claimEvidence.$inferSelect): ReplayOutcome {
     };
   }
 
-  const replayed = adjudicate(bundle);
+  const engine = engineFor(bundle as { triggerType?: number });
+  if (!engine) {
+    // A trigger whose verdict is not yet produced by a pure function. Saying
+    // so beats reporting a mismatch against rules that never applied.
+    return {
+      claimId: row.claimId,
+      attempt: row.attempt,
+      storedVersion: row.adjudicatorVersion,
+      status: 'not_replayable',
+      storedVerdictHash: row.verdictHash,
+      replayedVerdictHash: '',
+      storedBundleHash: row.bundleHash,
+      recomputedBundleHash,
+      detail: `no pure adjudicator for triggerType=${String(
+        (bundle as { triggerType?: number }).triggerType,
+      )}`,
+    };
+  }
+
+  const replayed = engine.run(bundle);
   const replayedVerdict = {
     outcome: replayed.outcome,
     lossAmount: replayed.lossAmount,
@@ -114,7 +183,7 @@ function replayOne(row: typeof claimEvidence.$inferSelect): ReplayOutcome {
   };
   const replayedVerdictHash = verdictHash(recomputedBundleHash, replayedVerdict);
 
-  const versionMatches = row.adjudicatorVersion === ADJUDICATOR_VERSION;
+  const versionMatches = row.adjudicatorVersion === engine.version;
   const outcomeMatches = replayed.outcome === storedVerdict.outcome;
   const lossMatches = replayed.lossAmount === storedVerdict.lossAmount;
 
@@ -142,7 +211,13 @@ function replayOne(row: typeof claimEvidence.$inferSelect): ReplayOutcome {
 
 function report(result: ReplayOutcome): void {
   const mark =
-    result.status === 'match' ? 'ok      ' : result.status === 'version_drift' ? 'drift   ' : 'FAIL    ';
+    result.status === 'match'
+      ? 'ok      '
+      : result.status === 'version_drift'
+        ? 'drift   '
+        : result.status === 'not_replayable'
+          ? 'skip    '
+          : 'FAIL    ';
   console.error(
     `${mark} ${result.claimId} attempt=${result.attempt} ` +
       `adjudicator=${result.storedVersion}${result.detail ? ` — ${result.detail}` : ''}`,

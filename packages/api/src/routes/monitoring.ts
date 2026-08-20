@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { and, desc, eq, lt, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
+  MonitoringEventType,
   PolicyState,
   SOLANA_ADDRESS_REGEX,
   generateDemoTxSignature,
@@ -191,7 +192,12 @@ export async function monitoringRoutes(app: FastifyInstance) {
     const { agentAddress, type } = z
       .object({
         agentAddress: z.string().regex(SOLANA_ADDRESS_REGEX, 'Invalid Solana address'),
-        type: z.enum(['exploit', 'oracle_deviation', 'agent_error', 'governance_attack']),
+        type: z.enum([
+          MonitoringEventType.Exploit,
+          MonitoringEventType.OracleDeviation,
+          MonitoringEventType.AgentError,
+          MonitoringEventType.GovernanceAttack,
+        ]),
       })
       .parse(request.body);
 

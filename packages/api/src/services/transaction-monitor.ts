@@ -1,12 +1,15 @@
 import { inArray } from 'drizzle-orm';
-import { PolicyState } from '@covantic/shared';
+import { MonitoringEventType, PolicyState } from '@covantic/shared';
 import type { Database } from '../config/database.js';
 import { policies, monitoringEvents } from '../db/schema.js';
 import type { EnhancedTransaction } from '../utils/helius.js';
 import { logger } from '../utils/logger.js';
 import type Redis from 'ioredis';
 import { publishAlert } from './alert-bus.js';
+import { isKnownEventType } from './event-vocabulary.js';
 import { screenForOracleDeviation } from './oracle/prefilter.js';
+import { screenEnhancedForExploit, type BalanceBaseline } from './exploit/prefilter.js';
+import { loadBalanceBaseline } from './exploit/baseline.js';
 import type { PriceOracle } from './oracle/types.js';
 import { incrementMetric } from '../utils/monitor-metrics.js';
 
@@ -27,16 +30,42 @@ import { incrementMetric } from '../utils/monitor-metrics.js';
 const LARGE_TRANSFER_THRESHOLD_UI = 1_000; // 1,000 USDC — triggers warning
 const CRITICAL_TRANSFER_THRESHOLD_UI = 10_000; // 10,000 USDC — triggers critical
 
-/** How specifically each anomaly type names what went wrong. The most
- *  specific one wins the single open-claim slot a policy has. */
-const ANOMALY_SPECIFICITY: Record<string, number> = {
-  oracle_deviation: 3,
-  failed_tx: 2,
-  large_transfer: 1,
+/**
+ * How specifically each anomaly type names what went wrong. The most specific
+ * one wins the single open-claim slot a policy has.
+ *
+ * Complete over {@link MonitoringEventType} on purpose, even for the types
+ * this monitor never raises. A rank that is merely *absent* silently becomes
+ * zero — below `large_transfer` — which is how a governance takeover would
+ * have been filed as an AgentError: the map had no governance entry, so the
+ * most specific statement available about the incident lost to the least.
+ * Making the record total means a new event type cannot be added without
+ * deciding where it sits.
+ */
+const ANOMALY_SPECIFICITY: Record<MonitoringEventType, number> = {
+  // Above `exploit`, and the ordering is load-bearing. A takeover that also
+  // drains is a takeover: filing it as an Exploit routes it to a verifier
+  // that can measure the drop but has nothing to say about who owns the
+  // account now — and the seizure-without-drain shape, where the balance
+  // never moves at all, would be rejected outright as `no_net_loss`.
+  [MonitoringEventType.GovernanceAttack]: 5,
+  // A policy holds one open claim (`claims_open_unique`), so the first
+  // anomaly published decides the trigger type for the whole incident. A
+  // drain that also looks like a bad fill is a drain, and filing it as
+  // OracleManipulation would route it to a verifier with nothing to say
+  // about authorization.
+  [MonitoringEventType.Exploit]: 4,
+  [MonitoringEventType.OracleDeviation]: 3,
+  [MonitoringEventType.FailedTx]: 2,
+  [MonitoringEventType.LargeTransfer]: 1,
+  // Not raised here — the keeper receives these from other producers — but
+  // ranked so the record stays total.
+  [MonitoringEventType.AgentError]: 2,
+  [MonitoringEventType.BalanceDropUnexplained]: 0,
 };
 
 function specificity(type: string): number {
-  return ANOMALY_SPECIFICITY[type] ?? 0;
+  return isKnownEventType(type) ? ANOMALY_SPECIFICITY[type] : 0;
 }
 
 /**
@@ -166,11 +195,26 @@ export class TransactionMonitor {
 
     if (insuredActive.size === 0) return;
 
+    // One baseline read per agent, not per transfer. `detectAnomalies` runs
+    // once for every outgoing transfer, so loading it inside that loop turned
+    // a single anomaly check into N database round-trips.
+    const baselines = new Map<string, BalanceBaseline | undefined>();
+    for (const agentAddress of insuredActive) {
+      try {
+        baselines.set(agentAddress, await loadBalanceBaseline(this.db, agentAddress));
+      } catch (error) {
+        // A missing baseline weakens the ratio test; it must not stop
+        // detection, which is the half of the pipeline that fails open.
+        logger.warn({ error, agentAddress }, 'monitor: balance baseline unavailable');
+        baselines.set(agentAddress, undefined);
+      }
+    }
+
     for (const transfer of tokenTransfers) {
       const agentAddress = transfer.fromUserAccount;
       if (!agentAddress || !insuredActive.has(agentAddress)) continue;
 
-      const anomalies = await this.detectAnomalies(tx, agentAddress);
+      const anomalies = await this.detectAnomalies(tx, agentAddress, baselines.get(agentAddress));
 
       for (const anomaly of anomalies) {
         await this.db.insert(monitoringEvents).values({
@@ -208,6 +252,7 @@ export class TransactionMonitor {
   private async detectAnomalies(
     tx: WebhookTransaction,
     agentAddress: string,
+    baseline: BalanceBaseline | undefined,
   ): Promise<Array<{ type: string; severity: string; details: Record<string, unknown> }>> {
     const anomalies: Array<{ type: string; severity: string; details: Record<string, unknown> }> =
       [];
@@ -218,7 +263,7 @@ export class TransactionMonitor {
 
     if (totalOutgoing > LARGE_TRANSFER_THRESHOLD_UI) {
       anomalies.push({
-        type: 'large_transfer',
+        type: MonitoringEventType.LargeTransfer,
         severity:
           totalOutgoing > CRITICAL_TRANSFER_THRESHOLD_UI ? 'critical' : 'warning',
         details: { amountUi: totalOutgoing, transfers: outgoing.length },
@@ -227,9 +272,29 @@ export class TransactionMonitor {
 
     if (tx.transactionError) {
       anomalies.push({
-        type: 'failed_tx',
+        type: MonitoringEventType.FailedTx,
         severity: 'warning',
         details: { error: tx.transactionError },
+      });
+    }
+
+    // Exploit screening. Until this existed, `exploit` was emitted by nothing
+    // in production — the only producer was the demo endpoint — so an insured
+    // agent could be drained to zero and no claim would ever open.
+    //
+    // The indexer payload cannot answer authorization, so this screen leans on
+    // relative magnitude and control instructions and lets the verifier do the
+    // real work from the chain's own record. Detection fails open.
+    const exploitScreen = screenEnhancedForExploit(
+      tx as unknown as EnhancedTransaction,
+      agentAddress,
+      { baseline },
+    );
+    if (exploitScreen.flagged) {
+      anomalies.push({
+        type: MonitoringEventType.Exploit,
+        severity: exploitScreen.severity,
+        details: { screenReason: exploitScreen.reason, ...exploitScreen.detail },
       });
     }
 
@@ -249,7 +314,7 @@ export class TransactionMonitor {
       );
       if (screen.flagged) {
         anomalies.push({
-          type: 'oracle_deviation',
+          type: MonitoringEventType.OracleDeviation,
           severity: screen.severity,
           details: { screenReason: screen.reason, ...screen.detail },
         });

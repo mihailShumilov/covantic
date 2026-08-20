@@ -91,6 +91,69 @@ pub mod covantic {
         verify_and_payout_v2_handler(ctx, payout_amount, evidence)
     }
 
+    /// Record the covered account's balance as the baseline a later exploit
+    /// payout is bounded by (permissionless crank).
+    ///
+    /// Permissionless on purpose: a baseline only the oracle could write
+    /// would put the oracle back in charge of the very number that is
+    /// supposed to constrain it.
+    pub fn checkpoint_balance(ctx: Context<CheckpointBalance>) -> Result<()> {
+        checkpoint_balance_handler(ctx)
+    }
+
+    /// Verify an exploit claim against a balance drop the program measures
+    /// for itself, and execute payout.
+    ///
+    /// Prefer this over `verify_and_payout` for TRIGGER_EXPLOIT. The program
+    /// re-reads the covered token account and refuses to pay more than the
+    /// difference from its own earlier checkpoint, so the oracle cannot
+    /// assert a loss that did not happen. What it still asserts — that the
+    /// drop was an exploit rather than the holder moving funds — is committed
+    /// via `bundle_hash` and left publicly falsifiable.
+    pub fn verify_and_payout_exploit(
+        ctx: Context<VerifyAndPayoutExploit>,
+        payout_amount: u64,
+        evidence: ExploitPayoutEvidence,
+    ) -> Result<()> {
+        verify_and_payout_exploit_handler(ctx, payout_amount, evidence)
+    }
+
+    /// Declare (or refresh) the authority set that is legitimate for an
+    /// agent. Holder-signed, and it matures on a delay — a baseline that
+    /// could be written and claimed against in the same breath would prove
+    /// nothing.
+    pub fn declare_governance_baseline(
+        ctx: Context<DeclareGovernanceBaseline>,
+        manifest: GovernanceManifest,
+    ) -> Result<()> {
+        declare_governance_baseline_handler(ctx, manifest)
+    }
+
+    /// Record who controls the covered account (permissionless crank).
+    ///
+    /// The governance counterpart to `checkpoint_balance`, and it must exist
+    /// separately: a balance reading is blind to a seizure, where the tokens
+    /// never move and only the owner changes, and to a freeze, where nothing
+    /// changes at all except that the agent can no longer act.
+    pub fn checkpoint_authority(ctx: Context<CheckpointAuthority>) -> Result<()> {
+        checkpoint_authority_handler(ctx)
+    }
+
+    /// Verify a governance claim against a departure the program observes,
+    /// and execute payout.
+    ///
+    /// The only path where the chain establishes the covered *event* rather
+    /// than merely bounding its size: it compares the holder's own matured
+    /// declaration of who may control the agent against what it reads on the
+    /// account now. The oracle asserts neither side.
+    pub fn verify_and_payout_governance(
+        ctx: Context<VerifyAndPayoutGovernance>,
+        payout_amount: u64,
+        evidence: GovernancePayoutEvidence,
+    ) -> Result<()> {
+        verify_and_payout_governance_handler(ctx, payout_amount, evidence)
+    }
+
     /// Mark expired policies (permissionless crank).
     pub fn expire_policy(ctx: Context<ExpirePolicy>) -> Result<()> {
         expire_policy_handler(ctx)

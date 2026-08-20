@@ -31,6 +31,44 @@ const envSchema = z.object({
   ORACLE_PROOF_ENABLED: z
     .preprocess((v) => (typeof v === 'string' ? v.toLowerCase() === 'true' : v), z.boolean())
     .default(false),
+  /**
+   * Route exploit payouts through `verify_and_payout_exploit`, which bounds
+   * the payout by a balance drop the program measures for itself.
+   *
+   * Defaults to off for the same reason as ORACLE_PROOF_ENABLED: the
+   * instruction only exists in program builds from this change forward, and
+   * enabling it against an older deployment makes every exploit payout fail.
+   * Turn it on after redeploying. Once on, an exploit claim that cannot be
+   * proven goes to review rather than falling back to the unverified path —
+   * a fallback would make the whole mechanism decorative.
+   */
+  EXPLOIT_PROOF_ENABLED: z
+    .preprocess((v) => (typeof v === 'string' ? v.toLowerCase() === 'true' : v), z.boolean())
+    .default(false),
+  /**
+   * Route governance payouts through `verify_and_payout_governance`, which
+   * compares the holder's own matured declaration of who may control the
+   * agent against what the program reads on the account now.
+   *
+   * Defaults to off for the same reason as the other two, plus one specific
+   * to this path: it also requires the holder to have declared a baseline. A
+   * policy with no declaration resolves to review whether the flag is on or
+   * off, so turning it on changes nothing for existing policies until they
+   * declare — which is the intended migration, not a bug.
+   */
+  GOVERNANCE_PROOF_ENABLED: z
+    .preprocess((v) => (typeof v === 'string' ? v.toLowerCase() === 'true' : v), z.boolean())
+    .default(false),
+  /**
+   * Cap on automatic payouts in a rolling hour, in USDC lamports. Zero
+   * disables the breaker.
+   *
+   * This is the control that survives one of the per-claim bounds being
+   * wrong: the failure that destroys a vault is not one bad payout, it is the
+   * same bad payout repeated before anyone looks. Claims over the cap queue
+   * to review rather than closing.
+   */
+  AUTO_PAYOUT_HOURLY_LIMIT_RAW: z.coerce.number().int().nonnegative().default(100_000_000_000),
   PROGRAM_ID: z.string().min(32),
   ORACLE_KEYPAIR_PATH: z.string(),
 

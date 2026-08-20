@@ -20,6 +20,8 @@ src/
     claim-oracle.ts       — Dispatcher over per-trigger verifiers
     verifiers/            — exploit, oracle-manipulation, agent-error, governance-attack
     oracle/               — Oracle-manipulation evidence spine (see below)
+    governance/           — Governance-attack evidence spine (see below)
+    event-vocabulary.ts   — MonitoringEventType → TriggerType, the one contract
     transaction-monitor.ts — Helius webhook processing, anomaly detection
     alert-bus.ts          — HMAC-signed publish/subscribe over Redis `monitoring:alerts`
     attestation-publisher.ts — Oracle-signed RiskAttestation PDA publisher (lazy-init CPI)
@@ -61,6 +63,7 @@ src/
     fleet-{bootstrap,start,status}.ts — Autonomous fleet management
     stake-vault.ts        — Stake USDC into the vault (raise solvency ratio)
     claim-replay.ts       — Re-derive stored verdicts from evidence; CI-gateable
+    declare-governance-baseline.ts — Holder-signed authority manifest (pnpm gov:declare)
     seed-demo.ts, simulate-exploit.ts, run-demo.ts, demo-common.ts — demo helpers
 ```
 
@@ -102,6 +105,48 @@ factory.ts          buildPriceOracle() — the one production source set
   `pnpm claim:replay` meaningful. Tests enforce it.
 - **Anomaly ordering matters.** A policy holds one open claim, so
   `oracle_deviation` is published ahead of `large_transfer` for the same tx.
+
+## Governance Module (`services/governance/`)
+
+The evidence spine behind `TriggerType.GovernanceAttack`.
+
+```
+authority.ts        Who controls the agent's accounts, before and after
+conjunction.ts      What the takeover cost, and whether it landed in the window
+signatures.ts       Structural markers separating a takeover from an operation
+adjudicate.ts       PURE verdict function — no I/O, no clock
+types.ts            GovernanceBaselineView / GovernanceEvidenceBundle
+prefilter.ts        Screen a RawTxView for a departure from the legitimate set
+checkpoint.ts       Writes checkpoint_authority; reads the declared baseline
+proof-poster.ts     Calls verify_and_payout_governance
+```
+
+### Invariants
+
+- **The covered event is on-chain state, not an inference.** Who controls a
+  token account is a field on that account. The holder declares who *may*
+  control it (`declare_governance_baseline`, holder-signed, matures after an
+  hour), and the program compares that against what it reads. This is the only
+  trigger where the chain establishes the event itself rather than bounding
+  its size.
+- **No declaration ⇒ review, never rejection.** A policy predating the
+  mechanism has no declared set; that is a gap in our records, not consent.
+  An *outage* reading the baseline is a third state again, and retries.
+- **The governance instructions derive the covered account by `address`, not
+  by `associated_token::authority`.** The latter compiles into an owner
+  equality check and would reject exactly the state being observed. This is
+  also why the exploit path cannot settle a seizure.
+- **`gone` and `frozen` cannot double-count.** `gone` is what is missing from
+  current holdings; `frozen` is a subset of what is present. On chain the
+  equivalent bound is `max(observed_drop, seized_amount)`, never the sum — and
+  `seized_amount` is zero for delegate and close-authority departures, which
+  are capabilities rather than losses.
+- **Program membership decides nothing.** "A governance program was invoked"
+  was the entirety of the old verifier and establishes nothing: a takeover of
+  an agent wallet is a `SetAuthority` against its own accounts and touches no
+  DAO program. `programs` is carried in the bundle as an audit trail only.
+- **Detection is pull-path only**, by design — nothing this screen needs
+  exists in the Helius payload. See the note at the top of `prefilter.ts`.
 
 ## Fleet Module (`services/fleet/`)
 

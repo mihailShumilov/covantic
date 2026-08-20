@@ -488,7 +488,22 @@ describe('AgentError verifier', () => {
 });
 
 describe('Exploit verifier', () => {
-  it('approves high-confidence flash-loan exploit', async () => {
+  /**
+   * The three cases here used to assert the opposite of what they assert now,
+   * and that inversion is the point of the change.
+   *
+   * The old verifier decided on which programs appeared in a transaction:
+   * a flash-loan program plus an outflow confirmed at 0.9 and paid the full
+   * coverage; a known DEX rejected outright as "legitimate trading"; no
+   * *USDC* outflow rejected as "no loss". None of it asked who authorised the
+   * movement, so it paid for ordinary leveraged trading and denied every
+   * drain routed through Jupiter.
+   */
+
+  it('no longer confirms on program membership alone', async () => {
+    // Identical to the transaction the old verifier paid full coverage for:
+    // a flash-loan program and 10,000 USDC out. Nothing here says the agent
+    // did not authorise it, so there is nothing to pay.
     const tx = mkTx({
       instructions: [{ programId: FLASH_LOAN_PROGRAM, accounts: [], data: '' }],
       tokenTransfers: [
@@ -516,6 +531,7 @@ describe('Exploit verifier', () => {
         },
       ],
     });
+
     const result = await verifyClaim(
       TriggerType.Exploit,
       tx.signature,
@@ -525,13 +541,15 @@ describe('Exploit verifier', () => {
       mkPricer({}),
       { usdcMint: USDC_MINT },
     );
-    expect(result.verified).toBe(true);
-    expect(result.details.reason).toBe('flash_loan_exploit');
-    expect(result.confidence).toBeCloseTo(0.9);
-    expect(result.lossAmount).toBe(COVERAGE_RAW);
+
+    expect(result.verified).toBe(false);
+    expect(result.lossAmount).toBe(0);
   });
 
-  it('rejects a DEX-only tx as legitimate trading', async () => {
+  it('escalates instead of denying when the chain record is unavailable', async () => {
+    // No RPC connection, so authorization cannot be read. "We could not
+    // check" must never be recorded as "there was no loss" — that collapse is
+    // how a valid claim gets destroyed by an infrastructure problem.
     const tx = mkTx({
       instructions: [{ programId: DEX_PROGRAM, accounts: [], data: '' }],
       accountData: [
@@ -548,6 +566,7 @@ describe('Exploit verifier', () => {
         },
       ],
     });
+
     const result = await verifyClaim(
       TriggerType.Exploit,
       tx.signature,
@@ -557,14 +576,17 @@ describe('Exploit verifier', () => {
       mkPricer({}),
       { usdcMint: USDC_MINT },
     );
-    expect(result.verified).toBe(false);
-    expect(result.details.reason).toBe('dex_only');
+
+    expect(result.outcome).toBe('indeterminate');
+    expect(result.details.reason).toBe('no_chain_record');
+    // Retryable, and it carries what evidence there was for a reviewer.
+    expect(result.retryAfterSec).toBeGreaterThan(0);
+    expect(result.evidence).toBeDefined();
   });
 
-  it('rejects when no USDC outflow is observable', async () => {
-    const tx = mkTx({
-      instructions: [{ programId: FLASH_LOAN_PROGRAM, accounts: [], data: '' }],
-    });
+  it('attaches a replayable evidence bundle to every verdict', async () => {
+    const tx = mkTx({ instructions: [{ programId: FLASH_LOAN_PROGRAM, accounts: [], data: '' }] });
+
     const result = await verifyClaim(
       TriggerType.Exploit,
       tx.signature,
@@ -574,8 +596,14 @@ describe('Exploit verifier', () => {
       mkPricer({}),
       { usdcMint: USDC_MINT },
     );
-    expect(result.verified).toBe(false);
-    expect(result.details.reason).toBe('no_outflow');
+
+    const bundle = result.evidence as unknown as Record<string, unknown>;
+    expect(bundle.triggerType).toBe(TriggerType.Exploit);
+    expect(bundle.txSignature).toBe(tx.signature);
+    // The old verifier returned a bag of scalars and nothing was persisted,
+    // so no exploit verdict could ever be re-derived.
+    expect(bundle.position).toBeDefined();
+    expect(bundle.hasRawTx).toBe(false);
   });
 });
 
@@ -1297,14 +1325,18 @@ describe('OracleManipulation verifier — block-time anchoring (Phase 1)', () =>
   });
 });
 
-describe('GovernanceAttack verifier', () => {
-  it('approves when a governance program is invoked with balance movement', async () => {
-    const tx = mkTx({
-      instructions: [{ programId: GOV_PROGRAM, accounts: [], data: '' }],
-      accountData: [
-        { account: 'a', nativeBalanceChange: 100_000_000, tokenBalanceChanges: [] },
-      ],
-    });
+describe('GovernanceAttack verifier — dispatch', () => {
+  /**
+   * Only the dispatch contract is asserted here. The verdict logic lives in
+   * `governance-adjudicate.test.ts` and `governance-corpus.test.ts`, where it
+   * can be driven with a chain record instead of an indexer payload.
+   */
+
+  it('cannot resolve a takeover from the indexer payload alone', async () => {
+    // No connection: no signer flags, no per-side token account owners. The
+    // old verifier answered anyway, off which programs it saw; this one says
+    // it cannot tell, and retries.
+    const tx = mkTx({ instructions: [{ programId: GOV_PROGRAM, accounts: [], data: '' }] });
     const result = await verifyClaim(
       TriggerType.GovernanceAttack,
       tx.signature,
@@ -1313,15 +1345,16 @@ describe('GovernanceAttack verifier', () => {
       mkHelius(tx),
       mkPricer({}),
     );
-    expect(result.verified).toBe(true);
-    expect(result.details.reason).toBe('governance_state_change_detected');
-    expect(result.lossAmount).toBe(COVERAGE_RAW / 2);
+
+    expect(result.outcome).toBe('indeterminate');
+    expect(result.details.reason).toBe('no_chain_record');
+    expect(result.lossAmount).toBe(0);
   });
 
-  it('rejects when no governance program was called', async () => {
-    const tx = mkTx({
-      instructions: [{ programId: UNKNOWN_PROGRAM, accounts: [], data: '' }],
-    });
+  it('never confirms without a governance program, and never rejects for lacking one', async () => {
+    // Both halves of the old verifier's mistake, in one assertion. A real
+    // takeover of an agent invokes no DAO program at all.
+    const tx = mkTx({ instructions: [{ programId: UNKNOWN_PROGRAM, accounts: [], data: '' }] });
     const result = await verifyClaim(
       TriggerType.GovernanceAttack,
       tx.signature,
@@ -1330,15 +1363,15 @@ describe('GovernanceAttack verifier', () => {
       mkHelius(tx),
       mkPricer({}),
     );
-    expect(result.verified).toBe(false);
-    expect(result.details.reason).toBe('no_governance_program');
+
+    expect(result.outcome).toBe('indeterminate');
+    expect(result.details.reason).not.toBe('no_governance_program');
   });
 
-  it('rejects when governance program was called but no balance moved', async () => {
-    const tx = mkTx({
-      instructions: [{ programId: GOV_PROGRAM, accounts: [], data: '' }],
-      accountData: [{ account: 'a', nativeBalanceChange: 1_000, tokenBalanceChanges: [] }],
-    });
+  it('carries an evidence bundle even when it cannot decide', async () => {
+    // A bundle with nothing in it helps nobody, but a claim with no bundle at
+    // all is unreplayable — which is what every governance claim used to be.
+    const tx = mkTx({ instructions: [{ programId: GOV_PROGRAM, accounts: [], data: '' }] });
     const result = await verifyClaim(
       TriggerType.GovernanceAttack,
       tx.signature,
@@ -1347,7 +1380,9 @@ describe('GovernanceAttack verifier', () => {
       mkHelius(tx),
       mkPricer({}),
     );
-    expect(result.verified).toBe(false);
-    expect(result.details.reason).toBe('governance_call_no_state_change');
+
+    expect(result.evidence).toBeDefined();
+    expect(result.evidence?.triggerType).toBe(TriggerType.GovernanceAttack);
+    expect(result.evidence?.txSignature).toBe(tx.signature);
   });
 });

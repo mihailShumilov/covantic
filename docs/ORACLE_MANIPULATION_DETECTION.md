@@ -23,12 +23,12 @@ All eight phases are implemented on `feature/actions-detection-improvement`.
 
 **Carried forward, with the reason:**
 
-- *Phase 6 deployment.* The Rust compiles (`cargo check` clean with
-  `pyth-solana-receiver-sdk` 0.4). IDL generation does not, on a pre-existing
-  toolchain mismatch in this environment: `anchor-syn` 0.30.1 calls
-  `proc_macro2::Span::source_file()`, removed in current Rust. Until the IDL
-  regenerates and the program redeploys, `ORACLE_PROOF_ENABLED` must stay
-  false — the instruction is not on the deployed program.
+- *Phase 6 deployment.* **IDL generation is fixed** — the program migrated to
+  Anchor 1.1.2 (with `pyth-solana-receiver-sdk` 2.0.0), which replaced the
+  `anchor-syn` 0.30.1 `Span::source_file()` call that current Rust removed.
+  `anchor build` now produces both the binary and the IDL, and the integration
+  suite runs. `ORACLE_PROOF_ENABLED` still stays false until the program is
+  **redeployed** — the instruction is built but not yet on devnet.
 - *Corpus A (real incident replay).* The collector is timestamp-driven so
   mainnet history works unchanged, but 2022 transactions need archival RPC
   access this environment does not have. Cases drop into

@@ -2,10 +2,16 @@ import type { Connection } from '@solana/web3.js';
 import { LOCK_PERIODS, TriggerType } from '@covantic/shared';
 import { HeliusClient } from '../utils/helius.js';
 import { logger } from '../utils/logger.js';
+import type { ExploitEvidenceBundle } from './exploit/types.js';
+import type { GovernanceEvidenceBundle } from './governance/types.js';
 import type { EvidenceBundle, PriceOracle } from './oracle/types.js';
+import type { CohortLookup } from './exploit/signatures.js';
 import { verifyAgentError } from './verifiers/agent-error.js';
 import { verifyExploit } from './verifiers/exploit.js';
-import { verifyGovernanceAttack } from './verifiers/governance-attack.js';
+import {
+  verifyGovernanceAttack,
+  type GovernanceVerifierOptions,
+} from './verifiers/governance-attack.js';
 import { verifyOracleManipulation } from './verifiers/oracle-manipulation.js';
 
 /**
@@ -16,6 +22,12 @@ import { verifyOracleManipulation } from './verifiers/oracle-manipulation.js';
  * to permanently close valid claims.
  */
 export type VerificationOutcome = 'confirmed' | 'rejected' | 'indeterminate';
+
+/** Every evidence shape the keeper may be handed. */
+export type AnyEvidenceBundle =
+  | EvidenceBundle
+  | ExploitEvidenceBundle
+  | GovernanceEvidenceBundle;
 
 export interface VerificationResult {
   outcome: VerificationOutcome;
@@ -30,8 +42,10 @@ export interface VerificationResult {
    *  the next attempt. */
   retryAfterSec?: number;
   /** Everything the verdict was derived from. Persisted by the keeper so the
-   *  decision can be replayed and audited. */
-  evidence?: EvidenceBundle;
+   *  decision can be replayed and audited. One shape per trigger: both carry
+   *  `triggerType`, which is what lets a replay pick the right adjudicator
+   *  without consulting the claim row. */
+  evidence?: AnyEvidenceBundle;
 }
 
 export interface VerifyClaimOptions {
@@ -40,9 +54,25 @@ export interface VerifyClaimOptions {
    *  summing tokenTransfers[]. */
   usdcMint?: string;
   /** RPC connection used to cross-check the trigger transaction's block time
-   *  against the indexer. Optional: without it the indexer's value is taken
-   *  on trust and the disagreement check is skipped. */
+   *  against the indexer, and — for exploits — to read the chain's own record
+   *  of who signed for what. Without it an exploit claim cannot be resolved
+   *  at all and returns `indeterminate`. */
   connection?: Connection | null;
+  /** Policy holder wallet. Value landing in an account the holder controls is
+   *  the holder moving their own money, not a loss the vault owes. */
+  holderAddress?: string;
+  /** Finds other insured agents hit by the same counterparty in the window. */
+  cohort?: CohortLookup;
+  /**
+   * Lookups only the governance path needs: the holder's declared authority
+   * set and the two balance readings its exposure is measured between.
+   *
+   * Injected rather than imported so `claim-oracle` stays free of database
+   * and Anchor-program coupling. Absent, a governance claim resolves to
+   * review — which is the correct behaviour before
+   * `declare_governance_baseline` is deployed, and never a rejection.
+   */
+  governance?: Omit<GovernanceVerifierOptions, 'connection' | 'holderAddress' | 'cohort'>;
 }
 
 /**
@@ -93,7 +123,11 @@ export async function verifyClaim(
 
   switch (triggerType) {
     case TriggerType.Exploit:
-      return verifyExploit(tx, agentAddress, coverageAmount, options.usdcMint);
+      return verifyExploit(tx, agentAddress, coverageAmount, priceOracle, {
+        connection: options.connection ?? null,
+        holderAddress: options.holderAddress,
+        cohort: options.cohort,
+      });
     case TriggerType.OracleManipulation:
       return verifyOracleManipulation(tx, agentAddress, coverageAmount, priceOracle, {
         connection: options.connection ?? null,
@@ -101,7 +135,12 @@ export async function verifyClaim(
     case TriggerType.AgentError:
       return verifyAgentError(tx, agentAddress, coverageAmount, options.usdcMint);
     case TriggerType.GovernanceAttack:
-      return verifyGovernanceAttack(tx, agentAddress, coverageAmount);
+      return verifyGovernanceAttack(tx, agentAddress, coverageAmount, priceOracle, {
+        ...(options.governance ?? {}),
+        connection: options.connection ?? null,
+        holderAddress: options.holderAddress,
+        cohort: options.cohort,
+      });
     default:
       return {
         outcome: 'rejected',

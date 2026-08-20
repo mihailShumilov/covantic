@@ -22,7 +22,38 @@ export const PDA_SEEDS = {
   ATTESTATION: 'covantic_attestation',
   /** One evidence record per policy, written by verify_and_payout_v2. */
   CLAIM_EVIDENCE: 'covantic_claim_evidence',
+  /** One balance checkpoint per policy, written by the permissionless crank.
+   *  The baseline `verify_and_payout_exploit` bounds a payout against. */
+  CHECKPOINT: 'covantic_checkpoint',
+  /** One exploit evidence record per policy, written by
+   *  verify_and_payout_exploit. */
+  EXPLOIT_EVIDENCE: 'covantic_exploit_evidence',
+  /** One governance baseline per policy — the authority set the holder
+   *  declared, written by the holder and matured on a delay. */
+  GOVERNANCE_BASELINE: 'covantic_gov_baseline',
+  /** One authority checkpoint per policy, written by the permissionless
+   *  crank. What `verify_and_payout_governance` compares against. */
+  AUTHORITY_CHECKPOINT: 'covantic_authority_checkpoint',
+  /** One governance evidence record per policy, written by
+   *  verify_and_payout_governance. */
+  GOVERNANCE_EVIDENCE: 'covantic_gov_evidence',
 } as const;
+
+/**
+ * Oldest a balance checkpoint may be and still bound an exploit payout
+ * (seconds). Keep in sync with `MAX_CHECKPOINT_AGE` in the Anchor program.
+ *
+ * This is the exposure window of the proven-exploit path: a drain claimed
+ * with no checkpoint newer than this cannot be proven on chain and goes to
+ * review instead.
+ */
+export const MAX_CHECKPOINT_AGE_SECONDS = 2 * 3600;
+
+/**
+ * Smallest balance drop that can support a proven exploit payout, in basis
+ * points. Keep in sync with `MIN_PROVABLE_DROP_BPS` in the Anchor program.
+ */
+export const MIN_PROVABLE_DROP_BPS = 5_000;
 
 /**
  * Maximum validity window for a risk attestation (seconds). Keep in sync
@@ -138,3 +169,26 @@ export function policyIdToBytes(id: bigint | { toString(): string }): Uint8Array
   view.setBigUint64(0, value, true);
   return buf;
 }
+
+/**
+ * How long a governance baseline must mature before it can support a claim
+ * (seconds). Keep in sync with `GOVERNANCE_BASELINE_DELAY` in the Anchor
+ * program.
+ *
+ * The delay is the mechanism. A declaration that could be written and claimed
+ * against in the same breath would prove nothing, because a stolen holder key
+ * would simply write a convenient one first.
+ */
+export const GOVERNANCE_BASELINE_DELAY_SECONDS = 3600;
+
+/**
+ * How long after a takeover a loss still counts as part of it (seconds).
+ * Keep in sync with `GOVERNANCE_DRAIN_WINDOW` in the Anchor program.
+ */
+export const GOVERNANCE_DRAIN_WINDOW_SECONDS = 30 * 60;
+
+/**
+ * Oldest an authority checkpoint may be and still bound a governance payout
+ * (seconds). Keep in sync with `MAX_AUTHORITY_CHECKPOINT_AGE`.
+ */
+export const MAX_AUTHORITY_CHECKPOINT_AGE_SECONDS = 2 * 3600;

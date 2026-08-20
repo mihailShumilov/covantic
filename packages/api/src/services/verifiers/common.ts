@@ -1,6 +1,5 @@
 import { USDC_DECIMALS } from '@covantic/shared';
-import type { VerificationResult } from '../claim-oracle.js';
-import type { EvidenceBundle } from '../oracle/types.js';
+import type { AnyEvidenceBundle, VerificationResult } from '../claim-oracle.js';
 import {
   KNOWN_DEX_PROGRAMS,
   KNOWN_BRIDGE_PROGRAMS,
@@ -148,7 +147,7 @@ export function verdictConfirmed(args: {
   confidence: number;
   details: Record<string, unknown>;
   lockPeriod: number;
-  evidence?: EvidenceBundle;
+  evidence?: AnyEvidenceBundle;
 }): VerificationResult {
   return {
     outcome: 'confirmed',
@@ -169,7 +168,7 @@ export function verdictRejected(
   reason: string,
   details: Record<string, unknown>,
   lockPeriod: number,
-  evidence?: EvidenceBundle,
+  evidence?: AnyEvidenceBundle,
 ): VerificationResult {
   return {
     outcome: 'rejected',
@@ -196,7 +195,7 @@ export function verdictIndeterminate(
   details: Record<string, unknown>,
   lockPeriod: number,
   retryAfterSec = 60,
-  evidence?: EvidenceBundle,
+  evidence?: AnyEvidenceBundle,
 ): VerificationResult {
   return {
     outcome: 'indeterminate',

@@ -64,7 +64,7 @@ pub fn stake_handler(ctx: Context<Stake>, amount: u64) -> Result<()> {
 
     // Transfer USDC from staker to vault
     let transfer_ctx = CpiContext::new(
-        ctx.accounts.token_program.to_account_info(),
+        ctx.accounts.token_program.key(),
         Transfer {
             from: ctx.accounts.staker_token_account.to_account_info(),
             to: ctx.accounts.vault_token_account.to_account_info(),

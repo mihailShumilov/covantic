@@ -27,11 +27,43 @@ src/
     stake.rs              — USDC deposit, crystallize pending rewards first
     unstake.rs            — Two-phase: request (timestamp) + execute (48h cooldown)
     claim_rewards.rs      — Pull rewards via the per-stake accumulator
+    checkpoint_balance.rs — Permissionless crank: records the covered balance
+    verify_and_payout_exploit.rs — Bounds payout by a drop the program measures
+    verify_and_payout_v2.rs      — Bounds payout by a guardian-signed Pyth price
+    declare_governance_baseline.rs — Holder-signed authority manifest, matures on a delay
+    checkpoint_authority.rs        — Permissionless crank: records who controls the account
+    verify_and_payout_governance.rs — Bounds payout by a departure the program observes
 ```
+
+## Governance Proof Path
+
+`declare_governance_baseline` is **holder-signed** and matures after
+`GOVERNANCE_BASELINE_DELAY` (1 h). `checkpoint_authority` is permissionless
+and records the covered account's owner, delegate, close authority and frozen
+flag. `verify_and_payout_governance` compares the matured declaration against
+what it reads now and refuses to pay unless control left the declared set.
+
+Two constraints that must not be "simplified":
+
+- The covered account is derived with `address =
+  get_associated_token_address(&policy.agent_address, &usdc_mint.key())`, not
+  with `associated_token::authority`. Anchor compiles the latter into an owner
+  equality check, which rejects precisely the seizure being observed.
+- Checkpoint staleness is measured against `policy.claim_submitted_at`, not
+  `now`. The governance lock is 2 h and the staleness allowance is 2 h, so
+  measuring against `now` makes every payout unsatisfiable.
 
 ## Key Patterns
 
-- Anchor 0.30.1 with `anchor-spl` for token CPI
+- Anchor 1.1.2 with `anchor-spl` for token CPI. `anchor-lang` and
+  `pyth-solana-receiver-sdk` must move together — mismatched versions pull two
+  `solana-program` majors into one binary and fail as a wall of
+  "Pubkey: BorshSerialize is not satisfied", which names nothing useful.
+- `CpiContext::new`/`new_with_signer` take the program **id** (`.key()`), not
+  its `AccountInfo` — an Anchor 1.x change.
+- TS client is `@coral-xyz/anchor` 0.32.1 (no 1.x is published). `.accounts()`
+  is strict there; use `.accountsPartial()` when passing accounts the resolver
+  could derive.
 - All state accounts are PDAs with seeds in `constants.rs`
 - Vault signs CPI transfers using PDA seeds + bump
 - Policy states: Active(0), ClaimPending(1), ClaimPaid(2), Expired(3), Cancelled(4)

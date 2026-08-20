@@ -190,7 +190,7 @@ pub fn verify_and_payout_v2_handler(
     let signer_seeds = &[&seeds[..]];
 
     let transfer_ctx = CpiContext::new_with_signer(
-        ctx.accounts.token_program.to_account_info(),
+        ctx.accounts.token_program.key(),
         Transfer {
             from: ctx.accounts.vault_token_account.to_account_info(),
             to: ctx.accounts.holder_token_account.to_account_info(),
@@ -302,31 +302,31 @@ pub struct VerifyAndPayoutV2<'info> {
         bump = config.bump,
         constraint = config.oracle_authority == oracle.key() @ CovanticError::UnauthorizedOracle,
     )]
-    pub config: Account<'info, ProtocolConfig>,
+    pub config: Box<Account<'info, ProtocolConfig>>,
 
     #[account(
         mut,
         seeds = [POLICY_SEED, policy.holder.as_ref(), &policy.policy_id.to_le_bytes()],
         bump = policy.bump,
     )]
-    pub policy: Account<'info, InsurancePolicy>,
+    pub policy: Box<Account<'info, InsurancePolicy>>,
 
     #[account(mut, seeds = [VAULT_SEED], bump = vault.bump)]
-    pub vault: Account<'info, InsuranceVault>,
+    pub vault: Box<Account<'info, InsuranceVault>>,
 
     #[account(
         mut,
         constraint = vault_token_account.owner == vault.key() @ CovanticError::InvalidTokenAccount,
         constraint = vault_token_account.mint == config.usdc_mint @ CovanticError::InvalidTokenAccount,
     )]
-    pub vault_token_account: Account<'info, TokenAccount>,
+    pub vault_token_account: Box<Account<'info, TokenAccount>>,
 
     #[account(
         mut,
         constraint = holder_token_account.owner == policy.holder @ CovanticError::InvalidTokenAccount,
         constraint = holder_token_account.mint == config.usdc_mint @ CovanticError::InvalidTokenAccount,
     )]
-    pub holder_token_account: Account<'info, TokenAccount>,
+    pub holder_token_account: Box<Account<'info, TokenAccount>>,
 
     /// Guardian-signed price update, posted by the Pyth receiver program.
     ///
@@ -335,7 +335,7 @@ pub struct VerifyAndPayoutV2<'info> {
     /// receiver, and the receiver only writes one after checking the Wormhole
     /// guardians' signatures. A fabricated account fails deserialization
     /// before any of the logic above runs.
-    pub price_update: Account<'info, PriceUpdateV2>,
+    pub price_update: Box<Account<'info, PriceUpdateV2>>,
 
     /// Immutable record of what was proven. `init` rather than
     /// `init_if_needed`: one policy, one proven payout, and a second attempt
@@ -347,7 +347,7 @@ pub struct VerifyAndPayoutV2<'info> {
         seeds = [CLAIM_EVIDENCE_SEED, policy.key().as_ref()],
         bump,
     )]
-    pub evidence_record: Account<'info, ClaimEvidenceRecord>,
+    pub evidence_record: Box<Account<'info, ClaimEvidenceRecord>>,
 
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,

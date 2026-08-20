@@ -214,6 +214,35 @@ export const monitoringEvents = pgTable(
   ],
 );
 
+// Agent Balance Snapshots — the "before" every drain ratio is measured against
+//
+// Written by the checkpoint crank, one row per (agent, mint) per tick. Two
+// consumers read it and they must never disagree about what "before" meant:
+// the off-chain exploit screen, and the on-chain `PolicyBalanceCheckpoint`
+// the proof instruction bounds a payout by. One writer, one meaning.
+export const agentBalanceSnapshots = pgTable(
+  'agent_balance_snapshots',
+  {
+    id: uuid('id')
+      .default(sql`gen_random_uuid()`)
+      .primaryKey(),
+    agentAddress: varchar('agent_address', { length: 44 }).notNull(),
+    /** Canonical mint, or 'SOL' for native. */
+    mint: varchar('mint', { length: 44 }).notNull(),
+    amountRaw: bigint('amount_raw', { mode: 'number' }).notNull(),
+    decimals: integer('decimals').notNull(),
+    /** Slot the balance was read at — what makes a snapshot comparable to a
+     *  transaction rather than merely near it in wall-clock time. */
+    slot: bigint('slot', { mode: 'number' }).notNull(),
+    blockTime: timestamp('block_time', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_balance_snapshot_agent_time').on(table.agentAddress, table.blockTime),
+    index('idx_balance_snapshot_agent_mint').on(table.agentAddress, table.mint, table.blockTime),
+  ],
+);
+
 // Vault Snapshots — periodic state snapshots
 export const vaultSnapshots = pgTable(
   'vault_snapshots',
