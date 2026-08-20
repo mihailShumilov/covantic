@@ -116,9 +116,32 @@ const envSchema = z.object({
   // this secret.
   ALERT_HMAC_SECRET: z.string().min(32),
 
+  /**
+   * Bearer token for real Helius deliveries, separate from the HMAC key.
+   *
+   * Helius sends this header verbatim on every delivery, so it is exposed to
+   * anything that logs headers. Sharing it with `HELIUS_WEBHOOK_SECRET` meant
+   * seeing one leaked both. Optional: falls back to the shared secret, so an
+   * existing deployment keeps working until it is set.
+   */
+  HELIUS_WEBHOOK_BEARER: z.string().min(32).optional(),
+
+  /**
+   * The covered mint. Optional so a bare dev boot works, but never silently
+   * discarded: the previous preprocessor mapped *any* value under 32 chars to
+   * `undefined`, so the placeholder shipped in `.env.example`
+   * (`YOUR_DEVNET_USDC_MINT`, 21 chars) booted clean and disabled the entire
+   * agent-error auto-claim path — `screenForMandateBreach` needs a covered
+   * mint to find the covered leg, and without one no mandate breach can ever
+   * open a claim. A wrong value now fails validation instead.
+   */
   USDC_MINT: z.preprocess(
-    (v) => (typeof v === 'string' && v.length >= 32 ? v : undefined),
-    z.string().min(32).optional(),
+    (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+    z
+      .string()
+      .min(32, 'USDC_MINT must be a base58 mint address — the .env.example placeholder is not one')
+      .max(44)
+      .optional(),
   ),
 
   TRUST_PROXY: z
@@ -140,5 +163,20 @@ export function loadConfig(): AppConfig {
     process.exit(1);
   }
   cachedConfig = result.data;
+
+  // Absence is legal but never silent. Without a covered mint the agent-error
+  // screen cannot identify the covered leg, so no mandate breach can open a
+  // claim — a whole trigger disabled with nothing in the logs to say so.
+  if (!cachedConfig.USDC_MINT) {
+    logger.error(
+      'USDC_MINT is not set: agent-error claims cannot be opened automatically. ' +
+        'Set it to the covered mint address for this cluster.',
+    );
+  }
+  if (cachedConfig.AGENT_ERROR_PROOF_ENABLED && !cachedConfig.USDC_MINT) {
+    logger.error('AGENT_ERROR_PROOF_ENABLED is on but USDC_MINT is unset — refusing to start.');
+    process.exit(1);
+  }
+
   return cachedConfig;
 }

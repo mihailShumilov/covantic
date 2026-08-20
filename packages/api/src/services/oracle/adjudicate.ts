@@ -1,3 +1,4 @@
+import { CONFIDENCE_CEILING } from '../confidence-lanes.js';
 import { lookupMint } from '@covantic/shared';
 import { FEED_IDS } from './price-sources/pyth-hermes.js';
 import type { EvidenceBundle, PriceWindow } from './types.js';
@@ -65,7 +66,7 @@ export const VOLATILITY_MULTIPLIER = 2;
  * broad, should not release funds on its own — that is what the on-chain
  * proof path is for.
  */
-export const CONFIDENCE_CEILING = 0.92;
+export { CONFIDENCE_CEILING } from '../confidence-lanes.js';
 
 /** Assumed DEX taker fee where the venue's tier is unknown. Conservative in
  *  the direction that matters: it shrinks the payable loss. */
@@ -395,7 +396,13 @@ function capToCoverage(lossRaw: number, coverageRaw: number): number {
 }
 
 function rejected(reason: string, details: Record<string, unknown>): Verdict {
-  return { outcome: 'rejected', lossAmount: 0, confidence: 0, reason, details: { reason, ...details } };
+  return {
+    outcome: 'rejected',
+    lossAmount: 0,
+    confidence: 0,
+    reason,
+    details: { reason, ...details },
+  };
 }
 
 function indeterminate(

@@ -84,6 +84,11 @@ pub fn verify_and_payout_v2_handler(
         CovanticError::PayoutExceedsCoverage
     );
 
+    // A zero payout transfers nothing but still flips the policy to
+    // `ClaimPaid` and releases the coverage — closing a live claim for free.
+    // Nothing legitimate submits one.
+    require!(payout_amount > 0, CovanticError::ZeroPayout);
+
     let lock_expires_at = policy
         .claim_submitted_at
         .checked_add(LOCK_ORACLE_MANIPULATION)
@@ -256,7 +261,12 @@ pub fn verify_and_payout_v2_handler(
     record.subject_decimals = evidence.subject_decimals;
     record.price_publish_time = price.publish_time;
     record.trigger_block_time = evidence.trigger_block_time;
-    record.deviation_bps = deviation_bps as u32;
+    // Saturate rather than truncate. `as u32` wraps, so a deviation past
+    // u32::MAX would be recorded as a small number — corrupting the one
+    // artefact this instruction exists to leave behind. Clamping records
+    // "at least this large", which is true; wrapping records a falsehood.
+    let deviation_bps_u32 = u32::try_from(deviation_bps).unwrap_or(u32::MAX);
+    record.deviation_bps = deviation_bps_u32;
     record.max_provable_loss = max_provable_loss;
     record.payout_amount = payout_amount;
     record.bundle_hash = evidence.bundle_hash;
@@ -268,7 +278,7 @@ pub fn verify_and_payout_v2_handler(
         feed_id: evidence.feed_id,
         reference_price: reference,
         executed_price: evidence.executed_price,
-        deviation_bps: deviation_bps as u32,
+        deviation_bps: deviation_bps_u32,
         max_provable_loss,
         payout_amount,
         bundle_hash: evidence.bundle_hash,

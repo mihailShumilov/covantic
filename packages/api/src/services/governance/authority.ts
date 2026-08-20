@@ -421,15 +421,21 @@ function resolveSigner(
   const direct = str(info.authority) ?? str(info.owner) ?? str(info.freezeAuthority);
   if (direct) return direct;
 
+  // The multisig account is the authority of record — `signers` only records
+  // which members signed on its behalf. Returning null here read as "not the
+  // agent" downstream, so an agent that was itself a multisig had its own
+  // authority changes scored as a takeover. Same defect as the exploit path's
+  // `resolveAuthority`; fixed the same way.
   const multisig = str(info.multisigAuthority) ?? str(info.multisigOwner);
   const signers = Array.isArray(info.signers) ? info.signers.map((s) => String(s)) : [];
   if (multisig) {
-    if (signers.length === 1) return signers[0]!;
-    unevaluated.push({
-      check: 'multisig_authority',
-      reason: `Multisig ${multisig} signed with ${signers.length} signers; no single authority to attribute.`,
-    });
-    return null;
+    if (signers.length > 1) {
+      unevaluated.push({
+        check: 'multisig_signer_attribution',
+        reason: `Multisig ${multisig} signed with ${signers.length} signers; individual signer not attributed.`,
+      });
+    }
+    return multisig;
   }
 
   unevaluated.push({

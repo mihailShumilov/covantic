@@ -1,0 +1,20 @@
+{
+  // Typecheck-only view of the package.
+  //
+  // `tsconfig.json` is the *build* config: it sets `rootDir: ./src` so the
+  // emitted layout is correct, which means `tests/` and `scripts/` are outside
+  // its `include` and were never typechecked at all. vitest strips types with
+  // esbuild without checking them, so ~9.5k lines of test code had no
+  // strict-mode verification. This config checks everything and emits nothing.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["src/**/*", "tests/**/*"],
+  // `scripts/` and the network-gated e2e suite carry pre-existing type
+  // looseness that predates this config and is not what it was added to catch.
+  // Bringing them in is worth doing; doing it here would mean shipping a gate
+  // that fails on day one, which is the same as not having one.
+  "exclude": ["scripts/**/*", "tests/e2e.test.ts", "dist"]
+}

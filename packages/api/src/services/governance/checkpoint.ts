@@ -31,10 +31,7 @@ export class AuthorityCheckpointWriter {
   }
 
   deriveConfigPda(): PublicKey {
-    return PublicKey.findProgramAddressSync(
-      [Buffer.from(PDA_SEEDS.CONFIG)],
-      this.ctx.programId,
-    )[0];
+    return PublicKey.findProgramAddressSync([Buffer.from(PDA_SEEDS.CONFIG)], this.ctx.programId)[0];
   }
 
   deriveAuthorityCheckpointPda(policyPda: PublicKey): PublicKey {
@@ -92,8 +89,7 @@ export class AuthorityCheckpointWriter {
         () => { accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> } }
       >;
 
-      return await methods
-        .checkpointAuthority!()
+      return await methods.checkpointAuthority!()
         .accounts({
           cranker: signer.publicKey,
           config,
@@ -157,6 +153,7 @@ export class AuthorityCheckpointWriter {
 
     return {
       authorities: [...new Set([...named, ...extras])].sort(),
+      extraAuthorities: [...new Set(extras)].sort(),
       tokenOwner: raw.tokenOwner.toBase58(),
       expectedDelegate: raw.expectedDelegate?.toBase58() ?? null,
       expectedCloseAuthority: raw.expectedCloseAuthority?.toBase58() ?? null,

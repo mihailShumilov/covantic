@@ -21,7 +21,7 @@ export interface ProvenGovernancePayoutRequest {
 /**
  * Settle a governance claim on the path the chain can check.
  *
- * The shortest of the three posters, and that is the point. It carries a
+ * The shortest of the four posters, and that is the point. It carries a
  * payout amount and a bundle hash, and nothing else — the program reads the
  * holder's own matured declaration, the authority checkpoint it wrote
  * earlier, and the covered account's current state, then decides for itself
@@ -64,15 +64,17 @@ export class GovernanceProofPoster {
 
     const methods = this.ctx.program.methods as unknown as Record<
       string,
-      (
-        ...args: unknown[]
-      ) => { accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> } }
+      (...args: unknown[]) => {
+        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+      }
     >;
 
-    const signature = await methods
-      .verifyAndPayoutGovernance!(new BN(request.payoutAmount.toString()), {
+    const signature = await methods.verifyAndPayoutGovernance!(
+      new BN(request.payoutAmount.toString()),
+      {
         bundleHash: Array.from(Buffer.from(request.bundleHash, 'hex')),
-      })
+      },
+    )
       .accounts({
         oracle: oracleKeypair.publicKey,
         config,

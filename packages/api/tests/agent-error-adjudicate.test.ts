@@ -187,6 +187,7 @@ describe('adjudicateAgentError — the complement of the exploit verdict', () =>
               account: OTHER_ATA,
               authority: ATTACKER,
               authorityIsAgent: false,
+              authorityResolved: true,
               viaCpi: false,
             },
           ],
@@ -315,9 +316,7 @@ describe('adjudicateAgentError — the abuse the declaration cannot close alone'
   });
 
   it('leaves an ordinary cap alone', () => {
-    const verdict = adjudicateAgentError(
-      bundle({ outflowBaseline: history(100 * 10 ** 6) }),
-    );
+    const verdict = adjudicateAgentError(bundle({ outflowBaseline: history(100 * 10 ** 6) }));
 
     expect(verdict.outcome).toBe('confirmed');
   });

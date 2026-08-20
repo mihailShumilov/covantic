@@ -12,7 +12,7 @@ import { TriggerType } from '@covantic/shared';
  *
  * The lanes below are the missing comparison. The important property is not
  * where the boundaries sit but that the top lane is **unreachable by
- * off-chain analysis alone**: both pure adjudicators cap confidence at 0.92,
+ * off-chain analysis alone**: all four pure adjudicators cap confidence at 0.92,
  * below {@link AUTO_PAY_CONFIDENCE}, so an automatic payout always requires
  * the chain's own measurement — a guardian-signed price it verified, or a
  * balance drop it measured. That is a structural guarantee rather than a
@@ -28,6 +28,19 @@ import { TriggerType } from '@covantic/shared';
  * rather than an accident of two numbers that happen not to meet.
  */
 export const AUTO_PAY_CONFIDENCE = 0.95;
+
+/**
+ * The ceiling every pure adjudicator caps at.
+ *
+ * Lives here, beside {@link AUTO_PAY_CONFIDENCE}, because the guarantee is the
+ * *gap between the two numbers* — off-chain analysis, however well
+ * corroborated, cannot reach the pay lane on its own. Four private copies of
+ * this constant meant four chances to raise one quietly, and the test named
+ * after the property only ever checked two of them.
+ *
+ * Relaxing it now means editing a file whose whole purpose is to be audited.
+ */
+export const CONFIDENCE_CEILING = 0.92;
 
 /** Below this, a confirmed verdict still goes to a human. */
 export const REVIEW_CONFIDENCE = 0.75;

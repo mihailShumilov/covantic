@@ -6,6 +6,9 @@ import {
   type PriceWindow,
 } from '../types.js';
 
+/** Outbound timeout — see the note in `cex.ts`. */
+const HTTP_TIMEOUT_MS = 5_000;
+
 /** Pyth Hermes REST endpoint (free, no API key required). */
 const PYTH_HERMES_URL = 'https://hermes.pyth.network';
 
@@ -126,12 +129,11 @@ export class PythHermesSource implements PriceSource {
     if (cached !== undefined) return cached;
 
     const url =
-      `${this.baseUrl}/v2/updates/price/${ts}` +
-      `?ids[]=${feedId}&parsed=true&binary=true`;
+      `${this.baseUrl}/v2/updates/price/${ts}` + `?ids[]=${feedId}&parsed=true&binary=true`;
 
     let res: Response;
     try {
-      res = await fetch(url);
+      res = await fetch(url, { signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
     } catch (error) {
       throw new PriceSourceUnavailableError('pyth', `Hermes fetch failed: ${String(error)}`, {
         retryAfterSec: 30,
@@ -161,11 +163,33 @@ export class PythHermesSource implements PriceSource {
       });
     }
 
-    const entry = data.parsed?.find((p) => p.id?.toLowerCase() === feedId) ?? data.parsed?.[0];
+    // Match the requested feed only. The previous `?? data.parsed?.[0]`
+    // fallback accepted whatever Hermes happened to return and then stamped it
+    // with the feed id we asked for — so a mismatched response became a
+    // confident price for the wrong asset, with nothing downstream able to
+    // tell. A response that does not contain the feed is an unusable response.
+    const entry = data.parsed?.find((p) => p.id?.toLowerCase() === feedId);
+    if (data.parsed?.length && !entry) {
+      throw new PriceSourceUnavailableError(
+        'pyth',
+        `Hermes returned ${data.parsed.length} feed(s), none matching ${feedId}`,
+        { retryAfterSec: 30 },
+      );
+    }
     const priceData = entry?.price;
     if (!priceData) {
       this.remember(cacheKey, null);
       return null;
+    }
+
+    // `publish_time` drives both staleness gates. Undefined makes the skew
+    // NaN, and `NaN > tolerance` is false, so both gates would silently pass.
+    if (typeof priceData.publish_time !== 'number' || !Number.isFinite(priceData.publish_time)) {
+      throw new PriceSourceUnavailableError(
+        'pyth',
+        `Hermes entry for ${feedId} carried no usable publish_time`,
+        { retryAfterSec: 30 },
+      );
     }
 
     const scale = Math.pow(10, priceData.expo);
@@ -249,7 +273,7 @@ export class PythHermesSource implements PriceSource {
 
     const url = `${this.baseUrl}/v2/updates/price/latest?ids[]=${feedId}&parsed=true`;
     try {
-      const res = await fetch(url);
+      const res = await fetch(url, { signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
       if (!res.ok) {
         logger.error({ feedKey, status: res.status }, 'Pyth Hermes API error');
         return null;

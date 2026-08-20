@@ -79,12 +79,19 @@ pub fn declare_governance_baseline_handler(
     let baseline = &mut ctx.accounts.baseline;
     let is_new = baseline.policy_id == 0 && baseline.effective_at == 0;
 
+    // A first declaration has no predecessor, and must say so. Seeding `prev_*`
+    // with this declaration's own values and `now` is the natural thing to
+    // write and exactly wrong: any `prev`-based fallback would then accept the
+    // declaration as matured the instant it was written, silently disabling
+    // the whole maturity delay. `declare_agent_mandate` gets this right; this
+    // instruction did not, and only escaped consequence because nothing reads
+    // these fields yet.
     let prev_token_owner = if is_new {
-        manifest.token_owner
+        Pubkey::default()
     } else {
         baseline.token_owner
     };
-    let prev_effective_at = if is_new { now } else { baseline.effective_at };
+    let prev_effective_at = if is_new { 0 } else { baseline.effective_at };
 
     baseline.policy_id = policy.policy_id;
     baseline.holder = policy.holder;

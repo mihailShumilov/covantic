@@ -72,10 +72,7 @@ function hmacSignatureMatches(
  * bodies. Mitigations: secret is 64+ chars, TLS-only ingress, secret
  * rotatable by re-running sync-helius-webhook.
  */
-function staticTokenMatches(
-  authHeader: string | undefined,
-  secret: string,
-): boolean {
+function staticTokenMatches(authHeader: string | undefined, secret: string): boolean {
   if (!authHeader) return false;
   const expected = `Bearer ${secret}`;
   const providedBuf = Buffer.from(authHeader);
@@ -102,6 +99,19 @@ function buildMandateReader(config: FastifyInstance['config']): MandateReader | 
 }
 
 export async function monitoringRoutes(app: FastifyInstance) {
+  // Capture the exact bytes before JSON parsing, so the HMAC is computed over
+  // what was actually signed rather than over a re-serialisation of the parsed
+  // object. Scoped to this plugin, so the rest of the API keeps Fastify's
+  // default JSON handling.
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body: string, done) => {
+    (req as { rawBody?: string }).rawBody = body;
+    try {
+      done(null, body === '' ? {} : JSON.parse(body));
+    } catch (err) {
+      done(err as Error, undefined);
+    }
+  });
+
   // The mandate reader is optional and built lazily: a deployment with no
   // oracle keypair still monitors, it simply cannot read the declared
   // envelopes — and the screen fails open in that case rather than treating
@@ -115,11 +125,7 @@ export async function monitoringRoutes(app: FastifyInstance) {
     buildPriceOracle(),
     mandateReader
       ? (holderAddress, policyId) =>
-          mandateReader.readMandate(
-            holderAddress,
-            BigInt(policyId),
-            Math.floor(Date.now() / 1000),
-          )
+          mandateReader.readMandate(holderAddress, BigInt(policyId), Math.floor(Date.now() / 1000))
       : undefined,
     app.config.USDC_MINT,
   );
@@ -151,16 +157,26 @@ export async function monitoringRoutes(app: FastifyInstance) {
     const hmacHeader = request.headers['x-helius-hmac-signature'] as string | undefined;
     const authHeader = request.headers['authorization'] as string | undefined;
 
+    // The exact bytes that were signed, when the raw-body parser captured
+    // them. Re-serialising `request.body` produces a *different* string for
+    // the same payload — key order, whitespace, number formatting — so a
+    // signature computed by any real body-bound signer would never verify.
+    // It happened to work only because both sides re-serialised identically.
     const rawBody =
-      typeof request.body === 'string'
-        ? request.body
-        : JSON.stringify(request.body);
+      (request as { rawBody?: string }).rawBody ??
+      (typeof request.body === 'string' ? request.body : JSON.stringify(request.body));
 
     // Accept either: HMAC-of-body (preferred, used by internal callers +
     // tests) OR static bearer token (what real Helius actually sends).
+    //
+    // Two secrets, not one. Sharing them meant anyone who saw an
+    // `Authorization` header — a proxy log, an ngrok dashboard, a support
+    // ticket — also held the HMAC key. `HELIUS_WEBHOOK_BEARER` falls back to
+    // the shared secret so existing deployments keep working.
+    const bearerSecret = app.config.HELIUS_WEBHOOK_BEARER ?? secret;
     const authorized =
       hmacSignatureMatches(hmacHeader, rawBody, secret) ||
-      staticTokenMatches(authHeader, secret);
+      staticTokenMatches(authHeader, bearerSecret);
     if (!authorized) {
       return reply.status(401).send({ error: 'Unauthorized' });
     }

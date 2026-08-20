@@ -1,7 +1,8 @@
-import type { AuthorityReport } from './authority.js';
+import { CONFIDENCE_CEILING } from '../confidence-lanes.js';
+import type { AuthorityReport, TakeoverKind } from './authority.js';
 import type { GovernanceExposure } from './conjunction.js';
 import type { GovernanceSignatureReport } from './signatures.js';
-import type { GovernanceEvidenceBundle } from './types.js';
+import type { GovernanceBaselineView, GovernanceEvidenceBundle } from './types.js';
 
 /**
  * The judgement, separated from the evidence gathering.
@@ -43,7 +44,7 @@ import type { GovernanceEvidenceBundle } from './types.js';
  */
 
 /** Bump on any change that alters what this function decides. */
-export const GOVERNANCE_ADJUDICATOR_VERSION = '1.0.0';
+export const GOVERNANCE_ADJUDICATOR_VERSION = '1.1.0';
 
 export type Outcome = 'confirmed' | 'rejected' | 'indeterminate';
 
@@ -82,7 +83,7 @@ export const REVIEW_SIGNATURE_SCORE = 0.4;
  * the account (`verify_and_payout_governance`). This ceiling is what makes
  * that structural rather than a policy someone can quietly relax.
  */
-export const CONFIDENCE_CEILING = 0.92;
+export { CONFIDENCE_CEILING } from '../confidence-lanes.js';
 
 /**
  * Score a fully collected evidence bundle.
@@ -165,7 +166,14 @@ export function adjudicateGovernance(bundle: GovernanceEvidenceBundle): Governan
     ...(bundle.holderAddress ? [bundle.holderAddress] : []),
   ]);
   const controllers = controllersOf(authority);
-  const outside = controllers.filter((c) => !declared.has(c));
+  const outside = outsideDeclaredSet(authority, baseline, bundle);
+  // A control change whose new owner the RPC did not report. Everywhere else
+  // in this pipeline an unreported owner is treated as maximally suspicious
+  // (`hasForeignTakeover`, the prefilter); dropping it here silently turned a
+  // visible seizure into `no_control_change` — a rejection, which is terminal.
+  const unattributedControlChanges =
+    authority.takeovers.filter((t) => !t.newAuthority).length +
+    authority.ownerChanges.filter((c) => c.toOwner === null).length;
 
   const facts = {
     controllers,
@@ -173,6 +181,7 @@ export function adjudicateGovernance(bundle: GovernanceEvidenceBundle): Governan
     declaredSetSize: declared.size,
     takeoverKinds: authority.takeovers.map((t) => t.kind),
     ownerChanges: authority.ownerChanges.length,
+    unattributedControlChanges,
     agentWasSigner: authority.agentWasSigner,
     holderWasSigner: authority.holderWasSigner,
     manifestHash: baseline.manifestHash,
@@ -202,6 +211,19 @@ export function adjudicateGovernance(bundle: GovernanceEvidenceBundle): Governan
             'This policy declares a multisig controller, and a multisig program was invoked ' +
             'whose instructions the RPC does not decode. Whether the controller was weakened ' +
             'cannot be established here.',
+        },
+        1_800,
+      );
+    }
+
+    if (unattributedControlChanges > 0) {
+      return indeterminate(
+        'unattributed_control_change',
+        {
+          ...facts,
+          note:
+            'Control of the agent’s account changed, but the RPC did not report to whom. ' +
+            'That is a gap in what we could read, not evidence the claim is false.',
         },
         1_800,
       );
@@ -400,10 +422,88 @@ function principalSigned(authority: AuthorityReport): boolean {
   const changed = authority.takeovers.length > 0 || authority.ownerChanges.length > 0;
   if (!changed) return false;
   if (!authority.takeovers.every((t) => t.signerIsAgent || t.signerIsHolder)) return false;
-  if (authority.ownerChanges.length > 0 && !authority.agentWasSigner && !authority.holderWasSigner) {
+  if (
+    authority.ownerChanges.length > 0 &&
+    !authority.agentWasSigner &&
+    !authority.holderWasSigner
+  ) {
     return false;
   }
   return true;
+}
+
+/**
+ * Which new controllers the holder's declaration does *not* account for.
+ *
+ * Role-aware on purpose. A declaration names five distinct capabilities —
+ * who owns the account, who may hold an allowance against it, who may close
+ * it, who may upgrade the program, who controls it via multisig — and
+ * flattening them into one membership test says that declaring an address for
+ * any one of them declares it for all five.
+ *
+ * That is a targeted evasion, not a theoretical one: the baseline PDA is
+ * public, so an attacker able to issue `SetAuthority(AccountOwner)` can read
+ * the declared *delegate* and name it as the new owner. Under a flat test the
+ * seizure lands inside the declared set and is `rejected` — terminal, with no
+ * human review. Keyed by kind, it lands outside and is confirmed.
+ *
+ * `extraAuthorities` are the deliberate exception: operator keys the holder
+ * declared without binding them to a role, so they are permitted for any kind.
+ */
+function permittedFor(
+  kind: TakeoverKind,
+  baseline: GovernanceBaselineView,
+  bundle: GovernanceEvidenceBundle,
+): Set<string> {
+  // Absent `extraAuthorities` means a bundle stored before this check existed.
+  // Falling back to the flat set reproduces the old verdict exactly, which is
+  // what `claim:replay` requires of historical evidence; bundles built by the
+  // current reader always carry the field (empty array included), so the
+  // role-aware check governs every new claim.
+  const roleAgnostic = baseline.extraAuthorities ?? baseline.authorities;
+  const base = [
+    bundle.agentAddress,
+    ...(bundle.holderAddress ? [bundle.holderAddress] : []),
+    ...roleAgnostic,
+  ];
+  switch (kind) {
+    case 'owner':
+    case 'freeze':
+      // A freeze is exercised by the account's own authority, so it shares the
+      // owner's set rather than having one of its own.
+      return new Set([...base, baseline.tokenOwner]);
+    case 'delegate':
+      return new Set([...base, ...(baseline.expectedDelegate ? [baseline.expectedDelegate] : [])]);
+    case 'close':
+      return new Set([
+        ...base,
+        ...(baseline.expectedCloseAuthority ? [baseline.expectedCloseAuthority] : []),
+      ]);
+    case 'upgrade':
+      return new Set([
+        ...base,
+        ...(baseline.programUpgradeAuthority ? [baseline.programUpgradeAuthority] : []),
+      ]);
+  }
+}
+
+function outsideDeclaredSet(
+  authority: AuthorityReport,
+  baseline: GovernanceBaselineView,
+  bundle: GovernanceEvidenceBundle,
+): string[] {
+  const outside: string[] = [];
+  for (const t of authority.takeovers) {
+    if (!t.newAuthority) continue;
+    if (!permittedFor(t.kind, baseline, bundle).has(t.newAuthority)) outside.push(t.newAuthority);
+  }
+  // A bare owner change carries no instruction to read a kind from; it is an
+  // ownership transfer by definition.
+  const ownerSet = permittedFor('owner', baseline, bundle);
+  for (const c of authority.ownerChanges) {
+    if (c.toOwner && !ownerSet.has(c.toOwner)) outside.push(c.toOwner);
+  }
+  return [...new Set(outside)].sort();
 }
 
 function controllersOf(authority: AuthorityReport): string[] {

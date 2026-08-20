@@ -16,13 +16,15 @@ export type {
   Agent,
 } from './types/risk.js';
 
-export type {
-  Claim,
-  SubmitClaimParams,
-  PipelineStep,
-  VerificationData,
+export type { Claim, SubmitClaimParams, PipelineStep, VerificationData } from './types/claims.js';
+export {
+  ClaimStatus,
+  VerificationStep,
+  StepStatus,
+  OPEN_CLAIM_STATUSES,
+  PARKED_CLAIM_STATUSES,
+  TRIGGER_SPECIFICITY,
 } from './types/claims.js';
-export { ClaimStatus, VerificationStep, StepStatus, OPEN_CLAIM_STATUSES } from './types/claims.js';
 
 export type { StakerPositionResponse } from './types/staking.js';
 

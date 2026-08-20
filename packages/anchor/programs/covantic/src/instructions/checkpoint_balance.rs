@@ -41,12 +41,52 @@ pub fn checkpoint_balance_handler(ctx: Context<CheckpointBalance>) -> Result<()>
     let checkpoint = &mut ctx.accounts.checkpoint;
     let is_new = checkpoint.policy_id == 0 && checkpoint.slot == 0;
 
-    let prev_amount = if is_new { covered.amount } else { checkpoint.amount };
-    let prev_slot = if is_new { clock.slot } else { checkpoint.slot };
-    let prev_unix_timestamp = if is_new {
-        clock.unix_timestamp
+    // `prev_*` is a pre-drop watermark, not simply "the previous reading".
+    //
+    // Shifting history by one slot on every tick looked right and was not: the
+    // crank runs every couple of minutes, a claim is only filed once off-chain
+    // verification finishes, so at least one tick reliably lands *between* the
+    // incident and the claim. That tick's post-drain reading became
+    // `checkpoint.amount`, the next one pushed the last pre-incident reading
+    // out of `prev_amount` entirely, and `verify_and_payout_exploit` was left
+    // subtracting a drained balance from a drained balance — `observed_drop`
+    // of zero on a real theft, reverting, recorded `failed`.
+    //
+    // So a drop pins the reading that preceded it, and later ticks do not
+    // dislodge the pin until it ages past the window a payout could use it in
+    // anyway. Everything here is still a balance the program read for itself;
+    // nothing is accepted from the caller.
+    let dropped = !is_new && covered.amount < checkpoint.amount;
+    let pin_held = !is_new && checkpoint.prev_amount > checkpoint.amount;
+    let pin_expired = !is_new
+        && clock
+            .unix_timestamp
+            .saturating_sub(checkpoint.prev_unix_timestamp)
+            > MAX_CHECKPOINT_AGE;
+
+    let (prev_amount, prev_slot, prev_unix_timestamp) = if is_new {
+        (covered.amount, clock.slot, clock.unix_timestamp)
+    } else if dropped {
+        // Pin the reading immediately before the drop.
+        (
+            checkpoint.amount,
+            checkpoint.slot,
+            checkpoint.unix_timestamp,
+        )
+    } else if pin_held && !pin_expired {
+        // Hold the existing pin rather than overwriting it with a reading
+        // taken after the money already left.
+        (
+            checkpoint.prev_amount,
+            checkpoint.prev_slot,
+            checkpoint.prev_unix_timestamp,
+        )
     } else {
-        checkpoint.unix_timestamp
+        (
+            checkpoint.amount,
+            checkpoint.slot,
+            checkpoint.unix_timestamp,
+        )
     };
 
     checkpoint.policy_id = policy.policy_id;

@@ -24,12 +24,6 @@ pub struct GovernancePayoutEvidence {
     pub bundle_hash: [u8; 32],
 }
 
-/// How control left the declared set. Recorded so a reader does not have to
-/// re-derive which check the payout rested on.
-pub const DEPARTURE_OWNER: u8 = 1;
-pub const DEPARTURE_FROZEN: u8 = 2;
-pub const DEPARTURE_DELEGATE: u8 = 3;
-pub const DEPARTURE_CLOSE_AUTHORITY: u8 = 4;
 
 /// Verify a governance claim against a departure the program observes, and
 /// execute payout.
@@ -104,6 +98,11 @@ pub fn verify_and_payout_governance_handler(
         payout_amount <= policy.coverage_amount,
         CovanticError::PayoutExceedsCoverage
     );
+
+    // A zero payout transfers nothing but still flips the policy to
+    // `ClaimPaid` and releases the coverage — closing a live claim for free.
+    // Nothing legitimate submits one.
+    require!(payout_amount > 0, CovanticError::ZeroPayout);
 
     let lock_expires_at = policy
         .claim_submitted_at
@@ -365,15 +364,19 @@ fn classify_departure(
     observed_close_authority: Option<Pubkey>,
     checkpoint: &PolicyAuthorityCheckpoint,
 ) -> Result<(u8, Pubkey)> {
-    let permitted = |candidate: &Pubkey| -> bool {
+    // Role-keyed: a key the holder declared as a *delegate* is not thereby
+    // permitted to become the account's *owner*. Asking the flat question let
+    // an attacker read this public account and name the declared delegate as
+    // the new owner, landing a real seizure inside the declared set.
+    let permitted = |candidate: &Pubkey, role: u8| -> bool {
         candidate == &policy.holder
             || candidate == &policy.agent_address
-            || baseline.permits(candidate)
+            || baseline.permits_role(candidate, role)
     };
 
     // Ordered by how completely each one removes the agent's control. An
     // owner change is total; a delegate is partial and might be routine.
-    if !permitted(&observed_owner) {
+    if !permitted(&observed_owner, DEPARTURE_OWNER) {
         return Ok((DEPARTURE_OWNER, observed_owner));
     }
 
@@ -385,13 +388,13 @@ fn classify_departure(
     }
 
     if let Some(close_authority) = observed_close_authority {
-        if !permitted(&close_authority) {
+        if !permitted(&close_authority, DEPARTURE_CLOSE_AUTHORITY) {
             return Ok((DEPARTURE_CLOSE_AUTHORITY, close_authority));
         }
     }
 
     if let Some(delegate) = observed_delegate {
-        if !permitted(&delegate) {
+        if !permitted(&delegate, DEPARTURE_DELEGATE) {
             return Ok((DEPARTURE_DELEGATE, delegate));
         }
     }

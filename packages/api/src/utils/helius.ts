@@ -1,5 +1,9 @@
 import { logger } from './logger.js';
 
+/** Outbound timeout. Undici defaults to 300s, which is long enough for a
+ *  single stalled request to hold up an entire watcher tick. */
+const HTTP_TIMEOUT_MS = 10_000;
+
 /** Base58 Solana address validation — same alphabet as routes/risk.ts */
 const SOLANA_ADDRESS_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 /** Solana transaction signature: 87–88 Base58 characters */
@@ -200,7 +204,7 @@ export class HeliusClient {
     const params = new URLSearchParams({ 'api-key': this.apiKey, limit: String(limit) });
     const url = `${this.baseUrl}/addresses/${encodeURIComponent(address)}/transactions?${params}`;
 
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
     if (res.status === 404) return [];
     if (!res.ok) {
       throw new Error(`Helius getEnhancedTransactions failed: HTTP ${res.status}`);
@@ -209,12 +213,14 @@ export class HeliusClient {
   }
 
   /** Get token balances for an address. Throws on HTTP failure. */
-  async getTokenBalances(address: string): Promise<{ tokens: TokenBalance[]; nativeBalance: number }> {
+  async getTokenBalances(
+    address: string,
+  ): Promise<{ tokens: TokenBalance[]; nativeBalance: number }> {
     assertAddress(address);
     const params = new URLSearchParams({ 'api-key': this.apiKey });
     const url = `${this.baseUrl}/addresses/${encodeURIComponent(address)}/balances?${params}`;
 
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
     if (res.status === 404) return { tokens: [], nativeBalance: 0 };
     if (!res.ok) {
       throw new Error(`Helius getTokenBalances failed: HTTP ${res.status}`);
@@ -229,7 +235,7 @@ export class HeliusClient {
     const params = new URLSearchParams({ 'api-key': this.apiKey });
     const url = `${this.baseUrl}/addresses/${encodeURIComponent(address)}/info?${params}`;
 
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
     if (res.status === 404) return null;
     if (!res.ok) {
       throw new Error(`Helius getAccountInfo failed: HTTP ${res.status}`);
@@ -245,6 +251,7 @@ export class HeliusClient {
 
     try {
       const res = await fetch(url, {
+        signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // signature is validated above — safe to include in the JSON body

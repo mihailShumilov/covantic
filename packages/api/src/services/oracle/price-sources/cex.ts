@@ -6,6 +6,10 @@ import {
   type PriceSourceId,
 } from '../types.js';
 
+/** Outbound timeout. The sweep runs on a 120s tick; a source that has not
+ *  answered in 5s has already cost more than its price is worth. */
+const HTTP_TIMEOUT_MS = 5_000;
+
 /**
  * Centralised-exchange price references.
  *
@@ -70,7 +74,7 @@ async function fetchJson(
 ): Promise<unknown> {
   let res: Response;
   try {
-    res = await fetch(url, { headers });
+    res = await fetch(url, { headers, signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
   } catch (error) {
     throw new PriceSourceUnavailableError(source, `fetch failed: ${String(error)}`, {
       retryAfterSec: 30,
@@ -208,9 +212,10 @@ export class KrakenSource extends CandleSource {
   protected async load(symbol: string, bucket: number): Promise<PricePoint | null> {
     // `since` is exclusive-ish, so step back one bucket and select exactly.
     const url = `${this.baseUrl}/0/public/OHLC?pair=${symbol}&interval=1&since=${bucket - CANDLE_SEC}`;
-    const body = (await fetchJson(this.id, url)) as
-      | { error?: string[]; result?: Record<string, unknown[][]> }
-      | null;
+    const body = (await fetchJson(this.id, url)) as {
+      error?: string[];
+      result?: Record<string, unknown[][]>;
+    } | null;
     if (!body) return null;
     if (body.error?.length) {
       // Kraken reports unknown pairs as errors rather than empty results.

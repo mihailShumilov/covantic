@@ -1,6 +1,9 @@
 use anchor_lang::prelude::*;
 
-use crate::constants::MAX_GOVERNANCE_EXTRA_AUTHORITIES;
+use crate::constants::{
+    DEPARTURE_CLOSE_AUTHORITY, DEPARTURE_CONTROLLER, DEPARTURE_DELEGATE, DEPARTURE_FROZEN,
+    DEPARTURE_OWNER, DEPARTURE_UPGRADE_AUTHORITY, MAX_GOVERNANCE_EXTRA_AUTHORITIES,
+};
 
 /// The authority set the holder declares as legitimate for their agent.
 ///
@@ -90,26 +93,36 @@ impl GovernanceBaseline {
         + 8                    // prev_effective_at
         + 1; // bump
 
-    /// Is `candidate` one of the addresses the holder declared?
+    /// Is `candidate` permitted to hold `role`?
+    ///
+    /// Keyed by role on purpose. The declaration names five distinct
+    /// capabilities, and asking only "does this address appear anywhere in the
+    /// declaration?" says that declaring an address for any one of them
+    /// declares it for all five.
+    ///
+    /// That is exploitable, not merely imprecise: this account is public, so
+    /// an attacker who can issue `SetAuthority(AccountOwner)` reads the
+    /// declared *delegate* and names it as the new *owner*. Under a flat test
+    /// the seizure lands inside the declared set and `classify_departure`
+    /// finds no departure to settle.
+    ///
+    /// `extra_authorities` are the deliberate exception — operator keys the
+    /// holder declared without binding them to a role, so they satisfy any.
     ///
     /// The agent and the holder are *not* folded in here. Callers add them
     /// explicitly, because the two questions — "is this declared?" and "is
     /// this still the family?" — produce different rejection reasons and
     /// collapsing them would lose that.
-    pub fn permits(&self, candidate: &Pubkey) -> bool {
-        if candidate == &self.token_owner {
-            return true;
-        }
-        if self.expected_delegate == Some(*candidate) {
-            return true;
-        }
-        if self.expected_close_authority == Some(*candidate) {
-            return true;
-        }
-        if self.program_upgrade_authority == Some(*candidate) {
-            return true;
-        }
-        if self.controller == Some(*candidate) {
+    pub fn permits_role(&self, candidate: &Pubkey, role: u8) -> bool {
+        let named_match = match role {
+            DEPARTURE_OWNER | DEPARTURE_FROZEN => candidate == &self.token_owner,
+            DEPARTURE_DELEGATE => self.expected_delegate == Some(*candidate),
+            DEPARTURE_CLOSE_AUTHORITY => self.expected_close_authority == Some(*candidate),
+            DEPARTURE_UPGRADE_AUTHORITY => self.program_upgrade_authority == Some(*candidate),
+            DEPARTURE_CONTROLLER => self.controller == Some(*candidate),
+            _ => false,
+        };
+        if named_match {
             return true;
         }
         let count = (self.extra_authority_count as usize).min(MAX_GOVERNANCE_EXTRA_AUTHORITIES);

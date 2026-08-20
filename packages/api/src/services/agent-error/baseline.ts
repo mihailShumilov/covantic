@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, lte } from 'drizzle-orm';
+import { and, asc, eq, gte, lte, ne } from 'drizzle-orm';
 import type { Database } from '../../config/database.js';
 import { agentOutflowEvents } from '../../db/schema.js';
 import { logger } from '../../utils/logger.js';
@@ -60,10 +60,7 @@ export interface OutflowObservation {
  * the picture but must never be able to stop detection, which is the half of
  * the pipeline that fails open.
  */
-export async function recordOutflow(
-  db: Database,
-  observation: OutflowObservation,
-): Promise<void> {
+export async function recordOutflow(db: Database, observation: OutflowObservation): Promise<void> {
   if (!(observation.amountRaw > 0)) return;
   try {
     await db.insert(agentOutflowEvents).values(observation).onConflictDoNothing();
@@ -93,6 +90,16 @@ export async function loadOutflowBaseline(
   mint: string,
   at: Date,
   windowSeconds: number,
+  /**
+   * The transaction being judged, excluded from its own history.
+   *
+   * `recordOutflows` writes the trigger's row before the claim-keeper reads
+   * this back, so without the exclusion the caller's own movement is already
+   * inside the window sum — and the verifier then adds it a second time.
+   * Doubling any transfer over half the declared cap manufactured a
+   * `window_outflow` breach out of an entirely compliant payment.
+   */
+  excludeTxSignature?: string,
 ): Promise<OutflowBaselineView | null> {
   const historyFrom = new Date(at.getTime() - DEFAULT_OUTFLOW_WINDOW_SEC * 1000);
   const rows = await db
@@ -107,6 +114,7 @@ export async function loadOutflowBaseline(
         eq(agentOutflowEvents.mint, mint),
         gte(agentOutflowEvents.blockTime, historyFrom),
         lte(agentOutflowEvents.blockTime, at),
+        ...(excludeTxSignature ? [ne(agentOutflowEvents.txSignature, excludeTxSignature)] : []),
       ),
     )
     .orderBy(asc(agentOutflowEvents.blockTime));
@@ -138,9 +146,7 @@ export async function loadOutflowBaseline(
     // Too few observations is the same kind of problem as too old: the
     // distribution does not describe anything yet, and saying so is more
     // useful than reporting a p95 computed from two payments.
-    stale:
-      rows.length < MIN_OUTFLOW_OBSERVATIONS ||
-      atSec - latest > OUTFLOW_BASELINE_MAX_AGE_SEC,
+    stale: rows.length < MIN_OUTFLOW_OBSERVATIONS || atSec - latest > OUTFLOW_BASELINE_MAX_AGE_SEC,
   };
 }
 

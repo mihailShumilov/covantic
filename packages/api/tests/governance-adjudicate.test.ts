@@ -168,9 +168,17 @@ describe('governance adjudicator — confirms', () => {
       bundle({
         exposure: exposure({ confUsd: 0, exposureRatio: 0.99 }),
         signatures: signatures({ score: 1.5 }),
-        authority: authority({ ownerChanges: [
-          { account: AGENT_USDC_ATA, mint: USDC, fromOwner: AGENT, toOwner: ATTACKER, amountRaw: 50_000e6 },
-        ] }),
+        authority: authority({
+          ownerChanges: [
+            {
+              account: AGENT_USDC_ATA,
+              mint: USDC,
+              fromOwner: AGENT,
+              toOwner: ATTACKER,
+              amountRaw: 50_000e6,
+            },
+          ],
+        }),
       }),
     );
 
@@ -192,6 +200,53 @@ describe('governance adjudicator — rejects only on positive facts', () => {
       bundle({
         authority: authority({
           takeovers: [takeover({ newAuthority: OPERATOR, signer: HOLDER, signerIsHolder: true })],
+        }),
+      }),
+    );
+
+    expect(verdict.outcome).toBe('rejected');
+    expect(verdict.reason).toBe('authority_within_baseline');
+  });
+
+  it('does not let a declared delegate become the account owner', () => {
+    // The baseline PDA is public. Flattening the five declared roles into one
+    // membership set meant an attacker could read the declared *delegate* and
+    // name it as the new *owner* — landing the seizure inside the declared set
+    // and getting it rejected, which is terminal and never seen by a human.
+    const verdict = adjudicateGovernance(
+      bundle({
+        baseline: baseline({
+          authorities: [AGENT, HOLDER, OPERATOR],
+          extraAuthorities: [],
+          expectedDelegate: OPERATOR,
+        }),
+        authority: authority({
+          takeovers: [takeover({ kind: 'owner', newAuthority: OPERATOR })],
+        }),
+      }),
+    );
+
+    expect(verdict.outcome).not.toBe('rejected');
+    expect(verdict.details.outsideDeclaredSet).toEqual([OPERATOR]);
+  });
+
+  it('still permits a declared delegate to hold a delegate allowance', () => {
+    const verdict = adjudicateGovernance(
+      bundle({
+        baseline: baseline({
+          authorities: [AGENT, HOLDER, OPERATOR],
+          extraAuthorities: [],
+          expectedDelegate: OPERATOR,
+        }),
+        authority: authority({
+          takeovers: [
+            takeover({
+              kind: 'delegate',
+              newAuthority: OPERATOR,
+              signer: HOLDER,
+              signerIsHolder: true,
+            }),
+          ],
         }),
       }),
     );
@@ -284,9 +339,7 @@ describe('governance adjudicator — escalates rather than guessing', () => {
   });
 
   it('escalates a loss it cannot place inside the window', () => {
-    const verdict = adjudicateGovernance(
-      bundle({ exposure: exposure({ withinWindow: false }) }),
-    );
+    const verdict = adjudicateGovernance(bundle({ exposure: exposure({ withinWindow: false }) }));
 
     expect(verdict.outcome).toBe('indeterminate');
     expect(verdict.reason).toBe('conjunction_outside_window');

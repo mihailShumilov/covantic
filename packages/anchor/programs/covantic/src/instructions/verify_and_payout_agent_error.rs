@@ -107,6 +107,11 @@ pub fn verify_and_payout_agent_error_handler(
         CovanticError::PayoutExceedsCoverage
     );
 
+    // A zero payout transfers nothing but still flips the policy to
+    // `ClaimPaid` and releases the coverage — closing a live claim for free.
+    // Nothing legitimate submits one.
+    require!(payout_amount > 0, CovanticError::ZeroPayout);
+
     let lock_expires_at = policy
         .claim_submitted_at
         .checked_add(LOCK_AGENT_ERROR)
@@ -142,8 +147,24 @@ pub fn verify_and_payout_agent_error_handler(
         CovanticError::InvalidCoveredAccount
     );
 
+    // Two reasons to reach past the current reading for the baseline.
+    //
+    // The original one: the checkpoint was taken after the claim was filed, so
+    // it cannot describe the state the claim is about.
+    //
+    // The one that was missing: `checkpoint_balance` pins the reading that
+    // preceded a drop into `prev_*`, and that pin is precisely the
+    // pre-incident balance this instruction needs. A tick between the incident
+    // and the claim leaves a post-drain figure in `checkpoint.amount` with a
+    // timestamp that still predates the claim — so the first rule alone chose
+    // it, subtracted it from itself, and found a drop of zero on a real theft.
+    // Prefer the pin whenever it is higher and it, too, predates the claim.
+    let pin_usable = checkpoint.prev_unix_timestamp > 0
+        && checkpoint.prev_unix_timestamp <= policy.claim_submitted_at
+        && checkpoint.prev_amount > checkpoint.amount;
+
     let (baseline_amount, baseline_slot, baseline_time) =
-        if checkpoint.unix_timestamp <= policy.claim_submitted_at {
+        if checkpoint.unix_timestamp <= policy.claim_submitted_at && !pin_usable {
             (checkpoint.amount, checkpoint.slot, checkpoint.unix_timestamp)
         } else {
             (

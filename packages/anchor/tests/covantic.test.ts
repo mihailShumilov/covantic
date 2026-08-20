@@ -33,8 +33,8 @@ import { Clock, startAnchor, type ProgramTestContext, type BanksClient } from 's
 
 const IDL_PATH_EAGER = resolve(__dirname, '../target/idl/covantic.json');
 const _PROGRAM_ID_FROM_IDL: string = existsSync(IDL_PATH_EAGER)
-  ? (JSON.parse(readFileSync(IDL_PATH_EAGER, 'utf-8')) as { address?: string })
-      .address ?? '52KrSMg3rsbtRw3FchxJ9jRwRzQmWcDzg1AiiHHHXz1D'
+  ? ((JSON.parse(readFileSync(IDL_PATH_EAGER, 'utf-8')) as { address?: string }).address ??
+    '52KrSMg3rsbtRw3FchxJ9jRwRzQmWcDzg1AiiHHHXz1D')
   : '52KrSMg3rsbtRw3FchxJ9jRwRzQmWcDzg1AiiHHHXz1D';
 const PROGRAM_ID = new PublicKey(_PROGRAM_ID_FROM_IDL);
 
@@ -56,8 +56,7 @@ const usdc = (amount: number) => new BN(amount * 10 ** USDC_DECIMALS);
 
 const IDL_PATH = resolve(__dirname, '../target/idl/covantic.json');
 const hasIdl = existsSync(IDL_PATH);
-const loadIdl = (): Idl =>
-  JSON.parse(readFileSync(IDL_PATH, 'utf-8')) as Idl;
+const loadIdl = (): Idl => JSON.parse(readFileSync(IDL_PATH, 'utf-8')) as Idl;
 
 function u64LeBytes(value: BN): Buffer {
   const buf = Buffer.alloc(8);
@@ -74,10 +73,7 @@ function policyPda(holder: PublicKey, policyId: BN): [PublicKey, number] {
 }
 
 function stakerPda(staker: PublicKey): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
-    [STAKER_SEED, staker.toBuffer()],
-    PROGRAM_ID,
-  );
+  return PublicKey.findProgramAddressSync([STAKER_SEED, staker.toBuffer()], PROGRAM_ID);
 }
 
 function checkpointPda(policy: PublicKey): [PublicKey, number] {
@@ -85,7 +81,10 @@ function checkpointPda(policy: PublicKey): [PublicKey, number] {
 }
 
 function governanceBaselinePda(policy: PublicKey): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync([GOVERNANCE_BASELINE_SEED, policy.toBuffer()], PROGRAM_ID);
+  return PublicKey.findProgramAddressSync(
+    [GOVERNANCE_BASELINE_SEED, policy.toBuffer()],
+    PROGRAM_ID,
+  );
 }
 
 function authorityCheckpointPda(policy: PublicKey): [PublicKey, number] {
@@ -103,10 +102,7 @@ function governanceEvidencePda(policy: PublicKey): [PublicKey, number] {
 }
 
 function exploitEvidencePda(policy: PublicKey): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
-    [EXPLOIT_EVIDENCE_SEED, policy.toBuffer()],
-    PROGRAM_ID,
-  );
+  return PublicKey.findProgramAddressSync([EXPLOIT_EVIDENCE_SEED, policy.toBuffer()], PROGRAM_ID);
 }
 
 function agentMandatePda(policy: PublicKey): [PublicKey, number] {
@@ -137,10 +133,7 @@ async function advanceSlots(context: ProgramTestContext, slots: number): Promise
   context.warpToSlot(clock.slot + BigInt(slots));
 }
 
-async function advanceClockBySeconds(
-  context: ProgramTestContext,
-  seconds: number,
-): Promise<void> {
+async function advanceClockBySeconds(context: ProgramTestContext, seconds: number): Promise<void> {
   const current = await context.banksClient.getClock();
   // Advance the slot as well as the clock. Time passing means blocks passing,
   // and without a new blockhash two identical instructions serialize to the
@@ -214,9 +207,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
     }
 
     // Create USDC mint
-    const lamports = await getMinimumBalanceForRentExemptMint(
-      provider.connection as any,
-    );
+    const lamports = await getMinimumBalanceForRentExemptMint(provider.connection as any);
     const createMintTx = new Transaction().add(
       SystemProgram.createAccount({
         fromPubkey: admin.publicKey,
@@ -244,18 +235,9 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
     // Derive ATAs
     const [vault] = vaultPda();
     vaultAta = getAssociatedTokenAddressSync(usdcMint.publicKey, vault, true);
-    holderAta = getAssociatedTokenAddressSync(
-      usdcMint.publicKey,
-      holder.publicKey,
-    );
-    stakerAta = getAssociatedTokenAddressSync(
-      usdcMint.publicKey,
-      staker.publicKey,
-    );
-    staker2Ata = getAssociatedTokenAddressSync(
-      usdcMint.publicKey,
-      staker2.publicKey,
-    );
+    holderAta = getAssociatedTokenAddressSync(usdcMint.publicKey, holder.publicKey);
+    stakerAta = getAssociatedTokenAddressSync(usdcMint.publicKey, staker.publicKey);
+    staker2Ata = getAssociatedTokenAddressSync(usdcMint.publicKey, staker2.publicKey);
 
     // Create holder + staker ATAs and mint USDC to them
     const setupTx = new Transaction().add(
@@ -301,7 +283,6 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
     setupTx.sign(admin);
     await banks.processTransaction(setupTx);
   });
-
 
   /**
    * Publish an oracle-signed risk attestation for an agent.
@@ -410,7 +391,6 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
     const vaultBefore: any = await (program.account as any).insuranceVault.fetch(vault);
     const holderBefore = await getAccount(provider.connection as any, holderAta);
 
-    await ensureAttestation(agentWallet.publicKey);
     await program.methods
       .createPolicy(usdc(100), new BN(86400), agentWallet.publicKey)
       .accountsPartial({
@@ -447,8 +427,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
         BigInt(vaultBefore.totalStakerRewards.toString()),
     ).toBe(staker70);
     expect(
-      BigInt(vaultAfter.reserveFund.toString()) -
-        BigInt(vaultBefore.reserveFund.toString()),
+      BigInt(vaultAfter.reserveFund.toString()) - BigInt(vaultBefore.reserveFund.toString()),
     ).toBe(reserve20);
     expect(
       BigInt(vaultAfter.protocolTreasury.toString()) -
@@ -513,9 +492,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
     expect(pol.payoutAmount.toString()).toBe(payout.toString());
 
     const holderAfter = await getAccount(provider.connection as any, holderAta);
-    expect(holderAfter.amount - holderBefore.amount).toBe(
-      80n * 10n ** BigInt(USDC_DECIMALS),
-    );
+    expect(holderAfter.amount - holderBefore.amount).toBe(80n * 10n ** BigInt(USDC_DECIMALS));
 
     const vaultAfter: any = await (program.account as any).insuranceVault.fetch(vault);
     expect(vaultAfter.totalClaimsPaid.toString()).toBe(payout.toString());
@@ -594,8 +571,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
 
     const vaultAfter: any = await (program.account as any).insuranceVault.fetch(vault);
     expect(
-      BigInt(vaultBefore.totalCoverage.toString()) -
-        BigInt(vaultAfter.totalCoverage.toString()),
+      BigInt(vaultBefore.totalCoverage.toString()) - BigInt(vaultAfter.totalCoverage.toString()),
     ).toBe(50n * 10n ** BigInt(USDC_DECIMALS));
   });
 
@@ -1120,11 +1096,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
         .rpc();
     }
 
-    function payout(
-      policy: PublicKey,
-      agent: PublicKey,
-      amount: BN,
-    ) {
+    function payout(policy: PublicKey, agent: PublicKey, amount: BN) {
       const [config] = configPda();
       const [vault] = vaultPda();
       return program.methods
@@ -1270,10 +1242,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
           cranker: staker.publicKey,
           config,
           policy,
-          coveredTokenAccount: getAssociatedTokenAddressSync(
-            usdcMint.publicKey,
-            agent.publicKey,
-          ),
+          coveredTokenAccount: getAssociatedTokenAddressSync(usdcMint.publicKey, agent.publicKey),
           usdcMint: usdcMint.publicKey,
           checkpoint: checkpointPda(policy)[0],
           tokenProgram: TOKEN_PROGRAM_ID,
@@ -1289,7 +1258,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       expect(cp.amount.toString()).toBe(usdc(100).toString());
     });
 
-    it('rejects a checkpoint pointed at an account that is not the agent\'s', async () => {
+    it("rejects a checkpoint pointed at an account that is not the agent's", async () => {
       // The constraint that makes the drop a measurement rather than an
       // assertion: Anchor derives the covered account from the policy.
       const { policy, agent } = await setupCoveredPolicy(usdc(100));
@@ -1327,7 +1296,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       await expect(payout(policy, agent.publicKey, usdc(90)).rpc()).rejects.toThrow();
     });
 
-    it('cannot settle a seizure — the covered account stops being the agent\'s', async () => {
+    it("cannot settle a seizure — the covered account stops being the agent's", async () => {
       // The finding that made a separate governance path necessary rather
       // than merely nicer. `associated_token::authority = policy.agent_address`
       // compiles into an owner equality check, so once `SetAuthority` lands
@@ -1491,7 +1460,10 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
     async function fileGovernanceClaim(policy: PublicKey, trigger = 4) {
       const [config] = configPda();
       await program.methods
-        .oracleSubmitClaim(trigger, Buffer.from(Array.from({ length: 64 }, (_, i) => (i + 11) % 256)))
+        .oracleSubmitClaim(
+          trigger,
+          Buffer.from(Array.from({ length: 64 }, (_, i) => (i + 11) % 256)),
+        )
         .accountsPartial({ oracle: oracle.publicKey, config, policy } as any)
         .signers([oracle])
         .rpc();
@@ -1692,7 +1664,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       await expect(govPayout(policy, agent.publicKey, usdc(100)).rpc()).rejects.toThrow();
     });
 
-    it('refuses a checkpoint pointed at an account that is not the agent\'s', async () => {
+    it("refuses a checkpoint pointed at an account that is not the agent's", async () => {
       const { policy } = await setupGovernedPolicy(usdc(100));
       const [config] = configPda();
 
@@ -1838,13 +1810,26 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       policy: PublicKey,
       overrides: Record<string, unknown> = {},
       signer: Keypair = holder,
+      agent?: PublicKey,
     ) {
+      const [config] = configPda();
+      // The covered account is derived from the policy's own agent, so read it
+      // off chain rather than assuming the suite-wide wallet: this block makes
+      // a fresh agent per case.
+      const policyAcc: any = await (program.account as any).insurancePolicy.fetch(policy);
+      const coveredAgent = agent ?? (policyAcc.agentAddress as PublicKey);
       await program.methods
         .declareAgentMandate(envelope(overrides) as any)
         .accountsPartial({
           holder: signer.publicKey,
           policy,
           mandate: agentMandatePda(policy)[0],
+          config,
+          // Read only to bound `minRetainedBalance` against a balance the
+          // program can see, so a holder cannot declare a floor they already
+          // breach and make every outflow a full-loss claim.
+          coveredTokenAccount: getAssociatedTokenAddressSync(usdcMint.publicKey, coveredAgent),
+          usdcMint: usdcMint.publicKey,
           systemProgram: SystemProgram.programId,
         } as any)
         .signers([signer])
@@ -1947,6 +1932,23 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       const { policy } = await setupMandatedPolicy(usdc(100));
 
       await expect(declareMandate(policy, { maxWindowOutflow: usdc(1) })).rejects.toThrow();
+    });
+
+    it('refuses a retention floor the agent does not already satisfy', async () => {
+      // The one declared dimension nothing bounded, and the arithmetic bound
+      // the whole trigger rests on.
+      //
+      // `floor_excess` is `min(floor - retained, outflow)`, so a floor
+      // declared far above what the account holds makes the excess equal the
+      // *entire* movement — turning "we pay the overshoot beyond what you said
+      // you would risk" into "we pay the whole loss". A holder may only
+      // declare a floor they currently meet.
+      const { policy } = await setupMandatedPolicy(usdc(100));
+
+      await expect(declareMandate(policy, { minRetainedBalance: usdc(1_000) })).rejects.toThrow();
+
+      // A floor inside the balance stays perfectly legal.
+      await declareMandate(policy, { minRetainedBalance: usdc(50) });
     });
 
     it('pays only the overshoot beyond the declared cap', async () => {

@@ -1,3 +1,5 @@
+import { CONFIDENCE_CEILING } from '../confidence-lanes.js';
+import { MIN_PROVABLE_MANDATE_BREACH } from '@covantic/shared';
 import type { AgentErrorEvidenceBundle } from './types.js';
 
 /**
@@ -47,7 +49,7 @@ import type { AgentErrorEvidenceBundle } from './types.js';
  */
 
 /** Bump on any change that alters what this function decides. */
-export const AGENT_ERROR_ADJUDICATOR_VERSION = '1.0.0';
+export const AGENT_ERROR_ADJUDICATOR_VERSION = '1.1.0';
 
 export type Outcome = 'confirmed' | 'rejected' | 'indeterminate';
 
@@ -77,7 +79,7 @@ export const MIN_PAYABLE_LOSS_RAW = 100_000;
  * requires the chain's own arithmetic — here, a drop it measured against an
  * envelope the holder signed for. Do not close the gap by raising this.
  */
-export const CONFIDENCE_CEILING = 0.92;
+export { CONFIDENCE_CEILING } from '../confidence-lanes.js';
 
 /**
  * Score a fully collected evidence bundle.
@@ -321,6 +323,29 @@ export function adjudicateAgentError(bundle: AgentErrorEvidenceBundle): AgentErr
     });
   }
 
+  // A provable breach settles through `verify_and_payout_agent_error`, which
+  // enforces its own floor — ten times this module's dust floor, because on
+  // chain the number is a cap on what a compromised oracle key can extract
+  // rather than a noise filter. Confirming between the two floors sends a
+  // transaction that reverts, and a reverted payout is recorded `failed`, not
+  // `review`: a correct claim, correctly bounded, quietly dead. Escalate
+  // instead, so a human settles what the instruction cannot.
+  if (breach.provable && lossAmount < MIN_PROVABLE_MANDATE_BREACH) {
+    return indeterminate(
+      'breach_below_provable_floor',
+      {
+        ...facts,
+        lossAmount,
+        offChainFloor: MIN_PAYABLE_LOSS_RAW,
+        onChainFloor: MIN_PROVABLE_MANDATE_BREACH,
+        note:
+          'The overshoot is real but smaller than the on-chain instruction will settle. ' +
+          'Paying it needs a reviewer rather than the proven path.',
+      },
+      0,
+    );
+  }
+
   return {
     outcome: 'confirmed',
     lossAmount,
@@ -339,7 +364,7 @@ export function adjudicateAgentError(bundle: AgentErrorEvidenceBundle): AgentErr
 /**
  * Confidence in the verdict, not in the size of the loss.
  *
- * The budget is lopsided on purpose, matching the other two adjudicators. How
+ * The budget is lopsided on purpose, matching the other three adjudicators. How
  * *much* was moved contributes almost nothing; how well established it is that
  * the movement fell outside a declaration that had matured contributes most. A
  * huge overshoot measured against a mandate half of whose dimensions could not

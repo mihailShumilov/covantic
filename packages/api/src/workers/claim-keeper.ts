@@ -1,15 +1,17 @@
 import { Queue, Worker } from 'bullmq';
 import type Redis from 'ioredis';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import anchorPkg from '@coral-xyz/anchor';
 import { PublicKey } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from '@solana/spl-token';
 import {
   DEMO_TX_SIGNATURE_PREFIX,
   LOCK_PERIODS,
+  PARKED_CLAIM_STATUSES,
   PDA_SEEDS,
   PolicyState,
   SYNTHETIC_PAYOUT_RATIO,
+  TRIGGER_SPECIFICITY,
   TriggerType,
   canonicalMint,
   generateDemoTxSignature,
@@ -43,10 +45,7 @@ import { AgentErrorProofPoster } from '../services/agent-error/proof-poster.js';
 import { loadOutflowBaseline } from '../services/agent-error/baseline.js';
 import { loadBalanceSnapshotAt, readAgentBalances } from '../services/exploit/baseline.js';
 import { GOVERNANCE_BASELINE_MAX_LEAD_SEC } from '../services/governance/conjunction.js';
-import {
-  createCovanticProgram,
-  type CovanticProgram,
-} from '../utils/program.js';
+import { createCovanticProgram, type CovanticProgram } from '../utils/program.js';
 import {
   verifyClaim,
   type VerificationResult,
@@ -68,7 +67,6 @@ const PAYOUT_QUEUE = 'claim-payout';
  * retrying will not fix.
  */
 const MAX_VERIFY_ATTEMPTS = 5;
-
 
 /** Shared BullMQ job options: retry up to 3 times with exponential backoff,
  *  bound retained history so failed jobs are inspectable without unbounded
@@ -99,10 +97,7 @@ interface PayoutJobPayload {
 
 type ClaimRow = typeof claims.$inferSelect;
 
-function mergeVerificationData(
-  existing: unknown,
-  patch: VerificationData,
-): VerificationData {
+function mergeVerificationData(existing: unknown, patch: VerificationData): VerificationData {
   const base: VerificationData =
     existing && typeof existing === 'object' && !Array.isArray(existing)
       ? (existing as VerificationData)
@@ -280,8 +275,8 @@ async function ingestAlert(
   // two concurrent alerts resolves here: the second insert raises a unique
   // violation we swallow.
   let claimId: string | undefined;
+  const verificationData: VerificationData = { simulated, eventType, source: 'claim-keeper' };
   try {
-    const verificationData: VerificationData = { simulated, eventType, source: 'claim-keeper' };
     const inserted = await db
       .insert(claims)
       .values({
@@ -298,6 +293,32 @@ async function ingestAlert(
   } catch (err) {
     // Unique-violation = open claim already exists. Anything else re-throws.
     if ((err as { code?: string })?.code === '23505') {
+      // Not necessarily the end of it. A policy holds one open claim, and
+      // `review`/`indeterminate` are open — so a claim parked for a human was
+      // enough to make the policy deaf to every later alert, including the
+      // genuine exploit it was insured against. That is a denial-of-coverage
+      // vector an attacker can arm for the price of one cheap anomaly.
+      //
+      // Nothing automated is working on a parked claim, so a strictly more
+      // specific threat may take the slot: the claim is re-pointed at the new
+      // trigger and re-queued rather than a second one being opened, which
+      // keeps the one-open-claim rule intact.
+      const superseded = await supersedeParkedClaim(
+        db,
+        redis,
+        active.policyId,
+        trigger,
+        effectiveTxSignature,
+        verificationData,
+      );
+      if (superseded) {
+        await processQueue.add('process', { claimId: superseded });
+        logger.warn(
+          { policyId: active.policyId, agentAddress, trigger, claimId: superseded },
+          'claim-keeper: parked claim superseded by a higher-specificity trigger',
+        );
+        return;
+      }
       logger.info(
         { policyId: active.policyId, agentAddress },
         'claim-keeper: open claim already exists for policy (unique constraint)',
@@ -308,7 +329,10 @@ async function ingestAlert(
   }
 
   if (!claimId) {
-    logger.error({ agentAddress, policyId: active.policyId }, 'claim-keeper: insert returned no id');
+    logger.error(
+      { agentAddress, policyId: active.policyId },
+      'claim-keeper: insert returned no id',
+    );
     return;
   }
 
@@ -323,10 +347,7 @@ async function ingestAlert(
 /** Synthetic verification for simulated monitoring events. Demo tx
  *  signatures can't be resolved by Helius, so the production verifier
  *  returns verified:false; this keeps the demo UX working end-to-end. */
-function syntheticVerification(
-  triggerType: number,
-  coverageAmount: number,
-): VerificationResult {
+function syntheticVerification(triggerType: number, coverageAmount: number): VerificationResult {
   const lockByTrigger: Record<number, number> = {
     [TriggerType.Exploit]: LOCK_PERIODS.EXPLOIT,
     [TriggerType.OracleManipulation]: LOCK_PERIODS.ORACLE_MANIPULATION,
@@ -467,6 +488,9 @@ function agentErrorLookups(
             canonicalMint(coveredMint),
             new Date(claim.createdAt),
             windowSeconds,
+            // The trigger is excluded from its own history: the monitor has
+            // already recorded it, and the verifier adds it back explicitly.
+            claim.triggerTxSignature ?? undefined,
           )
         : Promise.resolve(null),
   };
@@ -640,9 +664,7 @@ async function processClaim(claimId: string, deps: ProcessDeps): Promise<void> {
   // An exploit verdict that turns on "the agent authorised this" is not a dead
   // end — it is the other trigger's opening statement. See
   // {@link reattributeToAgentError}.
-  if (
-    await reattributeToAgentError(claim, policy, result, deps, evidenceHash !== null)
-  ) {
+  if (await reattributeToAgentError(claim, policy, result, deps, evidenceHash !== null)) {
     return;
   }
 
@@ -775,12 +797,7 @@ async function executePayout(
   // masked verifier bugs by over-paying; fail loudly instead.
   const payoutAmount = claim.payoutAmount ?? 0;
   if (payoutAmount <= 0) {
-    await rejectClaim(
-      claim,
-      { reason: 'payout_amount_missing' },
-      db,
-      redis,
-    );
+    await rejectClaim(claim, { reason: 'payout_amount_missing' }, db, redis);
     return;
   }
 
@@ -905,6 +922,38 @@ async function executePayout(
       'claim-keeper: payout executed',
     );
   } catch (err) {
+    // Ask the chain before believing the error.
+    //
+    // The transfer may have landed and only the confirmation or the DB write
+    // after it failed — the ordinary "RPC timed out on a transaction that
+    // succeeded" case. Recording `failed` there means real USDC left the vault
+    // with nothing linking it to the claim, and the retry then reverts against
+    // `ClaimPaid` and records `failed` again, permanently. The money is gone
+    // and the record says it never moved.
+    const settled = await isPolicySettledOnChain(programCtx, claim).catch(() => false);
+    if (settled) {
+      logger.warn(
+        { claimId: claim.id, err: String(err) },
+        'claim-keeper: payout reported an error but the policy is ClaimPaid; recording as paid',
+      );
+      await db
+        .update(claims)
+        .set({
+          status: 'paid',
+          paidAt: new Date(),
+          verificationData: mergeVerificationData(claim.verificationData, {
+            payoutError: String(err),
+            reconciledFromChain: true,
+            note: 'Settled on chain; the signature was lost with the failed confirmation.',
+          }),
+          updatedAt: new Date(),
+        })
+        .where(eq(claims.id, claim.id));
+      const reconciled = await loadClaim(claim.id, db);
+      if (reconciled) await broadcastClaim(reconciled, redis);
+      return;
+    }
+
     logger.error({ err, claimId: claim.id }, 'claim-keeper: payout failed');
     await db
       .update(claims)
@@ -922,6 +971,23 @@ async function executePayout(
   }
 }
 
+/**
+ * Did the policy actually settle, whatever the client thinks happened?
+ *
+ * `ClaimPaid` is terminal and only `verify_and_payout*` sets it, so reading it
+ * back is a reliable answer to "did the money move?" when the client's own
+ * report is untrustworthy.
+ */
+async function isPolicySettledOnChain(ctx: CovanticProgram, claim: ClaimRow): Promise<boolean> {
+  const { policy } = derivePdas(
+    ctx.programId,
+    new PublicKey(claim.holderAddress),
+    BigInt(claim.policyId),
+  );
+  const onChain: any = await (ctx.program.account as any).insurancePolicy.fetchNullable(policy);
+  return onChain !== null && Number(onChain.state) === PolicyState.ClaimPaid;
+}
+
 // ---------------------------------------------------------------------------
 // On-chain helpers
 // ---------------------------------------------------------------------------
@@ -931,20 +997,91 @@ function derivePdas(
   holder: PublicKey,
   policyId: bigint,
 ): { config: PublicKey; vault: PublicKey; policy: PublicKey } {
-  const [config] = PublicKey.findProgramAddressSync(
-    [Buffer.from(PDA_SEEDS.CONFIG)],
-    programId,
-  );
+  const [config] = PublicKey.findProgramAddressSync([Buffer.from(PDA_SEEDS.CONFIG)], programId);
   const [vault] = PublicKey.findProgramAddressSync([Buffer.from(PDA_SEEDS.VAULT)], programId);
   const [policy] = PublicKey.findProgramAddressSync(
-    [
-      Buffer.from(PDA_SEEDS.POLICY),
-      holder.toBuffer(),
-      Buffer.from(policyIdToBytes(policyId)),
-    ],
+    [Buffer.from(PDA_SEEDS.POLICY), holder.toBuffer(), Buffer.from(policyIdToBytes(policyId))],
     programId,
   );
   return { config, vault, policy };
+}
+
+/**
+ * Hand the policy's open-claim slot to a strictly more specific trigger.
+ *
+ * Only touches a *parked* claim — `review` or `indeterminate`, where no job
+ * and no on-chain transaction is in flight. A claim in `verifying`,
+ * `approved` or `paying` is left alone: superseding one would race a
+ * transaction that may already have been signed.
+ *
+ * Returns the claim id when it took the slot, `null` when it did not, so the
+ * caller can fall through to the ordinary "already open" path.
+ */
+async function supersedeParkedClaim(
+  db: Database,
+  redis: Redis,
+  policyId: number,
+  trigger: TriggerType,
+  triggerTxSignature: string,
+  verificationData: VerificationData,
+): Promise<string | null> {
+  const parked = await db
+    .select({
+      id: claims.id,
+      triggerType: claims.triggerType,
+      status: claims.status,
+    })
+    .from(claims)
+    .where(
+      and(
+        eq(claims.policyId, policyId),
+        inArray(claims.status, PARKED_CLAIM_STATUSES as unknown as string[]),
+      ),
+    )
+    .limit(1);
+
+  const existing = parked[0];
+  if (!existing) return null;
+
+  const incoming = TRIGGER_SPECIFICITY[trigger] ?? 0;
+  const current = TRIGGER_SPECIFICITY[existing.triggerType as TriggerType] ?? 0;
+  // Strictly greater: an equally specific repeat of what a human is already
+  // looking at is not new information, and swapping on ties would let a
+  // stream of identical alerts reset the claim forever.
+  if (incoming <= current) return null;
+
+  // Conditional on the status still being parked, so a verifier that picked
+  // the claim up between the select and here wins the race rather than having
+  // its work silently reset.
+  const updated = await db
+    .update(claims)
+    .set({
+      triggerType: trigger,
+      triggerTxSignature,
+      status: 'pending',
+      reviewReason: null,
+      verifyAttempts: 0,
+      verificationData: {
+        ...verificationData,
+        supersededTriggerType: existing.triggerType,
+        supersededFromStatus: existing.status,
+      },
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(claims.id, existing.id),
+        inArray(claims.status, PARKED_CLAIM_STATUSES as unknown as string[]),
+      ),
+    )
+    .returning({ id: claims.id });
+
+  const id = updated[0]?.id ?? null;
+  if (id) {
+    const reloaded = await loadClaim(id, db);
+    if (reloaded) await broadcastClaim(reloaded, redis);
+  }
+  return id;
 }
 
 async function submitClaimOnChain(
@@ -959,15 +1096,44 @@ async function submitClaimOnChain(
 
   const sigBytes = Buffer.from(triggerTxSignature, 'utf8');
 
-  return await (ctx.program.methods as any)
-    .oracleSubmitClaim(triggerType, sigBytes)
-    .accounts({
-      oracle: ctx.oracleKeypair!.publicKey,
-      config,
-      policy,
-    })
-    .rpc();
+  try {
+    return await (ctx.program.methods as any)
+      .oracleSubmitClaim(triggerType, sigBytes)
+      .accounts({
+        oracle: ctx.oracleKeypair!.publicKey,
+        config,
+        policy,
+      })
+      .rpc();
+  } catch (err) {
+    // The submit may have landed and only the confirmation failed — an RPC
+    // timeout on a transaction that succeeded is the ordinary case, not an
+    // exotic one. On retry the instruction reverts with `PolicyNotActive`
+    // because the policy is already `ClaimPending`, and letting that throw
+    // stranded the claim at `verifying` forever: an OPEN status holding the
+    // policy's only claim slot, which nothing else reconciles.
+    //
+    // So ask the chain what actually happened before believing the error.
+    const onChain: any = await (ctx.program.account as any).insurancePolicy
+      .fetchNullable(policy)
+      .catch(() => null);
+    if (onChain && Number(onChain.state) === PolicyState.ClaimPending) {
+      logger.warn(
+        { policyId: policyId.toString(), err: (err as Error).message },
+        'claim-keeper: submit reported an error but the policy is ClaimPending; treating as submitted',
+      );
+      return SUBMIT_SIGNATURE_UNKNOWN;
+    }
+    throw err;
+  }
 }
+
+/**
+ * Recorded when the chain confirms the claim was submitted but the signature
+ * was lost with the failed confirmation. Distinguishes "we know it landed,
+ * without the receipt" from "it never landed" — the latter must retry.
+ */
+const SUBMIT_SIGNATURE_UNKNOWN = 'unknown:reconciled-from-chain';
 
 async function verifyAndPayoutOnChain(
   ctx: CovanticProgram,
@@ -1216,4 +1382,3 @@ async function broadcastClaim(row: ClaimRow, redis: Redis): Promise<void> {
     logger.warn({ err }, 'claim-keeper: broadcast publish failed');
   }
 }
-

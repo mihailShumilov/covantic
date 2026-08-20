@@ -9,7 +9,7 @@ Agents buy insurance before DeFi operations; claims are auto-verified and paid o
 
 ```
 packages/
-  anchor/   — Solana program (Rust, Anchor 1.1.2)
+  anchor/   — Solana program (Rust, Anchor 1.0.2 — see packages/anchor/Anchor.toml)
   api/      — Backend (Fastify 5, Drizzle ORM, BullMQ)
   web/      — Frontend (Next.js 16, React 19, Tailwind)
   shared/   — Cross-package types, constants, utilities
@@ -131,7 +131,9 @@ Filter to single package: `pnpm --filter api dev`, `pnpm --filter web dev`
   rejected. Do not reintroduce "unknown program ⇒ exploit" or "DEX present ⇒
   not an exploit"; both were false-positive/false-negative engines.
 - **Confidence is enforced, not decorative** (`services/confidence-lanes.ts`).
-  Both adjudicators cap at 0.92, below `AUTO_PAY_CONFIDENCE` (0.95), so
+  All four adjudicators cap at 0.92 — one `CONFIDENCE_CEILING`, defined beside
+  `AUTO_PAY_CONFIDENCE` and re-exported, so the two numbers cannot drift
+  apart — below `AUTO_PAY_CONFIDENCE` (0.95), so
   off-chain analysis can never release funds alone — paying always needs the
   chain's own check. That gap is the guarantee; do not close it by raising a
   ceiling.

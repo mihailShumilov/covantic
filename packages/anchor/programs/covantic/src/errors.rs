@@ -188,4 +188,7 @@ pub enum CovanticError {
     // -- Math Errors --
     #[msg("Arithmetic overflow")]
     MathOverflow,
+
+    #[msg("Payout amount must be greater than zero")]
+    ZeroPayout,
 }

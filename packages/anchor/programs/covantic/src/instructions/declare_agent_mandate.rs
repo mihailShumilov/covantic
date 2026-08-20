@@ -1,9 +1,10 @@
 use anchor_lang::prelude::*;
+use anchor_spl::token::{Mint, TokenAccount};
 
 use crate::constants::*;
 use crate::errors::CovanticError;
 use crate::events::AgentMandateDeclared;
-use crate::state::{InsurancePolicy, PolicyAgentMandate};
+use crate::state::{InsurancePolicy, PolicyAgentMandate, ProtocolConfig};
 
 /// What the holder commits to about how their agent is permitted to operate.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
@@ -113,6 +114,21 @@ pub fn declare_agent_mandate_handler(
             && !mandate.allowed_programs.contains(&Pubkey::default()),
         CovanticError::InvalidAgentMandate
     );
+    // The retention floor is a deductible the holder authors, and it was the
+    // one declared dimension nothing bounded — on chain or off.
+    //
+    // `floor_excess` is `min(floor - retained, outflow)`, so a floor declared
+    // far above what the account actually holds makes the excess equal the
+    // *entire* movement. That turns "we pay the overshoot beyond what you said
+    // you would risk" into "we pay the whole loss", and it is the arithmetic
+    // bound the whole trigger rests on.
+    //
+    // A holder may only declare a floor they currently satisfy. Declaring one
+    // you already breach is not a statement about how you intend to operate.
+    require!(
+        mandate.min_retained_balance <= ctx.accounts.covered_token_account.amount,
+        CovanticError::InvalidAgentMandate
+    );
 
     let record = &mut ctx.accounts.mandate;
     let is_new = record.policy_id == 0 && record.effective_at == 0;
@@ -202,6 +218,26 @@ pub struct DeclareAgentMandate<'info> {
         bump,
     )]
     pub mandate: Box<Account<'info, PolicyAgentMandate>>,
+
+    #[account(
+        seeds = [CONFIG_SEED],
+        bump = config.bump,
+    )]
+    pub config: Box<Account<'info, ProtocolConfig>>,
+
+    /// The covered account, read here only to bound the retention floor.
+    ///
+    /// Derived by Anchor from the policy's own agent address, exactly as in
+    /// `verify_and_payout_agent_error`, so the holder cannot point the bound
+    /// at some richer account of their choosing.
+    #[account(
+        associated_token::mint = usdc_mint,
+        associated_token::authority = policy.agent_address,
+    )]
+    pub covered_token_account: Box<Account<'info, TokenAccount>>,
+
+    #[account(constraint = usdc_mint.key() == config.usdc_mint @ CovanticError::InvalidTokenAccount)]
+    pub usdc_mint: Box<Account<'info, Mint>>,
 
     pub system_program: Program<'info, System>,
 }

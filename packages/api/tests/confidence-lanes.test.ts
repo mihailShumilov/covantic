@@ -5,15 +5,43 @@ import {
   REVIEW_CONFIDENCE,
   decideLane,
 } from '../src/services/confidence-lanes.js';
+import { CONFIDENCE_CEILING as AGENT_ERROR_CEILING } from '../src/services/agent-error/adjudicate.js';
 import { CONFIDENCE_CEILING as EXPLOIT_CEILING } from '../src/services/exploit/adjudicate.js';
+import { CONFIDENCE_CEILING as GOVERNANCE_CEILING } from '../src/services/governance/adjudicate.js';
 import { CONFIDENCE_CEILING as ORACLE_CEILING } from '../src/services/oracle/adjudicate.js';
 
 describe('confidence lanes', () => {
   it('keeps off-chain analysis structurally unable to release funds alone', () => {
-    // The load-bearing property of the whole design. Both adjudicators cap
+    // The load-bearing property of the whole design. Every adjudicator caps
     // below the auto-pay bar, so paying always needs the chain's own check.
-    expect(EXPLOIT_CEILING).toBeLessThan(AUTO_PAY_CONFIDENCE);
-    expect(ORACLE_CEILING).toBeLessThan(AUTO_PAY_CONFIDENCE);
+    //
+    // All four are named here on purpose. This test used to cover two, having
+    // been written when there were two, so the third and fourth triggers
+    // shipped with the property they depend on unasserted centrally.
+    const ceilings = {
+      oracle: ORACLE_CEILING,
+      exploit: EXPLOIT_CEILING,
+      governance: GOVERNANCE_CEILING,
+      agentError: AGENT_ERROR_CEILING,
+    };
+    for (const [domain, ceiling] of Object.entries(ceilings)) {
+      expect(ceiling, `${domain} ceiling must stay below the auto-pay bar`).toBeLessThan(
+        AUTO_PAY_CONFIDENCE,
+      );
+    }
+  });
+
+  it('gives every adjudicator the same ceiling, from one definition', () => {
+    // Four independent copies of 0.92 was four chances to raise one quietly.
+    // They are now re-exports of a single constant; this fails if that is
+    // ever unpicked back into per-domain literals that drift.
+    const distinct = new Set([
+      ORACLE_CEILING,
+      EXPLOIT_CEILING,
+      GOVERNANCE_CEILING,
+      AGENT_ERROR_CEILING,
+    ]);
+    expect(distinct.size).toBe(1);
   });
 
   it('pays a well-evidenced exploit only alongside a chain proof', () => {

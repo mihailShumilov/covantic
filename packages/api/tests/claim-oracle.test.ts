@@ -836,7 +836,7 @@ describe('OracleManipulation verifier — source consensus (Phase 3)', () => {
       bySources: Record<string, { contributors: string[] }>;
     };
     expect(consensus.minSourceCount).toBe(4);
-    expect(consensus.bySources['SOL/USD'].contributors).toEqual([
+    expect(consensus.bySources['SOL/USD']?.contributors).toEqual([
       'pyth',
       'binance',
       'coinbase',
@@ -855,7 +855,10 @@ describe('OracleManipulation verifier — source consensus (Phase 3)', () => {
 describe('OracleManipulation verifier — manipulation signatures (Phase 4)', () => {
   const BLOCK_TIME = 1_699_000_123;
 
-  async function judge(feeds: Parameters<typeof mkPricer>[0], tx = mkSwapTx(250, 1, { timestamp: BLOCK_TIME })) {
+  async function judge(
+    feeds: Parameters<typeof mkPricer>[0],
+    tx = mkSwapTx(250, 1, { timestamp: BLOCK_TIME }),
+  ) {
     return verifyClaim(
       TriggerType.OracleManipulation,
       tx.signature,
@@ -895,9 +898,7 @@ describe('OracleManipulation verifier — manipulation signatures (Phase 4)', ()
     });
     // Same fill, same reference at block time — but a threshold that ignores
     // volatility would treat these two identically.
-    expect(choppy.details.threshold as number).toBeGreaterThan(
-      calm.details.threshold as number,
-    );
+    expect(choppy.details.threshold as number).toBeGreaterThan(calm.details.threshold as number);
   });
 
   it('counts a flash loan as a signature in its own right', async () => {
@@ -1128,9 +1129,7 @@ describe('OracleManipulation verifier — block-time anchoring (Phase 1)', () =>
     expect(result.details.reason).toBe('deviation_below_threshold');
     // Threshold is three confidence intervals wide, aggregated across both
     // legs, so it lands well above the 4% move and above the fixed 3% bar.
-    expect(result.details.threshold as number).toBeGreaterThan(
-      result.details.deviation as number,
-    );
+    expect(result.details.threshold as number).toBeGreaterThan(result.details.deviation as number);
     expect(result.details.threshold as number).toBeGreaterThan(0.06);
   });
 
@@ -1170,7 +1169,7 @@ describe('OracleManipulation verifier — block-time anchoring (Phase 1)', () =>
     expect(result.evidence?.prices.length).toBeGreaterThan(0);
     // The signed proof blob must survive into the bundle — it is what makes
     // the price checkable by someone who does not trust us.
-    expect(result.evidence?.prices[0].raw).toBe('ab01');
+    expect(result.evidence?.prices[0]?.raw).toBe('ab01');
     expect(result.details.bundleHash).toMatch(/^[0-9a-f]{64}$/);
   });
 

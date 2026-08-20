@@ -7,7 +7,7 @@ import type { GovernanceSignatureReport } from './signatures.js';
  * The authority set the holder declared as legitimate, as read from chain.
  *
  * This is the thing that makes a governance verdict different in kind from
- * the other two triggers. An exploit verdict has to *infer* whether the agent
+ * the other three triggers. An exploit verdict has to *infer* whether the agent
  * consented to funds moving; a price verdict has to *assert* what a swap
  * executed at. Here the holder said, in advance and under their own
  * signature, who is allowed to control the agent — so "was this authorised"
@@ -18,8 +18,24 @@ import type { GovernanceSignatureReport } from './signatures.js';
  * `indeterminate` rather than reading it either way.
  */
 export interface GovernanceBaselineView {
-  /** Every address the holder declared, flattened for membership testing. */
+  /**
+   * Every address the holder declared, flattened.
+   *
+   * Retained for the audit trail and for `extraAuthorities`-style checks that
+   * genuinely are role-agnostic. **Not** the right set for deciding whether a
+   * given takeover was permitted: a declared *delegate* is not thereby
+   * permitted to become the account's *owner*. Use {@link permittedFor}.
+   */
   authorities: string[];
+  /**
+   * Operator keys the holder declared without binding them to one role.
+   * These are permitted for any takeover kind, which is what makes them
+   * distinct from the named single-role fields below.
+   *
+   * Optional: a bundle stored before the role-aware check existed carries no
+   * such field, and must still replay rather than throw.
+   */
+  extraAuthorities?: string[];
   tokenOwner: string;
   expectedDelegate: string | null;
   expectedCloseAuthority: string | null;
