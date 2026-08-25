@@ -242,6 +242,18 @@ pub mod covantic {
         accept_admin_handler(ctx)
     }
 
+    /// Grow the vault account to the current layout and seed `loss_index`.
+    /// Idempotent; required once after the loss-socialisation upgrade.
+    pub fn migrate_vault(ctx: Context<MigrateVault>) -> Result<()> {
+        migrate_vault_handler(ctx)
+    }
+
+    /// Grow a staker position to the current layout. Permissionless and
+    /// idempotent; required once per position after the same upgrade.
+    pub fn migrate_staker_position(ctx: Context<MigrateStakerPosition>) -> Result<()> {
+        migrate_staker_position_handler(ctx)
+    }
+
     /// Withdraw a pending admin transfer.
     pub fn cancel_admin_transfer(ctx: Context<CancelAdminTransfer>) -> Result<()> {
         cancel_admin_transfer_handler(ctx)

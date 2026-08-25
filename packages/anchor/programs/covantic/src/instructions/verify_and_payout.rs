@@ -91,36 +91,10 @@ pub fn verify_and_payout_handler(ctx: Context<VerifyAndPayout>, payout_amount: u
     // Use checked_sub on total_staked so an oversized loss fails the tx
     // explicitly (InsufficientVaultBalance is the closest matching error)
     // instead of silently clamping solvency to 0.
-    let mut remaining = payout_amount;
-
-    let from_treasury = remaining.min(vault.protocol_treasury);
-    vault.protocol_treasury = vault
-        .protocol_treasury
-        .checked_sub(from_treasury)
-        .ok_or(CovanticError::MathOverflow)?;
-    remaining = remaining
-        .checked_sub(from_treasury)
-        .ok_or(CovanticError::MathOverflow)?;
-
-    let from_reserve = remaining.min(vault.reserve_fund);
-    vault.reserve_fund = vault
-        .reserve_fund
-        .checked_sub(from_reserve)
-        .ok_or(CovanticError::MathOverflow)?;
-    remaining = remaining
-        .checked_sub(from_reserve)
-        .ok_or(CovanticError::MathOverflow)?;
-
-    if remaining > 0 {
-        // total_staker_rewards is a sub-accounting of the vault token balance
-        // that tracks *claimable* rewards for stakers. Do NOT reduce it here
-        // as well -- the staker principal absorbs the loss, not the already
-        // earned/pending reward ledger.
-        vault.total_staked = vault
-            .total_staked
-            .checked_sub(remaining)
-            .ok_or(CovanticError::InsufficientVaultBalance)?;
-    }
+    // Waterfall: treasury, then reserve, then staker principal — and the
+    // staker leg moves `loss_index` in step, so the loss is actually
+    // socialised instead of landing on whoever withdraws last.
+    vault.absorb_loss(payout_amount)?;
 
     vault.total_coverage = vault
         .total_coverage

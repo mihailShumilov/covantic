@@ -268,32 +268,10 @@ pub fn verify_and_payout_agent_error_handler(
     // Loss cascade, identical to every other payout path: treasury, then
     // reserve, then staker principal. Kept in step deliberately — a payout
     // must have the same effect on solvency however it was proven.
-    let mut remaining = payout_amount;
-
-    let from_treasury = remaining.min(vault.protocol_treasury);
-    vault.protocol_treasury = vault
-        .protocol_treasury
-        .checked_sub(from_treasury)
-        .ok_or(CovanticError::MathOverflow)?;
-    remaining = remaining
-        .checked_sub(from_treasury)
-        .ok_or(CovanticError::MathOverflow)?;
-
-    let from_reserve = remaining.min(vault.reserve_fund);
-    vault.reserve_fund = vault
-        .reserve_fund
-        .checked_sub(from_reserve)
-        .ok_or(CovanticError::MathOverflow)?;
-    remaining = remaining
-        .checked_sub(from_reserve)
-        .ok_or(CovanticError::MathOverflow)?;
-
-    if remaining > 0 {
-        vault.total_staked = vault
-            .total_staked
-            .checked_sub(remaining)
-            .ok_or(CovanticError::InsufficientVaultBalance)?;
-    }
+    // Waterfall: treasury, then reserve, then staker principal — and the
+    // staker leg moves `loss_index` in step, so the loss is actually
+    // socialised instead of landing on whoever withdraws last.
+    vault.absorb_loss(payout_amount)?;
 
     vault.total_coverage = vault
         .total_coverage

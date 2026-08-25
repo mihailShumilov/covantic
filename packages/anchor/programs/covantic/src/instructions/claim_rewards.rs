@@ -4,7 +4,7 @@ use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 use crate::constants::*;
 use crate::errors::CovanticError;
 use crate::events::RewardsClaimed;
-use crate::instructions::stake::crystallize_rewards;
+use crate::instructions::stake::{crystallize_rewards, settle_losses};
 use crate::state::{InsuranceVault, StakerPosition};
 
 /// Claim accumulated staker rewards.
@@ -17,6 +17,10 @@ pub fn claim_rewards_handler(ctx: Context<ClaimRewards>) -> Result<()> {
     let staker_position = &mut ctx.accounts.staker_position;
     let vault = &mut ctx.accounts.vault;
 
+    // Losses first: revalue the position against anything socialised since it
+    // was last touched, so rewards and any transfer below are computed on
+    // principal that still exists.
+    settle_losses(staker_position, vault)?;
     crystallize_rewards(staker_position, vault)?;
 
     let rewards = staker_position.rewards_pending;

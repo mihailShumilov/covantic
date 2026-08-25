@@ -4,7 +4,7 @@ use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 use crate::constants::*;
 use crate::errors::CovanticError;
 use crate::events::{UnstakeRequested, Unstaked};
-use crate::instructions::stake::crystallize_rewards;
+use crate::instructions::stake::{crystallize_rewards, settle_losses};
 use crate::state::{InsuranceVault, StakerPosition};
 
 /// Phase 1: Request unstake — starts the 48-hour cooldown period.
@@ -59,6 +59,10 @@ pub fn execute_unstake_handler(ctx: Context<ExecuteUnstake>) -> Result<()> {
     );
 
     // Pull in any rewards accrued since the staker's last interaction.
+    // Losses first: revalue the position against anything socialised since it
+    // was last touched, so rewards and any transfer below are computed on
+    // principal that still exists.
+    settle_losses(staker_position, vault)?;
     crystallize_rewards(staker_position, vault)?;
 
     let requested = staker_position.amount_staked;

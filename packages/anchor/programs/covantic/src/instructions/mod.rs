@@ -1,3 +1,4 @@
+pub mod migrate;
 pub mod admin_transfer;
 pub mod cancel_policy;
 pub mod declare_agent_mandate;
@@ -20,6 +21,7 @@ pub mod verify_and_payout_exploit;
 pub mod verify_and_payout_governance;
 pub mod verify_and_payout_v2;
 
+pub use migrate::*;
 pub use admin_transfer::*;
 pub use cancel_policy::*;
 pub use declare_agent_mandate::*;

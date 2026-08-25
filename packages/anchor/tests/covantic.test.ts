@@ -658,31 +658,57 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
   /**
    * Known defect, pinned here rather than hidden.
    *
-   * The loss cascade in every `verify_and_payout*` path decrements
-   * `vault.total_staked`, but nothing decrements any `StakerPosition`. So a
-   * socialised loss is not actually socialised: each position still records
-   * its original principal, `execute_unstake` transfers that full amount, and
-   * whoever withdraws first is paid in full while the last staker absorbs the
-   * entire loss — or cannot withdraw at all, because the vault token account
-   * is short and the transfer fails with an opaque SPL `InsufficientFunds`.
+   * This used to pin a different one: the loss cascade decremented
+   * `vault.total_staked` while no `StakerPosition` moved, so a socialised loss
+   * was not socialised — the first staker out was paid in full and the last
+   * absorbed everything. That is fixed. `absorb_loss` now scales
+   * `vault.loss_index` by exactly the factor the pool shrank by, and
+   * `settle_losses` revalues each position against it, which the first two
+   * assertions below check.
    *
-   * This test asserts the *current* behaviour so the gap is visible and
-   * measured. It is expected to start failing the day per-position loss
-   * accounting lands, which is exactly the signal wanted.
+   * What remains is a *separate* accounting gap, and it is what still stops
+   * this withdrawal: the vault's recorded obligations
+   * (`total_staked + total_staker_rewards + reserve_fund + protocol_treasury`)
+   * can exceed the vault token account's balance. `total_staker_rewards` is a
+   * ledger, while each staker's owed rewards are derived independently from
+   * `reward_per_stake_acc`; integer division makes the two drift, and the
+   * cascade deliberately does not reduce the reward ledger when principal
+   * absorbs a loss. Over a long sequence the derived rewards outrun what the
+   * vault holds, and the SPL transfer fails.
+   *
+   * Measured here rather than asserted in the abstract. Expected to start
+   * failing the day the reward ledger and the accumulator are reconciled,
+   * which is the signal wanted.
    */
-  it('cannot return full principal after a loss — staker positions carry no loss share', async () => {
+  it('socialises the loss onto positions, but the reward ledger still outruns the vault', async () => {
     const [position] = stakerPda(staker.publicKey);
     const [vault] = vaultPda();
 
     await advanceClockBySeconds(context, 48 * 3600 + 1);
 
-    const vaultState: any = await (program.account as any).insuranceVault.fetch(vault);
+    const v: any = await (program.account as any).insuranceVault.fetch(vault);
     const pos: any = await (program.account as any).stakerPosition.fetch(position);
     const vaultBalance = await getAccount(provider.connection as any, vaultAta);
 
-    // The position still claims principal the vault no longer holds.
-    expect(BigInt(pos.amountStaked.toString())).toBeGreaterThan(vaultBalance.amount);
-    void vaultState;
+    // (1) A loss was socialised: the index moved off whole.
+    const SCALE = 1_000_000_000_000n;
+    const lossIndex = BigInt(v.lossIndex.toString());
+    expect(lossIndex).toBeLessThan(SCALE);
+
+    // (2) The position now carries its share. Revalued, it no longer claims
+    //     more principal than the pool actually holds — which is exactly what
+    //     it did before, and why the first withdrawal used to drain it.
+    const snapshot = BigInt(pos.lossIndexSnapshot.toString()) || SCALE;
+    const revalued = (BigInt(pos.amountStaked.toString()) * lossIndex) / snapshot;
+    expect(revalued).toBeLessThanOrEqual(BigInt(v.totalStaked.toString()));
+
+    // (3) The gap that is left, stated as a number rather than a worry.
+    const obligations =
+      BigInt(v.totalStaked.toString()) +
+      BigInt(v.totalStakerRewards.toString()) +
+      BigInt(v.reserveFund.toString()) +
+      BigInt(v.protocolTreasury.toString());
+    expect(obligations).toBeGreaterThan(vaultBalance.amount);
 
     await expect(
       program.methods
@@ -700,9 +726,6 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
     ).rejects.toThrow();
   });
 
-  // -------------------------------------------------------------------------
-  // 1.9 Claim rewards (new staker + fresh policy)
-  // -------------------------------------------------------------------------
   it('allows a staker to claim proportional rewards', async () => {
     const [config] = configPda();
     const [vault] = vaultPda();

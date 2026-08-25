@@ -195,6 +195,9 @@ pub enum CovanticError {
     #[msg("Rent refund account is not the admin that opened the proposal")]
     InvalidRentRefund,
 
+    #[msg("Account is not a migratable Covantic account")]
+    InvalidAccountForMigration,
+
     // -- Math Errors --
     #[msg("Arithmetic overflow")]
     MathOverflow,

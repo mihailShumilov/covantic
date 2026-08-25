@@ -1858,6 +1858,132 @@
       ]
     },
     {
+      "name": "migrate_staker_position",
+      "docs": [
+        "Grow a staker position to the current layout. Permissionless and",
+        "idempotent; required once per position after the same upgrade."
+      ],
+      "discriminator": [
+        50,
+        234,
+        67,
+        189,
+        2,
+        159,
+        52,
+        238
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "staker_position",
+          "docs": [
+            "PDA seeds, and its discriminator is verified before it is resized."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "staker"
+              }
+            ]
+          }
+        },
+        {
+          "name": "staker"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "migrate_vault",
+      "docs": [
+        "Grow the vault account to the current layout and seed `loss_index`.",
+        "Idempotent; required once after the loss-socialisation upgrade."
+      ],
+      "discriminator": [
+        139,
+        151,
+        25,
+        211,
+        120,
+        164,
+        24,
+        215
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "docs": [
+            "PDA seeds, and its discriminator is verified before anything is written."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "oracle_submit_claim",
       "docs": [
         "Submit an insurance claim on behalf of a holder (oracle-signed path,",
@@ -4685,11 +4811,16 @@
     },
     {
       "code": 6060,
+      "name": "InvalidAccountForMigration",
+      "msg": "Account is not a migratable Covantic account"
+    },
+    {
+      "code": 6061,
       "name": "MathOverflow",
       "msg": "Arithmetic overflow"
     },
     {
-      "code": 6061,
+      "code": 6062,
       "name": "ZeroPayout",
       "msg": "Payout amount must be greater than zero"
     }
@@ -6369,6 +6500,22 @@
               "PDA bump"
             ],
             "type": "u8"
+          },
+          {
+            "name": "loss_index",
+            "docs": [
+              "Multiplicative index tracking cumulative socialised loss, scaled by",
+              "`LOSS_INDEX_SCALE`. Starts at `LOSS_INDEX_SCALE` and only ever falls.",
+              "Each staker's snapshot lives in `StakerPosition.loss_index_snapshot`;",
+              "a position's live principal is",
+              "`amount_staked * loss_index / loss_index_snapshot`.",
+              "",
+              "**Last field on purpose.** Appending keeps every byte before it at the",
+              "same offset, so an account written by the previous layout still parses",
+              "once grown, and migration is a resize plus one default rather than a",
+              "rewrite."
+            ],
+            "type": "u128"
           }
         ]
       }
@@ -7282,6 +7429,22 @@
               "PDA bump"
             ],
             "type": "u8"
+          },
+          {
+            "name": "loss_index_snapshot",
+            "docs": [
+              "Snapshot of `InsuranceVault.loss_index` when this position's",
+              "`amount_staked` was last revalued. The position's live principal is",
+              "`amount_staked * vault.loss_index / loss_index_snapshot`.",
+              "",
+              "Zero means \"not yet initialised\" — a position written before losses",
+              "were socialised at all. `settle_losses` adopts the current index in",
+              "that case rather than revaluing against a divisor of zero, which is",
+              "also what makes a migrated position safe with no value written.",
+              "",
+              "**Last field on purpose**, for the same reason as `InsuranceVault`."
+            ],
+            "type": "u128"
           }
         ]
       }
