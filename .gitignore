@@ -30,3 +30,6 @@ redisdata/
 
 # TypeScript incremental build output.
 *.tsbuildinfo
+
+# Audit scan artefacts — regenerate with audit-scan.sh
+docs/audit/scan/
