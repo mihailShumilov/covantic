@@ -7328,6 +7328,14 @@
           {
             "name": "rewards",
             "type": "u64"
+          },
+          {
+            "name": "remaining",
+            "docs": [
+              "Principal still staked after this withdrawal. Non-zero when the",
+              "solvency floor capped the payout and the request stays open."
+            ],
+            "type": "u64"
           }
         ]
       }

@@ -69,6 +69,9 @@ pub struct Unstaked {
     pub staker: Pubkey,
     pub amount: u64,
     pub rewards: u64,
+    /// Principal still staked after this withdrawal. Non-zero when the
+    /// solvency floor capped the payout and the request stays open.
+    pub remaining: u64,
 }
 
 /// Event: staker rewards claimed

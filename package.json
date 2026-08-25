@@ -38,7 +38,8 @@
     "fleet:status": "pnpm --filter api exec tsx scripts/fleet-status.ts",
     "deploy:devnet": "bash scripts/deploy-devnet.sh",
     "demo": "tsx scripts/run-demo.ts",
-    "clean": "turbo run clean && rm -rf node_modules"
+    "clean": "turbo run clean && rm -rf node_modules",
+    "idl:sync": "bash scripts/sync-idl.sh"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^7",
