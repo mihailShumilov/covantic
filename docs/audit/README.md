@@ -1,11 +1,11 @@
 # Audit artefacts
 
-Output of the security engagement tooling in `.claude/skills/`.
+Output of the security engagement tooling in [`tools/audit/`](../../tools/audit).
 
-> `.claude/` is git-ignored by repo policy (`.gitignore:24`), so the skills,
-> agents and scripts referenced below are **not** in a fresh clone. The reports
-> in this directory are committed and stand on their own; regenerating the scan
-> artefacts requires that local tooling.
+Run the scripts straight from a fresh clone. To make the skills and agents
+loadable in Claude Code as well, run `bash tools/audit/install.sh` once — it
+symlinks them into the git-ignored `.claude/`, which is the only place they are
+discovered from.
 
 | Path | Written by | Committed |
 |---|---|---|
@@ -16,8 +16,8 @@ Output of the security engagement tooling in `.claude/skills/`.
 ## Running
 
 ```bash
-bash .claude/skills/static-analysis/scripts/audit-scope.sh   # freeze scope (P0)
-bash .claude/skills/static-analysis/scripts/audit-scan.sh    # automated sweep (P2)
+bash tools/audit/skills/static-analysis/scripts/audit-scope.sh   # freeze scope (P0)
+bash tools/audit/skills/static-analysis/scripts/audit-scan.sh    # automated sweep (P2)
 ```
 
 Freeze scope on a clean working tree — `audit-scope.sh` warns when it is dirty,
