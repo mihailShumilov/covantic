@@ -218,17 +218,32 @@ pub mod covantic {
     /// the solvency-based premium multiplier. Each argument is optional.
     pub fn update_config(
         ctx: Context<UpdateConfig>,
-        new_admin: Option<Pubkey>,
         new_oracle_authority: Option<Pubkey>,
         new_paused: Option<bool>,
         new_premium_multiplier_bps: Option<u16>,
     ) -> Result<()> {
         update_config_handler(
             ctx,
-            new_admin,
             new_oracle_authority,
             new_paused,
             new_premium_multiplier_bps,
         )
+    }
+
+    /// Propose a new protocol admin. Takes effect only once the candidate
+    /// calls `accept_admin`, so a mistyped key cannot capture the one role
+    /// that can pause the protocol and rotate the oracle authority.
+    pub fn propose_admin(ctx: Context<ProposeAdmin>, new_admin: Pubkey) -> Result<()> {
+        propose_admin_handler(ctx, new_admin)
+    }
+
+    /// Accept a pending admin transfer. Signed by the proposed admin.
+    pub fn accept_admin(ctx: Context<AcceptAdmin>) -> Result<()> {
+        accept_admin_handler(ctx)
+    }
+
+    /// Withdraw a pending admin transfer.
+    pub fn cancel_admin_transfer(ctx: Context<CancelAdminTransfer>) -> Result<()> {
+        cancel_admin_transfer_handler(ctx)
     }
 }

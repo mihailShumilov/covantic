@@ -43,6 +43,7 @@ const VAULT_SEED = Buffer.from('covantic_vault');
 const POLICY_SEED = Buffer.from('covantic_policy');
 const STAKER_SEED = Buffer.from('covantic_staker');
 const ATTESTATION_SEED = Buffer.from('covantic_attestation');
+const PENDING_ADMIN_SEED = Buffer.from('covantic_pending_admin');
 const CHECKPOINT_SEED = Buffer.from('covantic_checkpoint');
 const EXPLOIT_EVIDENCE_SEED = Buffer.from('covantic_exploit_evidence');
 const GOVERNANCE_BASELINE_SEED = Buffer.from('covantic_gov_baseline');
@@ -63,6 +64,10 @@ function u64LeBytes(value: BN): Buffer {
   const bytes = value.toArrayLike(Buffer, 'le', 8);
   bytes.copy(buf);
   return buf;
+}
+
+function pendingAdminPda(): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync([PENDING_ADMIN_SEED], PROGRAM_ID);
 }
 
 function policyPda(holder: PublicKey, policyId: BN): [PublicKey, number] {
@@ -2093,6 +2098,169 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
 
       await payout(policy, agent.publicKey, usdc(50)).rpc();
       await expect(payout(policy, agent.publicKey, usdc(50)).rpc()).rejects.toThrow();
+    });
+  });
+  // -------------------------------------------------------------------------
+  // Admin handover — two steps, on purpose
+  // -------------------------------------------------------------------------
+  //
+  // The admin is the only key that can pause the protocol or rotate the oracle
+  // authority, and `update_config` used to set it outright. A mistyped pubkey
+  // took effect immediately and irreversibly: no pause, no oracle rotation, no
+  // recovery path in the program, with the vault still live.
+  //
+  // These run last and hand the role back at the end, so the shared config is
+  // left exactly as the earlier tests set it up.
+  describe('admin handover', () => {
+    const candidate = Keypair.generate();
+
+    // `propose_admin` makes the proposing admin the rent payer for the pending
+    // PDA, so the candidate needs SOL before it can hand the role back.
+    beforeAll(async () => {
+      await airdropSol(context, candidate.publicKey);
+    });
+
+    it('refuses a proposal from someone who is not the admin', async () => {
+      const [config] = configPda();
+      const [pending] = pendingAdminPda();
+      await expect(
+        program.methods
+          .proposeAdmin(candidate.publicKey)
+          .accountsPartial({
+            admin: holder.publicKey,
+            config,
+            pending,
+            systemProgram: SystemProgram.programId,
+          } as any)
+          .signers([holder])
+          .rpc(),
+      ).rejects.toThrow();
+    });
+
+    it('refuses the zero key and the incumbent as candidates', async () => {
+      const [config] = configPda();
+      const [pending] = pendingAdminPda();
+      for (const bad of [PublicKey.default, admin.publicKey]) {
+        await expect(
+          program.methods
+            .proposeAdmin(bad)
+            .accountsPartial({
+              admin: admin.publicKey,
+              config,
+              pending,
+              systemProgram: SystemProgram.programId,
+            } as any)
+            .signers([admin])
+            .rpc(),
+        ).rejects.toThrow();
+      }
+    });
+
+    it('records a proposal without moving the role', async () => {
+      const [config] = configPda();
+      const [pending] = pendingAdminPda();
+
+      await program.methods
+        .proposeAdmin(candidate.publicKey)
+        .accountsPartial({
+          admin: admin.publicKey,
+          config,
+          pending,
+          systemProgram: SystemProgram.programId,
+        } as any)
+        .signers([admin])
+        .rpc();
+
+      const rec: any = await (program.account as any).pendingAdminTransfer.fetch(pending);
+      expect(rec.proposedAdmin.toBase58()).toBe(candidate.publicKey.toBase58());
+      expect(rec.proposedBy.toBase58()).toBe(admin.publicKey.toBase58());
+
+      // The whole point: proposing changes nothing until it is accepted.
+      const cfg: any = await (program.account as any).protocolConfig.fetch(config);
+      expect(cfg.admin.toBase58()).toBe(admin.publicKey.toBase58());
+    });
+
+    it('refuses acceptance from a key that was not proposed', async () => {
+      const [config] = configPda();
+      const [pending] = pendingAdminPda();
+      await expect(
+        program.methods
+          .acceptAdmin()
+          .accountsPartial({
+            newAdmin: holder.publicKey,
+            config,
+            pending,
+            rentRefund: admin.publicKey,
+          } as any)
+          .signers([holder])
+          .rpc(),
+      ).rejects.toThrow();
+    });
+
+    it('moves the role only when the proposed key signs, and refunds the proposer', async () => {
+      const [config] = configPda();
+      const [pending] = pendingAdminPda();
+
+      await program.methods
+        .acceptAdmin()
+        .accountsPartial({
+          newAdmin: candidate.publicKey,
+          config,
+          pending,
+          rentRefund: admin.publicKey,
+        } as any)
+        .signers([candidate])
+        .rpc();
+
+      const cfg: any = await (program.account as any).protocolConfig.fetch(config);
+      expect(cfg.admin.toBase58()).toBe(candidate.publicKey.toBase58());
+
+      // Closed, so a second acceptance has nothing to replay against.
+      const closed = await (program.account as any).pendingAdminTransfer
+        .fetchNullable(pending)
+        .catch(() => null);
+      expect(closed).toBeNull();
+    });
+
+    it('locks out the previous admin once the handover completes', async () => {
+      const [config] = configPda();
+      await expect(
+        program.methods
+          .updateConfig(null, true, null)
+          .accountsPartial({ admin: admin.publicKey, config } as any)
+          .signers([admin])
+          .rpc(),
+      ).rejects.toThrow();
+    });
+
+    it('hands the role back, leaving the shared config as it was', async () => {
+      const [config] = configPda();
+      const [pending] = pendingAdminPda();
+
+      await program.methods
+        .proposeAdmin(admin.publicKey)
+        .accountsPartial({
+          admin: candidate.publicKey,
+          config,
+          pending,
+          systemProgram: SystemProgram.programId,
+        } as any)
+        .signers([candidate])
+        .rpc();
+
+      await program.methods
+        .acceptAdmin()
+        .accountsPartial({
+          newAdmin: admin.publicKey,
+          config,
+          pending,
+          rentRefund: candidate.publicKey,
+        } as any)
+        .signers([admin])
+        .rpc();
+
+      const cfg: any = await (program.account as any).protocolConfig.fetch(config);
+      expect(cfg.admin.toBase58()).toBe(admin.publicKey.toBase58());
     });
   });
 });

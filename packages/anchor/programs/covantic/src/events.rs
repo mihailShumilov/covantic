@@ -233,3 +233,26 @@ pub struct AgentErrorProofVerified {
     pub payout_amount: u64,
     pub bundle_hash: [u8; 32],
 }
+
+/// The admin role is the only key that can pause the protocol or rotate the
+/// oracle authority, so every step of a handover is on the record.
+#[event]
+pub struct AdminTransferProposed {
+    pub current_admin: Pubkey,
+    pub proposed_admin: Pubkey,
+    pub proposed_at: i64,
+}
+
+#[event]
+pub struct AdminTransferred {
+    pub previous_admin: Pubkey,
+    pub new_admin: Pubkey,
+    pub accepted_at: i64,
+}
+
+#[event]
+pub struct AdminTransferCancelled {
+    pub admin: Pubkey,
+    pub proposed_admin: Pubkey,
+    pub cancelled_at: i64,
+}

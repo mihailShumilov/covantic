@@ -1,3 +1,4 @@
+pub mod admin_transfer;
 pub mod cancel_policy;
 pub mod declare_agent_mandate;
 pub mod checkpoint_authority;
@@ -19,6 +20,7 @@ pub mod verify_and_payout_exploit;
 pub mod verify_and_payout_governance;
 pub mod verify_and_payout_v2;
 
+pub use admin_transfer::*;
 pub use cancel_policy::*;
 pub use declare_agent_mandate::*;
 pub use checkpoint_authority::*;

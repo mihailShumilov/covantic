@@ -185,6 +185,16 @@ pub enum CovanticError {
     #[msg("Payout exceeds the mandate breach the program measured")]
     PayoutExceedsProvenBreach,
 
+    // -- Admin Transfer --
+    #[msg("Proposed admin must be a real key and not the current admin")]
+    InvalidAdminCandidate,
+
+    #[msg("Signer is not the proposed admin")]
+    NotProposedAdmin,
+
+    #[msg("Rent refund account is not the admin that opened the proposal")]
+    InvalidRentRefund,
+
     // -- Math Errors --
     #[msg("Arithmetic overflow")]
     MathOverflow,

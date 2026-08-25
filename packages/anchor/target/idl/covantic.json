@@ -12,6 +12,194 @@
   ],
   "instructions": [
     {
+      "name": "accept_admin",
+      "docs": [
+        "Accept a pending admin transfer. Signed by the proposed admin."
+      ],
+      "discriminator": [
+        112,
+        42,
+        45,
+        90,
+        116,
+        181,
+        13,
+        170
+      ],
+      "accounts": [
+        {
+          "name": "new_admin",
+          "docs": [
+            "The proposed admin. Must sign — that signature is the guarantee the",
+            "key exists and is controlled."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pending",
+          "docs": [
+            "Closed on success, refunding rent to the admin that opened the",
+            "proposal rather than to whoever happens to accept it."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  112,
+                  101,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  95,
+                  97,
+                  100,
+                  109,
+                  105,
+                  110
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "rent_refund",
+          "docs": [
+            "rent, and the constraint pins it to the recorded proposer."
+          ],
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "cancel_admin_transfer",
+      "docs": [
+        "Withdraw a pending admin transfer."
+      ],
+      "discriminator": [
+        38,
+        131,
+        157,
+        31,
+        240,
+        137,
+        44,
+        215
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pending",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  112,
+                  101,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  95,
+                  97,
+                  100,
+                  109,
+                  105,
+                  110
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "cancel_policy",
       "docs": [
         "Cancel a policy with partial refund."
@@ -1779,6 +1967,109 @@
       ]
     },
     {
+      "name": "propose_admin",
+      "docs": [
+        "Propose a new protocol admin. Takes effect only once the candidate",
+        "calls `accept_admin`, so a mistyped key cannot capture the one role",
+        "that can pause the protocol and rotate the oracle authority."
+      ],
+      "discriminator": [
+        121,
+        214,
+        199,
+        212,
+        87,
+        39,
+        117,
+        234
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pending",
+          "docs": [
+            "`init_if_needed` so the admin can replace a proposal without a separate",
+            "cancel. Safe here in a way it is not on the checkpoint accounts: this",
+            "holds no running total and no previous value, and the handler rewrites",
+            "every field, so nothing survives an overwrite."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  112,
+                  101,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  95,
+                  97,
+                  100,
+                  109,
+                  105,
+                  110
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "new_admin",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
       "name": "request_unstake",
       "docs": [
         "Request unstake (starts 48h cooldown)."
@@ -2117,12 +2408,6 @@
         }
       ],
       "args": [
-        {
-          "name": "new_admin",
-          "type": {
-            "option": "pubkey"
-          }
-        },
         {
           "name": "new_oracle_authority",
           "type": {
@@ -3731,6 +4016,19 @@
       ]
     },
     {
+      "name": "PendingAdminTransfer",
+      "discriminator": [
+        197,
+        99,
+        208,
+        208,
+        175,
+        41,
+        86,
+        46
+      ]
+    },
+    {
       "name": "PolicyAgentMandate",
       "discriminator": [
         204,
@@ -3810,6 +4108,45 @@
     }
   ],
   "events": [
+    {
+      "name": "AdminTransferCancelled",
+      "discriminator": [
+        93,
+        23,
+        69,
+        55,
+        216,
+        128,
+        106,
+        56
+      ]
+    },
+    {
+      "name": "AdminTransferProposed",
+      "discriminator": [
+        203,
+        168,
+        175,
+        51,
+        239,
+        104,
+        20,
+        85
+      ]
+    },
+    {
+      "name": "AdminTransferred",
+      "discriminator": [
+        255,
+        147,
+        182,
+        5,
+        199,
+        217,
+        38,
+        179
+      ]
+    },
     {
       "name": "AgentErrorProofVerified",
       "discriminator": [
@@ -4333,16 +4670,95 @@
     },
     {
       "code": 6057,
+      "name": "InvalidAdminCandidate",
+      "msg": "Proposed admin must be a real key and not the current admin"
+    },
+    {
+      "code": 6058,
+      "name": "NotProposedAdmin",
+      "msg": "Signer is not the proposed admin"
+    },
+    {
+      "code": 6059,
+      "name": "InvalidRentRefund",
+      "msg": "Rent refund account is not the admin that opened the proposal"
+    },
+    {
+      "code": 6060,
       "name": "MathOverflow",
       "msg": "Arithmetic overflow"
     },
     {
-      "code": 6058,
+      "code": 6061,
       "name": "ZeroPayout",
       "msg": "Payout amount must be greater than zero"
     }
   ],
   "types": [
+    {
+      "name": "AdminTransferCancelled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "proposed_admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "cancelled_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AdminTransferProposed",
+      "docs": [
+        "The admin role is the only key that can pause the protocol or rotate the",
+        "oracle authority, so every step of a handover is on the record."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "current_admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "proposed_admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "proposed_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AdminTransferred",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "previous_admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "new_admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "accepted_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
     {
       "name": "AgentErrorEvidenceRecord",
       "docs": [
@@ -6017,6 +6433,57 @@
                 32
               ]
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "PendingAdminTransfer",
+      "docs": [
+        "A proposed handover of the protocol admin role, awaiting the candidate's",
+        "signature.",
+        "",
+        "This lives in its own PDA rather than as a field on `ProtocolConfig`",
+        "deliberately. `ProtocolConfig` is created once at initialization and sized",
+        "from its struct; adding a field to it would leave the already-deployed",
+        "config account too small to deserialize, requiring a realloc migration",
+        "before the program could read its own config again. A separate account",
+        "that only exists while a transfer is pending has no such problem — the",
+        "deployed config is untouched, and the PDA is closed when the transfer",
+        "completes or is cancelled.",
+        "",
+        "PDA: seeds = [b\"covantic_pending_admin\"] — one at a time, protocol-wide."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "proposed_admin",
+            "docs": [
+              "The only key that may accept this transfer."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "proposed_by",
+            "docs": [
+              "The admin that opened it, and the account rent is refunded to when the",
+              "transfer completes or is cancelled."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "proposed_at",
+            "docs": [
+              "When the proposal was made. Not enforced as an expiry — a stale",
+              "proposal is visible on chain and the admin can cancel it — but it makes",
+              "an abandoned handover obvious to anyone reading the account."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
           }
         ]
       }

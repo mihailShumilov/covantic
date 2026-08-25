@@ -10,6 +10,10 @@ pub const STAKER_SEED: &[u8] = b"covantic_staker";
 /// Seed for ProtocolConfig PDA
 pub const CONFIG_SEED: &[u8] = b"covantic_config";
 
+/// Seed for the pending-admin-transfer PDA. One handover at a time,
+/// protocol-wide.
+pub const PENDING_ADMIN_SEED: &[u8] = b"covantic_pending_admin";
+
 /// Seed for vault token account PDA
 pub const VAULT_TOKEN_SEED: &[u8] = b"covantic_vault_token";
 
