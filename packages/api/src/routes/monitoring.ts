@@ -16,6 +16,7 @@ import { readMonitorMetrics } from '../utils/monitor-metrics.js';
 import { MandateReader } from '../services/agent-error/mandate.js';
 import { createCovanticProgram } from '../utils/program.js';
 import { logger } from '../utils/logger.js';
+import { syntheticAllowed } from '../services/synthetic-gate.js';
 
 /** Stripped-down shape we require from the Helius enhanced-transaction
  *  payload. Everything else is ignored, including fields we'd otherwise
@@ -236,7 +237,12 @@ export async function monitoringRoutes(app: FastifyInstance) {
    *  Guarded by NODE_ENV so the `simulated` flag can never originate in
    *  production. */
   app.post('/api/demo/simulate-exploit', async (request, reply) => {
-    if (app.config.NODE_ENV === 'production') {
+    // Same gate the claim-keeper applies to the synthetic verifier, not a
+    // thinner one. This endpoint is unauthenticated and injects both the
+    // monitoring event and the signed alert that drive a claim, so gating it
+    // on NODE_ENV alone left a mainnet deployment with a stray NODE_ENV one
+    // request away from a synthetic claim against a real policy.
+    if (!syntheticAllowed(app.config)) {
       return reply.status(404).send({ error: 'Not found' });
     }
 

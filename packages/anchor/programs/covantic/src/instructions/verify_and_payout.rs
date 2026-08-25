@@ -37,6 +37,13 @@ pub fn verify_and_payout_handler(ctx: Context<VerifyAndPayout>, payout_amount: u
         CovanticError::PayoutExceedsCoverage
     );
 
+    // A zero payout transfers nothing but still flips the policy to
+    // `ClaimPaid` and releases the coverage — closing a live claim for free.
+    // Nothing legitimate submits one. The keeper already rejects a zero
+    // payout before it gets here; this is the same guard on the chain, where
+    // it does not depend on the caller being the keeper.
+    require!(payout_amount > 0, CovanticError::ZeroPayout);
+
     // Check lock period for the trigger type
     let lock_period = match policy.trigger_type {
         TRIGGER_EXPLOIT => LOCK_EXPLOIT,

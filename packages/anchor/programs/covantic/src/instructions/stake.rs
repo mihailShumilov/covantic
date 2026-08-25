@@ -29,7 +29,10 @@ pub fn pending_reward_delta(
         .ok_or(CovanticError::MathOverflow)?
         .checked_div(REWARD_PER_STAKE_SCALE)
         .ok_or(CovanticError::MathOverflow)?;
-    Ok(earned as u64)
+    // Narrowing here was unbounded. A reward that does not fit u64 means the
+    // accumulator is already wrong; truncating would pay a silently wrong
+    // number, so fail the transaction instead.
+    u64::try_from(earned).map_err(|_| error!(CovanticError::MathOverflow))
 }
 
 /// Crystallize outstanding rewards for a staker into rewards_pending
@@ -109,11 +112,16 @@ pub fn stake_handler(ctx: Context<Stake>, amount: u64) -> Result<()> {
 
     // Update share_bps (lazy — informational only)
     if vault.total_staked > 0 {
-        staker_position.share_bps = ((staker_position.amount_staked as u128)
+        // Clamped rather than cast bare: this is only <= 10000 while
+        // amount_staked <= total_staked, an invariant maintained in another
+        // instruction. `InsuranceVault::recalculate_solvency` clamps the
+        // sibling ratio for the same reason — keep the two in step.
+        staker_position.share_bps = (staker_position.amount_staked as u128)
             .checked_mul(10000)
             .ok_or(CovanticError::MathOverflow)?
             .checked_div(vault.total_staked as u128)
-            .ok_or(CovanticError::MathOverflow)?) as u16;
+            .ok_or(CovanticError::MathOverflow)?
+            .min(u16::MAX as u128) as u16;
     }
 
     emit!(Staked {
