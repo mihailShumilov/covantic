@@ -23,4 +23,8 @@ COPY packages/anchor/target/idl/ ./packages/anchor/target/idl/
 RUN pnpm --filter shared build && pnpm --filter api build
 
 EXPOSE 4000
+# Drop privileges. The image only reads from /app and writes nothing at
+# runtime, so there is no reason for the process to be root.
+USER node
+
 CMD ["pnpm", "--filter", "api", "start"]

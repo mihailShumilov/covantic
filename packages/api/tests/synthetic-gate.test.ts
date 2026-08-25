@@ -42,8 +42,6 @@ describe('syntheticAllowed', () => {
   it('refuses a mainnet mint even when NODE_ENV claims development', () => {
     // The specific misconfiguration the third condition exists for: real USDC
     // reachable from a deployment whose NODE_ENV was never switched over.
-    expect(
-      syntheticAllowed(withField('USDC_MINT', MAINNET_USDC_MINT)),
-    ).toBe(false);
+    expect(syntheticAllowed(withField('USDC_MINT', MAINNET_USDC_MINT))).toBe(false);
   });
 });

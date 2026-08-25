@@ -19,30 +19,44 @@ from a fresh clone and need no install.
 
 ## Skills
 
-| Skill | Role |
-|---|---|
-| `audit-engagement` | The playbook. Seven phases, each with an exit gate: scope freeze → threat model → automated sweep → specialist review → formal verification → centralization → report → remediation re-audit |
-| `finding-classification` | Likelihood × Impact matrix, category taxonomy, finding IDs, status lifecycle, dedup rules, and severity calibration already settled for this protocol |
-| `audit-report` | The deliverable, plus a report template |
-| `formal-verification` | Seven invariants mapped onto the bankrun and vitest harnesses this repo already has |
-| `static-analysis` | Toolchain, triage protocol, and a 14-pattern Solana/protocol grep checklist |
-| `centralization-risk` | Privileged-role table, key custody, upgrade authority, trust ladder |
+| Skill                    | Role                                                                                                                                                                                         |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `audit-engagement`       | The playbook. Seven phases, each with an exit gate: scope freeze → threat model → automated sweep → specialist review → formal verification → centralization → report → remediation re-audit |
+| `finding-classification` | Likelihood × Impact matrix, category taxonomy, finding IDs, status lifecycle, dedup rules, and severity calibration already settled for this protocol                                        |
+| `audit-report`           | The deliverable, plus a report template                                                                                                                                                      |
+| `formal-verification`    | Seven invariants mapped onto the bankrun and vitest harnesses this repo already has                                                                                                          |
+| `static-analysis`        | Toolchain, triage protocol, and a 14-pattern Solana/protocol grep checklist                                                                                                                  |
+| `centralization-risk`    | Privileged-role table, key custody, upgrade authority, trust ladder                                                                                                                          |
+| `security-audit`         | The fast protocol-aware pass for a diff or a flag check                                                                                                                                      |
+| `anchor-security`        | Account-validation, arithmetic and authority checklist for the program                                                                                                                       |
+| `trigger-hardening`      | The house pattern for building a coverage trigger on verifiable evidence                                                                                                                     |
 
 ## Agents
 
-| Agent | Surface |
-|---|---|
-| `audit-lead` | Scope, coverage matrix, dedup, severity arbitration, report assembly. Finds nothing itself |
-| `crypto-signature-auditor` | HMAC alerts, Pyth guardian verification, evidence hashing, replay and domain separation |
-| `centralization-risk-auditor` | What each privileged key can take, break, and who could stop it |
-| `dependency-supply-chain-auditor` | Advisories with reachability established before severity |
-| `formal-verification-engineer` | Turns asserted invariants into executable, mutation-proved tests |
-| `remediation-verifier` | Re-derives each exploit path against the fix. The only agent that may mark a finding Resolved |
-| `automated-scan-triage` | Runs the scanners, returns surviving leads, keeps tool output out of context |
+| Agent                             | Surface                                                                                       |
+| --------------------------------- | --------------------------------------------------------------------------------------------- |
+| `audit-lead`                      | Scope, coverage matrix, dedup, severity arbitration, report assembly. Finds nothing itself    |
+| `crypto-signature-auditor`        | HMAC alerts, Pyth guardian verification, evidence hashing, replay and domain separation       |
+| `centralization-risk-auditor`     | What each privileged key can take, break, and who could stop it                               |
+| `dependency-supply-chain-auditor` | Advisories with reachability established before severity                                      |
+| `formal-verification-engineer`    | Turns asserted invariants into executable, mutation-proved tests                              |
+| `remediation-verifier`            | Re-derives each exploit path against the fix. The only agent that may mark a finding Resolved |
+| `automated-scan-triage`           | Runs the scanners, returns surviving leads, keeps tool output out of context                  |
 
-These sit alongside the four protocol-specific auditors already in `.claude/agents/`
-(`solana-program-auditor`, `protocol-economics-auditor`, `paranoic-security-auditor`,
-`claim-invariant-guard`), which the engagement dispatches in its manual-review phase.
+### Protocol-specific auditors
+
+Tracked here too, so the whole security set lives in one place:
+
+| Agent                        | Surface                                                               |
+| ---------------------------- | --------------------------------------------------------------------- |
+| `solana-program-auditor`     | The Anchor program — account validation, seeds, arithmetic, authority |
+| `protocol-economics-auditor` | Moral hazard, self-dealing, adverse selection, solvency drain         |
+| `paranoic-security-auditor`  | API, workers, web, Docker, secrets, the OWASP surface                 |
+| `claim-invariant-guard`      | The written invariants in `CLAUDE.md` and the claim pipeline          |
+
+The engagement dispatches these in its manual-review phase. Three
+general-purpose agents (`code-documenter`, `code-smell-detector`,
+`system-architect`) stay in `.claude/` — they are not audit tooling.
 
 ## Scripts
 

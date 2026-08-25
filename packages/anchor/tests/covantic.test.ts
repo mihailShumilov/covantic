@@ -656,31 +656,26 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
   });
 
   /**
-   * Known defect, pinned here rather than hidden.
+   * The vault's accounting identity, which two separate defects used to break.
    *
-   * This used to pin a different one: the loss cascade decremented
-   * `vault.total_staked` while no `StakerPosition` moved, so a socialised loss
-   * was not socialised — the first staker out was paid in full and the last
-   * absorbed everything. That is fixed. `absorb_loss` now scales
-   * `vault.loss_index` by exactly the factor the pool shrank by, and
-   * `settle_losses` revalues each position against it, which the first two
-   * assertions below check.
+   *   vault token balance  ==  total_staked
+   *                          + total_staker_rewards
+   *                          + reserve_fund
+   *                          + protocol_treasury
    *
-   * What remains is a *separate* accounting gap, and it is what still stops
-   * this withdrawal: the vault's recorded obligations
-   * (`total_staked + total_staker_rewards + reserve_fund + protocol_treasury`)
-   * can exceed the vault token account's balance. `total_staker_rewards` is a
-   * ledger, while each staker's owed rewards are derived independently from
-   * `reward_per_stake_acc`; integer division makes the two drift, and the
-   * cascade deliberately does not reduce the reward ledger when principal
-   * absorbs a loss. Over a long sequence the derived rewards outrun what the
-   * vault holds, and the SPL transfer fails.
+   * The first break was ECO-02: the loss cascade decremented `total_staked`
+   * while no `StakerPosition` moved, so a socialised loss was not socialised
+   * and the first staker out was paid in full. The second was ECO-03:
+   * `cancel_policy` transferred a refund out of the vault while reducing no
+   * counter at all, having already split that premium 70/20/10 into the three
+   * buckets when the policy was written — so cancelling handed part of it back
+   * twice, once as tokens and once as an obligation still on the books.
    *
-   * Measured here rather than asserted in the abstract. Expected to start
-   * failing the day the reward ledger and the accumulator are reconciled,
-   * which is the signal wanted.
+   * Neither surfaced where it was caused. Both surfaced as an opaque SPL
+   * `InsufficientFunds` on whichever staker withdrew last, which is why this
+   * asserts the identity itself rather than the symptom.
    */
-  it('socialises the loss onto positions, but the reward ledger still outruns the vault', async () => {
+  it('holds the vault accounting identity, and pays the last staker out in full', async () => {
     const [position] = stakerPda(staker.publicKey);
     const [vault] = vaultPda();
 
@@ -690,40 +685,43 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
     const pos: any = await (program.account as any).stakerPosition.fetch(position);
     const vaultBalance = await getAccount(provider.connection as any, vaultAta);
 
-    // (1) A loss was socialised: the index moved off whole.
+    // (1) A loss was socialised — the index moved off whole.
     const SCALE = 1_000_000_000_000n;
     const lossIndex = BigInt(v.lossIndex.toString());
     expect(lossIndex).toBeLessThan(SCALE);
 
-    // (2) The position now carries its share. Revalued, it no longer claims
-    //     more principal than the pool actually holds — which is exactly what
-    //     it did before, and why the first withdrawal used to drain it.
+    // (2) The position carries its share. Revalued, it no longer claims more
+    //     principal than the pool holds — which is what it did before, and why
+    //     the first withdrawal used to drain the vault.
     const snapshot = BigInt(pos.lossIndexSnapshot.toString()) || SCALE;
     const revalued = (BigInt(pos.amountStaked.toString()) * lossIndex) / snapshot;
     expect(revalued).toBeLessThanOrEqual(BigInt(v.totalStaked.toString()));
 
-    // (3) The gap that is left, stated as a number rather than a worry.
+    // (3) The identity, exactly. Every token in the vault is spoken for, and
+    //     nothing is spoken for twice.
     const obligations =
       BigInt(v.totalStaked.toString()) +
       BigInt(v.totalStakerRewards.toString()) +
       BigInt(v.reserveFund.toString()) +
       BigInt(v.protocolTreasury.toString());
-    expect(obligations).toBeGreaterThan(vaultBalance.amount);
+    expect(obligations).toBe(vaultBalance.amount);
 
-    await expect(
-      program.methods
-        .executeUnstake()
-        .accountsPartial({
-          staker: staker.publicKey,
-          stakerPosition: position,
-          vault,
-          vaultTokenAccount: vaultAta,
-          stakerTokenAccount: stakerAta,
-          tokenProgram: TOKEN_PROGRAM_ID,
-        } as any)
-        .signers([staker])
-        .rpc(),
-    ).rejects.toThrow();
+    // (4) And so the withdrawal that used to fail now settles.
+    const before = await getAccount(provider.connection as any, stakerAta);
+    await program.methods
+      .executeUnstake()
+      .accountsPartial({
+        staker: staker.publicKey,
+        stakerPosition: position,
+        vault,
+        vaultTokenAccount: vaultAta,
+        stakerTokenAccount: stakerAta,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      } as any)
+      .signers([staker])
+      .rpc();
+    const after = await getAccount(provider.connection as any, stakerAta);
+    expect(after.amount).toBeGreaterThan(before.amount);
   });
 
   it('allows a staker to claim proportional rewards', async () => {

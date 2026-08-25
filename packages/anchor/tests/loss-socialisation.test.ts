@@ -321,8 +321,7 @@ describe.skipIf(!hasIdl)('loss socialisation across stakers', () => {
 
     // The index falls by exactly the factor the pool did. This is the link
     // that did not exist: total_staked moved on its own before.
-    const expectedIndex =
-      (BigInt(before.lossIndex.toString()) * stakedAfter) / stakedBefore;
+    const expectedIndex = (BigInt(before.lossIndex.toString()) * stakedAfter) / stakedBefore;
     expect(BigInt(after.lossIndex.toString())).toBe(expectedIndex);
     expect(BigInt(after.lossIndex.toString())).toBeLessThan(10n ** 12n);
   });
@@ -522,6 +521,15 @@ describe.skipIf(!hasIdl)('migration from the pre-loss-index layout', () => {
 
   it('is idempotent — a second call changes nothing', async () => {
     const [vault] = vaultPda();
+
+    // Advance a slot first. This call is byte-identical to the one in the
+    // previous test, so without a fresh blockhash the two transactions
+    // serialize to the same signature and the second is rejected as
+    // already-processed — which surfaces as an opaque bankrun error and looks
+    // exactly like a program failure. The same hazard `advanceClockBySeconds`
+    // documents; it made this test fail about one run in three.
+    await advanceClockBySeconds(context, 1);
+
     const before = await banks.getAccount(vault);
 
     await program.methods

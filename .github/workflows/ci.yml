@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+# Least privilege: no job here reads a secret or writes to the repo, so the
+# workflow does not need the repository default token scope.
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest

@@ -17,6 +17,7 @@ import { MandateReader } from '../services/agent-error/mandate.js';
 import { createCovanticProgram } from '../utils/program.js';
 import { logger } from '../utils/logger.js';
 import { syntheticAllowed } from '../services/synthetic-gate.js';
+import { demoSimulationRateLimit } from '../middleware/rate-limit.js';
 
 /** Stripped-down shape we require from the Helius enhanced-transaction
  *  payload. Everything else is ignored, including fields we'd otherwise
@@ -236,47 +237,51 @@ export async function monitoringRoutes(app: FastifyInstance) {
   /** POST /api/demo/simulate-exploit — Simulate an exploit for demo (development only).
    *  Guarded by NODE_ENV so the `simulated` flag can never originate in
    *  production. */
-  app.post('/api/demo/simulate-exploit', async (request, reply) => {
-    // Same gate the claim-keeper applies to the synthetic verifier, not a
-    // thinner one. This endpoint is unauthenticated and injects both the
-    // monitoring event and the signed alert that drive a claim, so gating it
-    // on NODE_ENV alone left a mainnet deployment with a stray NODE_ENV one
-    // request away from a synthetic claim against a real policy.
-    if (!syntheticAllowed(app.config)) {
-      return reply.status(404).send({ error: 'Not found' });
-    }
+  app.post(
+    '/api/demo/simulate-exploit',
+    { preHandler: [demoSimulationRateLimit] },
+    async (request, reply) => {
+      // Same gate the claim-keeper applies to the synthetic verifier, not a
+      // thinner one. This endpoint is unauthenticated and injects both the
+      // monitoring event and the signed alert that drive a claim, so gating it
+      // on NODE_ENV alone left a mainnet deployment with a stray NODE_ENV one
+      // request away from a synthetic claim against a real policy.
+      if (!syntheticAllowed(app.config)) {
+        return reply.status(404).send({ error: 'Not found' });
+      }
 
-    const { agentAddress, type } = z
-      .object({
-        agentAddress: z.string().regex(SOLANA_ADDRESS_REGEX, 'Invalid Solana address'),
-        type: z.enum([
-          MonitoringEventType.Exploit,
-          MonitoringEventType.OracleDeviation,
-          MonitoringEventType.AgentError,
-          MonitoringEventType.GovernanceAttack,
-        ]),
-      })
-      .parse(request.body);
+      const { agentAddress, type } = z
+        .object({
+          agentAddress: z.string().regex(SOLANA_ADDRESS_REGEX, 'Invalid Solana address'),
+          type: z.enum([
+            MonitoringEventType.Exploit,
+            MonitoringEventType.OracleDeviation,
+            MonitoringEventType.AgentError,
+            MonitoringEventType.GovernanceAttack,
+          ]),
+        })
+        .parse(request.body);
 
-    await app.db.insert(monitoringEvents).values({
-      agentAddress,
-      eventType: type,
-      severity: 'critical',
-      txSignature: generateDemoTxSignature(),
-      details: {
-        simulated: true,
-        type,
+      await app.db.insert(monitoringEvents).values({
+        agentAddress,
+        eventType: type,
+        severity: 'critical',
+        txSignature: generateDemoTxSignature(),
+        details: {
+          simulated: true,
+          type,
+          timestamp: Date.now(),
+        },
+      });
+
+      await publishAlert(app.redis, app.config.ALERT_HMAC_SECRET, {
+        channel: 'monitoring:alerts',
+        event: type,
+        data: { agentAddress, type, simulated: true },
         timestamp: Date.now(),
-      },
-    });
+      });
 
-    await publishAlert(app.redis, app.config.ALERT_HMAC_SECRET, {
-      channel: 'monitoring:alerts',
-      event: type,
-      data: { agentAddress, type, simulated: true },
-      timestamp: Date.now(),
-    });
-
-    return reply.send({ success: true, message: `Simulated ${type} for ${agentAddress}` });
-  });
+      return reply.send({ success: true, message: `Simulated ${type} for ${agentAddress}` });
+    },
+  );
 }

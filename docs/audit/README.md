@@ -7,11 +7,11 @@ loadable in Claude Code as well, run `bash tools/audit/install.sh` once — it
 symlinks them into the git-ignored `.claude/`, which is the only place they are
 discovered from.
 
-| Path | Written by | Committed |
-|---|---|---|
-| `SCOPE.md` | `audit-scope.sh` | Yes — it is what a report's findings are pinned to |
-| `AUDIT-{date}-{commit8}.md` | `audit-lead` | Yes |
-| `scan/` | `audit-scan.sh` | No — regenerate it; raw tool output goes stale and can echo secrets |
+| Path                        | Written by       | Committed                                                           |
+| --------------------------- | ---------------- | ------------------------------------------------------------------- |
+| `SCOPE.md`                  | `audit-scope.sh` | Yes — it is what a report's findings are pinned to                  |
+| `AUDIT-{date}-{commit8}.md` | `audit-lead`     | Yes                                                                 |
+| `scan/`                     | `audit-scan.sh`  | No — regenerate it; raw tool output goes stale and can echo secrets |
 
 ## Running
 

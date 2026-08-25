@@ -302,9 +302,9 @@ describe.skipIf(!hasIdl)('unstake — solvency floor', () => {
     const expected = BigInt(usdc(STAKED).toString()) - reserve;
 
     // Principal released is exact — that is the quantity the floor governs.
-    expect(
-      BigInt(vBefore.totalStaked.toString()) - BigInt(vAfter.totalStaked.toString()),
-    ).toBe(expected);
+    expect(BigInt(vBefore.totalStaked.toString()) - BigInt(vAfter.totalStaked.toString())).toBe(
+      expected,
+    );
 
     // The transfer carries accrued rewards on top of principal. Rewards are
     // the staker's share of premiums, not backing capital: `solvency_ratio`
