@@ -27,7 +27,8 @@
     "claim:replay": "tsx scripts/claim-replay.ts",
     "gov:declare": "tsx scripts/declare-governance-baseline.ts",
     "mandate:declare": "tsx scripts/declare-agent-mandate.ts",
-    "backtest:fetch": "tsx scripts/backtest-fetch.ts"
+    "backtest:fetch": "tsx scripts/backtest-fetch.ts",
+    "migrate:accounts": "tsx scripts/migrate-accounts.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",

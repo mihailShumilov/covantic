@@ -69,12 +69,22 @@ export function solvencyStatus(ratioBps: number): SolvencyStatus {
   return SolvencyStatus.Emergency;
 }
 
-/** Format USDC lamports as human-readable string */
+/**
+ * Format USDC base units as a human-readable string.
+ *
+ * Two decimals, with one exception: an amount that is not zero never renders
+ * as `0.00`. A short policy on small coverage costs a fraction of a cent —
+ * 100 USDC for 24 hours at the LOW tier is 2,740 base units, $0.00274 — and
+ * showing that as `$0.00` hides both the number and the fact that there is
+ * one, on the screen where someone is deciding whether to pay it. Six
+ * decimals is USDC's own precision, so it is the most that can be shown.
+ */
 export function formatUsdc(lamports: number): string {
   const amount = lamports / 1_000_000;
+  const roundsToZero = amount !== 0 && Math.abs(amount) < 0.005;
   return amount.toLocaleString('en-US', {
     minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+    maximumFractionDigits: roundsToZero ? 6 : 2,
   });
 }
 
