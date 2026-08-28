@@ -68,9 +68,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: packages/anchor
+      # Agave 3.x, not 2.1.x. Anchor 1.x drives `cargo-build-sbf` from the
+      # Solana install, and the 2.1 layout makes it panic with a bare
+      # `NotFound` before it compiles anything. 3.1.14 is the version the
+      # build and the 78-test suite were validated against.
       - name: Install Solana CLI
         run: |
-          sh -c "$(curl -sSfL https://release.anza.xyz/v2.1.21/install)"
+          sh -c "$(curl -sSfL https://release.anza.xyz/v3.1.14/install)"
           echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
       # From crates.io, not npm. The npm distribution of anchor-cli ships a
       # launcher that cannot find its own binary and *exits zero* when it
