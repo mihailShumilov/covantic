@@ -1,5 +1,5 @@
 import anchorPkg from '@coral-xyz/anchor';
-import { PythSolanaReceiver } from '@pythnetwork/pyth-solana-receiver';
+import type { PythSolanaReceiver } from '@pythnetwork/pyth-solana-receiver';
 import {
   PublicKey,
   SystemProgram,
@@ -80,7 +80,7 @@ export class ProofPoster {
     const holderAta = getAssociatedTokenAddressSync(cfg.usdcMint, holder);
     const evidenceRecord = this.deriveEvidencePda(policy);
 
-    const receiver = this.getReceiver();
+    const receiver = await this.getReceiver();
     const builder = receiver.newTransactionBuilder({
       // Reclaim the rent: the update account exists only to be read by the
       // payout instruction in the same bundle.
@@ -143,9 +143,28 @@ export class ProofPoster {
     return signatures;
   }
 
-  private getReceiver(): PythSolanaReceiver {
+  /**
+   * Load the Pyth receiver on first use, not at import time.
+   *
+   * The import has to be dynamic, and the reason is worth recording because
+   * it cost a production boot. `@pythnetwork/pyth-solana-receiver` pulls in
+   * `@pythnetwork/solana-utils`, which imports `jito-ts` by an extensionless
+   * path; Node's ESM resolver will not resolve that, so merely *loading* this
+   * module throws `ERR_MODULE_NOT_FOUND` and takes the whole API process down
+   * at startup. Nothing catches it, because it happens before any code runs.
+   *
+   * Deferring it to the first proven settlement matches what the dependency
+   * is for. The proof paths are opt-in and off until the program carrying
+   * them is deployed, so on a deployment that never posts a proof this
+   * package is never loaded at all — and if it does fail, it fails inside a
+   * claim that then stalls rather than taking the API with it.
+   */
+  private async getReceiver(): Promise<PythSolanaReceiver> {
     if (!this.receiver) {
-      this.receiver = new PythSolanaReceiver({
+      const { PythSolanaReceiver: Receiver } = await import(
+        '@pythnetwork/pyth-solana-receiver'
+      );
+      this.receiver = new Receiver({
         connection: this.connection,
         wallet: this.ctx.provider.wallet as never,
       });
