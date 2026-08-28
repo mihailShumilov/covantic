@@ -226,8 +226,10 @@ independent exchanges at the February 2022 block time.
 ## 5. CI was reporting a result it never produced
 
 The `test-anchor` job passed in 46 seconds without compiling the program or
-running a single on-chain test. Three separate faults, all of which had to be
-fixed before the job did anything:
+running a single on-chain test. Four separate faults, all of which had to be
+fixed before the job did anything — and the last of them only became visible
+once the first three were, which is what a job that exits zero on failure
+costs you:
 
 1. **The CLI never installed.** `npm i -g @coral-xyz/anchor-cli@0.31.1` ships
    a launcher that cannot find its own binary (`EACCES`, then "Could not find
@@ -244,15 +246,24 @@ fixed before the job did anything:
    to a live cluster with a wallet CI does not have. The job now passes
    `--provider.cluster localnet` explicitly, and `--ignore-keys` on the build
    because the deploy keypair is deliberately not in the repo.
+4. **The Solana toolchain was a major version behind.** With the CLI working,
+   `anchor build` reached `cargo-build-sbf` and panicked on a bare `NotFound`:
+   Anchor 1.x drives it out of the Solana install and the 2.1.x layout is not
+   the one it expects. Pinned to Agave 3.1.14, the version the build and the
+   suite were validated against.
 
 A `Verify toolchain` step with `set -euo pipefail` and an exact version match
 now fails loudly if any of that regresses, rather than downgrading the two
 steps below it into no-ops.
 
-Validated locally on the same commands the workflow runs:
+Validated locally on the same commands the workflow runs, and now in CI:
 `anchor build --no-idl --ignore-keys` succeeds, and
 `anchor test --skip-build --provider.cluster localnet` runs **78 tests across
-3 files, all passing**.
+3 files, all passing**. The job takes about seven minutes, most of it
+compiling the CLI, against the 46 seconds it used to take to do nothing.
+
+The working toolchain, for anyone reproducing it: Agave 3.1.14,
+`anchor-cli` 1.0.2 from crates.io, surfpool 1.5.0.
 
 ---
 
