@@ -148,26 +148,46 @@ export class ConsensusPricer implements PriceOracle {
       return null;
     }
 
-    const fairPrice = median(contributors.map((p) => p.value));
-    const dispersion = relativeSpread(contributors.map((p) => p.value));
-    const anchor = buildAnchor(feedKey, target, contributors, fairPrice, dispersion);
-
-    return {
-      feedId: feedKey,
-      source: 'consensus',
-      targetTime: target,
-      // The bracketing pair is a single-source notion; consensus reports the
-      // agreed point and the spread that produced it instead.
-      before: null,
-      after: null,
-      anchor,
-      skewSec: Math.min(...contributors.map((p) => Math.abs(p.publishTime - target))),
-      contributors,
-      dispersion,
-      sourceCount: contributors.length,
-      missing,
-    };
+    return buildConsensusWindow(feedKey, target, contributors, missing);
   }
+}
+
+/**
+ * Assemble the agreed window from observations that already passed staleness.
+ *
+ * Split out of the class because it is the whole of the consensus *judgement*
+ * and none of the I/O, which lets a replay price a frozen transaction through
+ * exactly this arithmetic. A backtest that built its own window would be
+ * measuring a second implementation, and the one number nobody would notice
+ * drifting is the one that decides whether a fill was fair.
+ */
+export function buildConsensusWindow(
+  feedKey: string,
+  target: number,
+  contributors: PricePoint[],
+  missing: Array<{ source: PriceSourceId; reason: string }> = [],
+): ConsensusPriceWindow | null {
+  if (contributors.length === 0) return null;
+
+  const fairPrice = median(contributors.map((p) => p.value));
+  const dispersion = relativeSpread(contributors.map((p) => p.value));
+  const anchor = buildAnchor(feedKey, target, contributors, fairPrice, dispersion);
+
+  return {
+    feedId: feedKey,
+    source: 'consensus',
+    targetTime: target,
+    // The bracketing pair is a single-source notion; consensus reports the
+    // agreed point and the spread that produced it instead.
+    before: null,
+    after: null,
+    anchor,
+    skewSec: Math.min(...contributors.map((p) => Math.abs(p.publishTime - target))),
+    contributors,
+    dispersion,
+    sourceCount: contributors.length,
+    missing,
+  };
 }
 
 /**

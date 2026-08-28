@@ -229,8 +229,105 @@ export class KrakenSource extends CandleSource {
   }
 }
 
-/** The exchange references, in no particular order — consensus treats them
- *  equally and never falls back to a preferred one. */
+const OKX_SYMBOLS: Record<string, string> = {
+  'SOL/USD': 'SOL-USDT',
+  'BTC/USD': 'BTC-USDT',
+  'ETH/USD': 'ETH-USDT',
+  'USDC/USD': 'USDC-USDT',
+};
+
+/**
+ * OKX, on the `history-candles` route rather than `candles`.
+ *
+ * The distinction is the whole reason this source exists. `candles` serves
+ * only the recent window, which is useless here: a claim is always about a
+ * transaction that has already executed, so every lookup this pipeline makes
+ * is retrospective by construction. `history-candles` is paginated by an
+ * `after` cursor in milliseconds and reaches back years.
+ */
+export class OkxSource extends CandleSource {
+  readonly id = 'okx' as const;
+  constructor(private readonly baseUrl = 'https://www.okx.com') {
+    super();
+  }
+  protected symbolFor(feedKey: string): string | null {
+    return OKX_SYMBOLS[feedKey] ?? null;
+  }
+  protected async load(symbol: string, bucket: number): Promise<PricePoint | null> {
+    // `after` is exclusive and the series runs newest-first, so asking for
+    // everything strictly after the bucket's end puts our bucket at the top.
+    const url =
+      `${this.baseUrl}/api/v5/market/history-candles?instId=${symbol}&bar=1m` +
+      `&after=${(bucket + CANDLE_SEC) * 1000}&limit=2`;
+    // Row: [ts, open, high, low, close, ...]
+    const body = (await fetchJson(this.id, url)) as { code?: string; data?: unknown[][] } | null;
+    if (!body) return null;
+    if (body.code !== undefined && body.code !== '0') {
+      logger.debug({ symbol, code: body.code }, 'okx: history-candles error');
+      return null;
+    }
+    const row = body.data?.find((r) => Number(r[0]) === bucket * 1000);
+    if (!row) return null;
+    return candlePoint(this.id, symbol, bucket, Number(row[2]), Number(row[3]));
+  }
+}
+
+const BYBIT_SYMBOLS: Record<string, string> = {
+  'SOL/USD': 'SOLUSDT',
+  'BTC/USD': 'BTCUSDT',
+  'ETH/USD': 'ETHUSDT',
+  'USDC/USD': 'USDCUSDT',
+};
+
+/** Bybit spot klines. Deep history, and a fourth venue that a Solana-side
+ *  manipulation cannot reach. */
+export class BybitSource extends CandleSource {
+  readonly id = 'bybit' as const;
+  constructor(private readonly baseUrl = 'https://api.bybit.com') {
+    super();
+  }
+  protected symbolFor(feedKey: string): string | null {
+    return BYBIT_SYMBOLS[feedKey] ?? null;
+  }
+  protected async load(symbol: string, bucket: number): Promise<PricePoint | null> {
+    const url =
+      `${this.baseUrl}/v5/market/kline?category=spot&symbol=${symbol}&interval=1` +
+      `&start=${bucket * 1000}&end=${(bucket + CANDLE_SEC) * 1000}&limit=2`;
+    // Row: [startTime, open, high, low, close, volume, turnover]
+    const body = (await fetchJson(this.id, url)) as {
+      retCode?: number;
+      result?: { list?: unknown[][] };
+    } | null;
+    if (!body) return null;
+    if (body.retCode !== undefined && body.retCode !== 0) {
+      logger.debug({ symbol, retCode: body.retCode }, 'bybit: kline error');
+      return null;
+    }
+    const row = body.result?.list?.find((r) => Number(r[0]) === bucket * 1000);
+    if (!row) return null;
+    return candlePoint(this.id, symbol, bucket, Number(row[2]), Number(row[3]));
+  }
+}
+
+/**
+ * The exchange references, in no particular order — consensus treats them
+ * equally and never falls back to a preferred one.
+ *
+ * Kraken is kept for the fresh end of the range and is deliberately not
+ * counted on for anything older. Its public OHLC route ignores a `since`
+ * older than the ~720 candles it retains and answers with the *latest*
+ * window instead, so a lookup for a transaction from last week silently
+ * matches no bucket and reports `no_data`. That is a coverage limit, not a
+ * fault: it means the retrospective consensus rests on Binance, Coinbase,
+ * OKX and Bybit, and the count in a bundle's `missing[]` says so out loud
+ * rather than leaving a reader to assume four sources agreed when three did.
+ */
 export function defaultCexSources(): PriceSource[] {
-  return [new BinanceSource(), new CoinbaseSource(), new KrakenSource()];
+  return [
+    new BinanceSource(),
+    new CoinbaseSource(),
+    new KrakenSource(),
+    new OkxSource(),
+    new BybitSource(),
+  ];
 }

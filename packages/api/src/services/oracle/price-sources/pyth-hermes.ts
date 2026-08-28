@@ -9,8 +9,25 @@ import {
 /** Outbound timeout — see the note in `cex.ts`. */
 const HTTP_TIMEOUT_MS = 5_000;
 
-/** Pyth Hermes REST endpoint (free, no API key required). */
-const PYTH_HERMES_URL = 'https://hermes.pyth.network';
+/**
+ * Pyth Hermes REST endpoint.
+ *
+ * The public host no longer serves anonymous requests — as of this writing
+ * `hermes.pyth.network` answers `401 unauthorized` to every route, including
+ * `/v2/updates/price/latest`. So both the host and a credential are
+ * configurable: point `PYTH_HERMES_URL` at a self-hosted Hermes or a
+ * provider's endpoint, and set `PYTH_HERMES_API_KEY` if it wants one.
+ *
+ * Leaving the default in place is not a silent failure. A 401 raises
+ * {@link PriceSourceUnavailableError} like any other outage, which excludes
+ * Pyth from the consensus and records the reason in the bundle's `missing[]`
+ * — the claim still resolves against the exchange references, one source
+ * short, and the shortfall is visible to whoever reads the evidence.
+ */
+const PYTH_HERMES_URL = process.env.PYTH_HERMES_URL ?? 'https://hermes.pyth.network';
+
+/** Optional bearer credential for the configured Hermes host. */
+const PYTH_HERMES_API_KEY = process.env.PYTH_HERMES_API_KEY ?? '';
 
 /**
  * Pyth price feed IDs (hex, without 0x prefix).
@@ -89,7 +106,15 @@ export class PythHermesSource implements PriceSource {
 
   private readonly cache = new Map<string, PricePoint | null>();
 
-  constructor(private readonly baseUrl: string = PYTH_HERMES_URL) {}
+  constructor(
+    private readonly baseUrl: string = PYTH_HERMES_URL,
+    private readonly apiKey: string = PYTH_HERMES_API_KEY,
+  ) {}
+
+  /** Auth header for the configured host, or nothing when it needs none. */
+  private authHeaders(): Record<string, string> {
+    return this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {};
+  }
 
   /** {@link PriceSource} entry point. Same as {@link getPriceAt}. */
   priceAt(feedKey: string, unixTime: number): Promise<PricePoint | null> {
@@ -133,7 +158,10 @@ export class PythHermesSource implements PriceSource {
 
     let res: Response;
     try {
-      res = await fetch(url, { signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
+      res = await fetch(url, {
+        headers: this.authHeaders(),
+        signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+      });
     } catch (error) {
       throw new PriceSourceUnavailableError('pyth', `Hermes fetch failed: ${String(error)}`, {
         retryAfterSec: 30,
@@ -273,7 +301,10 @@ export class PythHermesSource implements PriceSource {
 
     const url = `${this.baseUrl}/v2/updates/price/latest?ids[]=${feedId}&parsed=true`;
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
+      const res = await fetch(url, {
+        headers: this.authHeaders(),
+        signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+      });
       if (!res.ok) {
         logger.error({ feedKey, status: res.status }, 'Pyth Hermes API error');
         return null;

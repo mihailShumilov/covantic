@@ -26,6 +26,8 @@ export type PriceSourceId =
   | 'binance'
   | 'coinbase'
   | 'kraken'
+  | 'okx'
+  | 'bybit'
   | 'switchboard'
   | 'jupiter'
   | 'pool'
@@ -156,7 +158,6 @@ export function isSourceUnavailable(err: unknown): err is PriceSourceUnavailable
 
 /** Where in the pipeline a bundle was assembled. */
 export type EvidenceStage = 'verify' | 'replay';
-
 
 /**
  * Everything the adjudicator is allowed to look at, and nothing else.
