@@ -17,6 +17,7 @@ import {
   generateDemoTxSignature,
   policyIdToBytes,
   type VerificationData,
+  isPermanentlyParked,
 } from '@covantic/shared';
 
 // Anchor's ESM export of BN tripping up on named imports; pull from default.
@@ -366,8 +367,6 @@ function syntheticVerification(triggerType: number, coverageAmount: number): Ver
     lockPeriod,
   };
 }
-
-
 
 // ---------------------------------------------------------------------------
 // Verification + submit_claim
@@ -1011,6 +1010,7 @@ async function supersedeParkedClaim(
       id: claims.id,
       triggerType: claims.triggerType,
       status: claims.status,
+      reviewReason: claims.reviewReason,
     })
     .from(claims)
     .where(
@@ -1026,10 +1026,24 @@ async function supersedeParkedClaim(
 
   const incoming = TRIGGER_SPECIFICITY[trigger] ?? 0;
   const current = TRIGGER_SPECIFICITY[existing.triggerType as TriggerType] ?? 0;
-  // Strictly greater: an equally specific repeat of what a human is already
-  // looking at is not new information, and swapping on ties would let a
-  // stream of identical alerts reset the claim forever.
-  if (incoming <= current) return null;
+
+  // Two ways to earn the slot.
+  //
+  // Specificity is the ordinary one, and strictly greater: an equally specific
+  // repeat of what a human is already looking at is not new information, and
+  // swapping on ties would let a stream of identical alerts reset the claim
+  // forever.
+  //
+  // The second exists because specificity alone gets the commonest real theft
+  // backwards. A phished `Approve` followed by a drain opens a governance
+  // claim first — an approval *is* a change of control — and it parks for want
+  // of a baseline the holder never declared. Governance outranks exploit, so
+  // the drain's claim could never take the slot, and the protocol would sit on
+  // the claim it cannot prove while refusing the one it can. A claim parked on
+  // a reason no retry can clear has no purchase on the slot, whatever its
+  // trigger outranks.
+  const parkedForever = isPermanentlyParked(existing.reviewReason);
+  if (incoming <= current && !parkedForever) return null;
 
   // Conditional on the status still being parked, so a verifier that picked
   // the claim up between the select and here wins the race rather than having
@@ -1046,6 +1060,9 @@ async function supersedeParkedClaim(
         ...verificationData,
         supersededTriggerType: existing.triggerType,
         supersededFromStatus: existing.status,
+        supersededReason: parkedForever
+          ? `unresolvable:${existing.reviewReason ?? 'unknown'}`
+          : 'higher_specificity',
       },
       updatedAt: new Date(),
     })

@@ -5,6 +5,8 @@ import {
   PARKED_CLAIM_STATUSES,
   TRIGGER_SPECIFICITY,
   TriggerType,
+  UNRESOLVABLE_PARK_REASONS,
+  isPermanentlyParked,
 } from '@covantic/shared';
 
 /**
@@ -69,5 +71,54 @@ describe('superseding a parked claim', () => {
     const parked = TriggerType.AgentError;
     const incoming = TriggerType.GovernanceAttack;
     expect(TRIGGER_SPECIFICITY[incoming] > TRIGGER_SPECIFICITY[parked]).toBe(true);
+  });
+});
+
+/**
+ * The route the specificity ordering did not anticipate.
+ *
+ * A phished `Approve` followed by a drain is the ordinary shape of a real
+ * theft. The approval is a change of control, so a governance claim opens
+ * first and parks for want of a baseline the holder never declared. Governance
+ * outranks exploit, so without this the drain's claim could never take the
+ * slot and the protocol would hold the claim it cannot prove while refusing
+ * the one it can.
+ */
+describe('a park no retry can clear', () => {
+  it('recognises the reasons a declaration can never satisfy', () => {
+    expect(isPermanentlyParked('no_governance_baseline')).toBe(true);
+    expect(isPermanentlyParked('no_mandate_declared')).toBe(true);
+    // Fixed comparisons against the incident's block time: waiting cannot
+    // make a declaration mature earlier than an event already in the past.
+    expect(isPermanentlyParked('governance_baseline_not_matured')).toBe(true);
+    expect(isPermanentlyParked('mandate_not_matured')).toBe(true);
+  });
+
+  it('leaves outages alone — those really do clear on retry', () => {
+    expect(isPermanentlyParked('baseline_lookup_unavailable')).toBe(false);
+    expect(isPermanentlyParked('mandate_lookup_unavailable')).toBe(false);
+    expect(isPermanentlyParked('position_not_valued')).toBe(false);
+    expect(isPermanentlyParked(null)).toBe(false);
+    expect(isPermanentlyParked(undefined)).toBe(false);
+  });
+
+  it('lets a lower-ranked trigger take a permanently parked slot', () => {
+    // The case itself: exploit is ranked *below* governance, and must still
+    // win when the governance claim is going nowhere.
+    expect(TRIGGER_SPECIFICITY[TriggerType.Exploit]).toBeLessThan(
+      TRIGGER_SPECIFICITY[TriggerType.GovernanceAttack],
+    );
+    expect(isPermanentlyParked('no_governance_baseline')).toBe(true);
+  });
+
+  it('keeps every unresolvable reason a park reason and not a status', () => {
+    // They are compared against `claims.reviewReason`, which both the review
+    // and indeterminate paths write; confusing them with statuses would make
+    // the check silently never fire.
+    for (const reason of UNRESOLVABLE_PARK_REASONS) {
+      expect(typeof reason).toBe('string');
+      expect(OPEN_CLAIM_STATUSES).not.toContain(reason as unknown as ClaimStatus);
+      expect(PARKED_CLAIM_STATUSES).not.toContain(reason as unknown as ClaimStatus);
+    }
   });
 });
