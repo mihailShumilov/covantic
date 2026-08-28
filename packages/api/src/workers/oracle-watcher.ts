@@ -14,10 +14,21 @@ import type { ConsensusPricer } from '../services/oracle/consensus.js';
 
 const QUEUE_NAME = 'oracle-watcher';
 
-/** How often the sweep runs. Oracle manipulation resolves in a slot or two,
- *  but the claim it produces stays valid for the life of the policy, so the
- *  cost of finding it minutes late is small next to never finding it. */
-const SWEEP_INTERVAL_MS = 120_000;
+/**
+ * How often the sweep runs, in milliseconds.
+ *
+ * A drain resolves in one slot, but the claim it produces stays valid for the
+ * life of the policy, so finding it minutes late costs far less than never
+ * finding it — which is why two minutes is the default and why nothing here
+ * is racing the chain.
+ *
+ * It is configurable because that reasoning is about production, and a demo
+ * has the opposite problem: two minutes of staring at a dashboard reads as a
+ * detector that does not work. Set `ORACLE_SWEEP_INTERVAL_MS` to a few
+ * seconds on devnet. The cost is real but small — each sweep re-reads every
+ * active policy's balances, and each priced leg costs an exchange lookup.
+ */
+const SWEEP_INTERVAL_MS = Number(process.env.ORACLE_SWEEP_INTERVAL_MS ?? 120_000);
 
 /** How far back each sweep looks. Comfortably wider than the interval so a
  *  slow tick or a restart does not open a hole. */
