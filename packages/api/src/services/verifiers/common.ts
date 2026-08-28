@@ -1,8 +1,11 @@
 import { USDC_DECIMALS } from '@covantic/shared';
+import type { AnyEvidenceBundle, VerificationResult } from '../claim-oracle.js';
 import {
   KNOWN_DEX_PROGRAMS,
+  ORDERBOOK_PROGRAMS,
   KNOWN_BRIDGE_PROGRAMS,
   FLASH_LOAN_PROGRAMS,
+  LENDING_PROGRAMS,
   type EnhancedTransaction,
 } from '../../utils/helius.js';
 
@@ -26,6 +29,15 @@ export interface ProgramClassification {
   bridge: boolean;
   flashLoan: boolean;
   governance: boolean;
+  /** A lending or perpetuals venue was invoked — meaning some program read an
+   *  oracle to value collateral or mark a position. Set independently of the
+   *  other flags, because the same program can be both the lender and the
+   *  flash-loan source. */
+  lending: boolean;
+  /** A central-limit order book was invoked. Implies `dex`, and means the
+   *  transaction's net balance change may not be a single exchange — see
+   *  ORDERBOOK_PROGRAMS in utils/helius.ts. */
+  orderBook: boolean;
   unknown: string[];
 }
 
@@ -43,9 +55,18 @@ export function classifyPrograms(tx: EnhancedTransaction): ProgramClassification
     bridge: false,
     flashLoan: false,
     governance: false,
+    lending: false,
+    orderBook: false,
     unknown: [],
   };
   for (const pid of seen) {
+    // Checked outside the exclusive chain below: a lending program is also a
+    // flash-loan source, and bucketing it once would lose one of the two.
+    if (LENDING_PROGRAMS.has(pid)) classification.lending = true;
+    // Also outside the exclusive chain: an order book is a DEX, and the flag
+    // qualifies that membership rather than replacing it.
+    if (ORDERBOOK_PROGRAMS.has(pid)) classification.orderBook = true;
+
     if (KNOWN_DEX_PROGRAMS.has(pid)) {
       classification.dex = true;
     } else if (KNOWN_BRIDGE_PROGRAMS.has(pid)) {
@@ -78,9 +99,7 @@ export function totalOutgoing(
  *  an account the agent itself owns. Covers the self-ATA and
  *  mint-to-self false-positive patterns. */
 export function isSelfTransfer(tx: EnhancedTransaction, agentAddress: string): boolean {
-  const outgoing = (tx.tokenTransfers ?? []).filter(
-    (t) => t.fromUserAccount === agentAddress,
-  );
+  const outgoing = (tx.tokenTransfers ?? []).filter((t) => t.fromUserAccount === agentAddress);
   if (outgoing.length === 0) return false;
   return outgoing.every((t) => t.toUserAccount === agentAddress);
 }
@@ -120,4 +139,79 @@ export function uiToRaw(ui: number): number {
 export function capToCoverage(lossRaw: number, coverageRaw: number): number {
   if (lossRaw <= 0) return 0;
   return Math.min(Math.floor(lossRaw), coverageRaw);
+}
+
+// ---------------------------------------------------------------------------
+// Verdict builders
+// ---------------------------------------------------------------------------
+
+/**
+ * A verifier reached a positive conclusion: the covered event happened and
+ * this much was lost.
+ */
+export function verdictConfirmed(args: {
+  lossAmount: number;
+  confidence: number;
+  details: Record<string, unknown>;
+  lockPeriod: number;
+  evidence?: AnyEvidenceBundle;
+}): VerificationResult {
+  return {
+    outcome: 'confirmed',
+    verified: true,
+    lossAmount: args.lossAmount,
+    confidence: args.confidence,
+    details: args.details,
+    lockPeriod: args.lockPeriod,
+    evidence: args.evidence,
+  };
+}
+
+/**
+ * A verifier reached a negative conclusion: the evidence was available and it
+ * shows the covered event did not happen. This closes the claim.
+ */
+export function verdictRejected(
+  reason: string,
+  details: Record<string, unknown>,
+  lockPeriod: number,
+  evidence?: AnyEvidenceBundle,
+): VerificationResult {
+  return {
+    outcome: 'rejected',
+    verified: false,
+    lossAmount: 0,
+    confidence: 0,
+    details: { reason, ...details },
+    lockPeriod,
+    evidence,
+  };
+}
+
+/**
+ * A verifier could not reach any conclusion: a source was down, the trigger
+ * transaction was not indexed yet, references disagreed.
+ *
+ * This is emphatically NOT a rejection. "We could not check" and "there was
+ * no loss" are different statements, and collapsing them is how a valid claim
+ * gets destroyed by an HTTP 429. The keeper retries these with backoff and
+ * escalates to human review rather than closing the claim.
+ */
+export function verdictIndeterminate(
+  reason: string,
+  details: Record<string, unknown>,
+  lockPeriod: number,
+  retryAfterSec = 60,
+  evidence?: AnyEvidenceBundle,
+): VerificationResult {
+  return {
+    outcome: 'indeterminate',
+    verified: false,
+    lossAmount: 0,
+    confidence: 0,
+    details: { reason, ...details },
+    lockPeriod,
+    retryAfterSec,
+    evidence,
+  };
 }

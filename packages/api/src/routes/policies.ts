@@ -1,15 +1,65 @@
 import type { FastifyInstance } from 'fastify';
 import { eq, and, desc, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { agents, claims, policies, riskAssessments } from '../db/schema.js';
+import { agents, claims, policies, riskAssessments, vaultSnapshots } from '../db/schema.js';
 import {
   PolicyState,
   RiskTier,
   SOLANA_ADDRESS_REGEX,
+  SOLVENCY_THRESHOLDS,
   calculatePremium,
   tierToPremiumBps,
 } from '@covantic/shared';
 import { fetchOnChainPolicy, getPolicyReaderStatus } from '../utils/policy-reader.js';
+
+/**
+ * What the vault currently has behind the coverage it has already sold.
+ *
+ * Coverage is backed fractionally by design — no insurer holds 100% of its
+ * aggregate limits, and the protocol's own ladder runs from 0.5x to 2.0x. The
+ * on-chain floor added to `execute_unstake` stops that backing reaching zero,
+ * but it does not make it whole, so a buyer is entitled to see the ratio they
+ * are buying into before they pay a premium priced as though it were.
+ *
+ * Read from the `vaultSnapshots` table the solvency-checker writes rather than
+ * from the chain: a quote must not depend on an RPC round-trip, and a figure a
+ * few minutes old is still an honest one as long as its age is published. Best
+ * effort throughout — a missing snapshot returns `null` and never fails the
+ * quote, because refusing to sell insurance over a stale dashboard row would
+ * be a worse outcome than quoting without the disclosure.
+ */
+async function readVaultBacking(app: FastifyInstance) {
+  try {
+    const [snapshot] = await app.db
+      .select()
+      .from(vaultSnapshots)
+      .orderBy(desc(vaultSnapshots.snapshotAt))
+      .limit(1);
+    if (!snapshot) return null;
+
+    const ratio = Number(snapshot.solvencyRatio ?? 0);
+    const band =
+      ratio >= SOLVENCY_THRESHOLDS.HEALTHY
+        ? 'healthy'
+        : ratio >= SOLVENCY_THRESHOLDS.CAUTION
+          ? 'caution'
+          : ratio >= SOLVENCY_THRESHOLDS.CRITICAL
+            ? 'critical'
+            : 'emergency';
+
+    return {
+      solvencyRatioBps: ratio,
+      /** 1.0 means every USDC of outstanding coverage has a USDC behind it. */
+      backingMultiple: Number((ratio / 10000).toFixed(4)),
+      band,
+      totalStaked: Number(snapshot.totalStaked ?? 0),
+      totalCoverage: Number(snapshot.totalCoverage ?? 0),
+      asOf: snapshot.snapshotAt.toISOString(),
+    };
+  } catch {
+    return null;
+  }
+}
 
 const policyQuerySchema = z.object({
   holder: z.string().optional(),
@@ -437,6 +487,10 @@ export async function policyRoutes(app: FastifyInstance) {
 
     const validUntil = new Date(assessedAtMs + QUOTE_MAX_ASSESSMENT_AGE_SECONDS * 1000);
 
+    // Disclosed with the price, not buried in a dashboard: the premium is
+    // quoted as though coverage were whole, and this says how whole it is.
+    const backing = await readVaultBacking(app);
+
     return reply.send({
       agentAddress: body.agentAddress,
       coverageAmount: body.coverageAmount,
@@ -450,6 +504,7 @@ export async function policyRoutes(app: FastifyInstance) {
       validUntil: validUntil.toISOString(),
       attestationPda,
       attestationExpiresAt,
+      backing,
     });
   });
 }

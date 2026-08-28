@@ -20,7 +20,47 @@ export const PDA_SEEDS = {
   VAULT_TOKEN: 'covantic_vault_token',
   /** One attestation PDA per agent address. See program state/risk_attestation.rs. */
   ATTESTATION: 'covantic_attestation',
+  /** One evidence record per policy, written by verify_and_payout_v2. */
+  CLAIM_EVIDENCE: 'covantic_claim_evidence',
+  /** One balance checkpoint per policy, written by the permissionless crank.
+   *  The baseline `verify_and_payout_exploit` bounds a payout against. */
+  CHECKPOINT: 'covantic_checkpoint',
+  /** One exploit evidence record per policy, written by
+   *  verify_and_payout_exploit. */
+  EXPLOIT_EVIDENCE: 'covantic_exploit_evidence',
+  /** One governance baseline per policy — the authority set the holder
+   *  declared, written by the holder and matured on a delay. */
+  GOVERNANCE_BASELINE: 'covantic_gov_baseline',
+  /** One authority checkpoint per policy, written by the permissionless
+   *  crank. What `verify_and_payout_governance` compares against. */
+  AUTHORITY_CHECKPOINT: 'covantic_authority_checkpoint',
+  /** One governance evidence record per policy, written by
+   *  verify_and_payout_governance. */
+  GOVERNANCE_EVIDENCE: 'covantic_gov_evidence',
+  /** One mandate per policy — the operating envelope the holder declared for
+   *  their agent, written by the holder and matured on a delay. What
+   *  `verify_and_payout_agent_error` checks a breach against. */
+  AGENT_MANDATE: 'covantic_agent_mandate',
+  /** One agent-error evidence record per policy, written by
+   *  verify_and_payout_agent_error. */
+  AGENT_ERROR_EVIDENCE: 'covantic_agent_error_evidence',
 } as const;
+
+/**
+ * Oldest a balance checkpoint may be and still bound an exploit payout
+ * (seconds). Keep in sync with `MAX_CHECKPOINT_AGE` in the Anchor program.
+ *
+ * This is the exposure window of the proven-exploit path: a drain claimed
+ * with no checkpoint newer than this cannot be proven on chain and goes to
+ * review instead.
+ */
+export const MAX_CHECKPOINT_AGE_SECONDS = 2 * 3600;
+
+/**
+ * Smallest balance drop that can support a proven exploit payout, in basis
+ * points. Keep in sync with `MIN_PROVABLE_DROP_BPS` in the Anchor program.
+ */
+export const MIN_PROVABLE_DROP_BPS = 5_000;
 
 /**
  * Maximum validity window for a risk attestation (seconds). Keep in sync
@@ -136,3 +176,66 @@ export function policyIdToBytes(id: bigint | { toString(): string }): Uint8Array
   view.setBigUint64(0, value, true);
   return buf;
 }
+
+/**
+ * How long a governance baseline must mature before it can support a claim
+ * (seconds). Keep in sync with `GOVERNANCE_BASELINE_DELAY` in the Anchor
+ * program.
+ *
+ * The delay is the mechanism. A declaration that could be written and claimed
+ * against in the same breath would prove nothing, because a stolen holder key
+ * would simply write a convenient one first.
+ */
+export const GOVERNANCE_BASELINE_DELAY_SECONDS = 3600;
+
+/**
+ * How long after a takeover a loss still counts as part of it (seconds).
+ * Keep in sync with `GOVERNANCE_DRAIN_WINDOW` in the Anchor program.
+ */
+export const GOVERNANCE_DRAIN_WINDOW_SECONDS = 30 * 60;
+
+/**
+ * Oldest an authority checkpoint may be and still bound a governance payout
+ * (seconds). Keep in sync with `MAX_AUTHORITY_CHECKPOINT_AGE`.
+ */
+export const MAX_AUTHORITY_CHECKPOINT_AGE_SECONDS = 2 * 3600;
+
+/**
+ * How long an agent mandate must mature before it can support a claim
+ * (seconds). Keep in sync with `MANDATE_DECLARATION_DELAY` in the Anchor
+ * program.
+ *
+ * Same value and same mechanism as {@link GOVERNANCE_BASELINE_DELAY_SECONDS},
+ * and the reason it is a separate constant rather than an alias is that the
+ * two answer different questions — who may control the agent, and what the
+ * agent may do — and one may need retuning without the other.
+ *
+ * The delay is what stops the obvious abuse. Without it a holder could watch
+ * an ordinary loss happen and then declare, retroactively, a mandate narrow
+ * enough to have been breached by it. With it, that manoeuvre has to be
+ * committed to on chain, in public, an hour before an incident the holder
+ * must then arrange to happen.
+ */
+export const MANDATE_DECLARATION_DELAY_SECONDS = 3600;
+
+/**
+ * How many destinations and programs a holder may declare. Keep in sync with
+ * `MAX_MANDATE_COUNTERPARTIES` / `MAX_MANDATE_PROGRAMS` in the Anchor program.
+ *
+ * Fixed so the account's size — and the stack cost of loading it — are
+ * bounded. Anything richer goes in the off-chain manifest the on-chain
+ * `manifest_hash` commits to.
+ */
+export const MAX_MANDATE_COUNTERPARTIES = 8;
+export const MAX_MANDATE_PROGRAMS = 8;
+
+/**
+ * Smallest mandate breach that can support a proven payout, in USDC base
+ * units. Keep in sync with `MIN_PROVABLE_MANDATE_BREACH`.
+ *
+ * Off chain a floor filters noise; on chain its job is different. It is a
+ * hard limit on what a compromised oracle key can extract by pointing the
+ * instruction at a policy whose agent merely spent slightly more than its
+ * declared cap.
+ */
+export const MIN_PROVABLE_MANDATE_BREACH = 1_000_000;

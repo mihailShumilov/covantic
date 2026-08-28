@@ -37,6 +37,18 @@ pub struct StakerPosition {
 
     /// PDA bump
     pub bump: u8,
+
+    /// Snapshot of `InsuranceVault.loss_index` when this position's
+    /// `amount_staked` was last revalued. The position's live principal is
+    /// `amount_staked * vault.loss_index / loss_index_snapshot`.
+    ///
+    /// Zero means "not yet initialised" — a position written before losses
+    /// were socialised at all. `settle_losses` adopts the current index in
+    /// that case rather than revaluing against a divisor of zero, which is
+    /// also what makes a migrated position safe with no value written.
+    ///
+    /// **Last field on purpose**, for the same reason as `InsuranceVault`.
+    pub loss_index_snapshot: u128,
 }
 
 impl StakerPosition {

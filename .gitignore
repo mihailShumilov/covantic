@@ -6,6 +6,7 @@ target/
 # the API/monitor docker images need at runtime. Keeping it versioned lets
 # the server rebuild images without needing the full Rust/Anchor toolchain.
 !packages/anchor/target/
+packages/anchor/target/*
 !packages/anchor/target/idl/
 !packages/anchor/target/idl/*.json
 .env
@@ -18,3 +19,17 @@ docker/keys/
 test-ledger/
 pgdata/
 redisdata/
+
+# Local agent state and editor config — never shared.
+.claude/
+.idea/
+
+# Env backups written by setup-local.sh. These hold the same secrets as .env,
+# and the timestamped names slip past the `.env` rule above.
+.env.bak-*
+
+# TypeScript incremental build output.
+*.tsbuildinfo
+
+# Audit scan artefacts — regenerate with audit-scan.sh
+docs/audit/scan/

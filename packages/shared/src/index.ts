@@ -16,13 +16,15 @@ export type {
   Agent,
 } from './types/risk.js';
 
-export type {
-  Claim,
-  SubmitClaimParams,
-  PipelineStep,
-  VerificationData,
+export type { Claim, SubmitClaimParams, PipelineStep, VerificationData } from './types/claims.js';
+export {
+  ClaimStatus,
+  VerificationStep,
+  StepStatus,
+  OPEN_CLAIM_STATUSES,
+  PARKED_CLAIM_STATUSES,
+  TRIGGER_SPECIFICITY,
 } from './types/claims.js';
-export { ClaimStatus, VerificationStep, StepStatus } from './types/claims.js';
 
 export type { StakerPositionResponse } from './types/staking.js';
 
@@ -67,7 +69,25 @@ export {
   DEMO_TX_SIGNATURE_PREFIX,
   generateDemoTxSignature,
   policyIdToBytes,
+  GOVERNANCE_BASELINE_DELAY_SECONDS,
+  GOVERNANCE_DRAIN_WINDOW_SECONDS,
+  MAX_AUTHORITY_CHECKPOINT_AGE_SECONDS,
+  MANDATE_DECLARATION_DELAY_SECONDS,
+  MAX_MANDATE_COUNTERPARTIES,
+  MAX_MANDATE_PROGRAMS,
+  MIN_PROVABLE_MANDATE_BREACH,
 } from './constants.js';
+
+// Token registry
+export type { TokenKind, TokenMeta } from './tokens.js';
+export {
+  MINT_REGISTRY,
+  NATIVE_SOL_PSEUDO_MINT,
+  WRAPPED_SOL_MINT,
+  lookupMint,
+  isStableMint,
+  canonicalMint,
+} from './tokens.js';
 
 // Utils
 export {

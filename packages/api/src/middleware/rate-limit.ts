@@ -59,3 +59,30 @@ export async function riskAssessmentRateLimit(
     return reply.status(429).send({ error: 'Risk assessment rate limit exceeded. Try again in a minute.' });
   }
 }
+
+/**
+ * Rate limiter for the demo simulation endpoint: 5 requests per minute per IP.
+ *
+ * `/api/demo/simulate-exploit` is unauthenticated and injects both a
+ * monitoring event and a signed `monitoring:alerts` message — the two inputs
+ * the claim-keeper acts on. `syntheticAllowed` keeps it off production, but on
+ * every other deployment anyone who finds the URL can name any agent address
+ * and drive the claim pipeline. The environment gate decides *whether* it is
+ * reachable; this decides how fast.
+ *
+ * Deliberately tighter than the risk-assessment limit: that endpoint is merely
+ * expensive, this one writes to the pipeline.
+ */
+export async function demoSimulationRateLimit(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  const redis = (request.server as FastifyInstance).redis;
+  const ip = request.ip;
+  const allowed = await checkLimit(redis, `rate:demo:${ip}`, 5, 60);
+  if (!allowed) {
+    return reply
+      .status(429)
+      .send({ error: 'Simulation rate limit exceeded. Try again in a minute.' });
+  }
+}

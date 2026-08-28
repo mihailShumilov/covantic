@@ -12,6 +12,194 @@
   ],
   "instructions": [
     {
+      "name": "accept_admin",
+      "docs": [
+        "Accept a pending admin transfer. Signed by the proposed admin."
+      ],
+      "discriminator": [
+        112,
+        42,
+        45,
+        90,
+        116,
+        181,
+        13,
+        170
+      ],
+      "accounts": [
+        {
+          "name": "new_admin",
+          "docs": [
+            "The proposed admin. Must sign — that signature is the guarantee the",
+            "key exists and is controlled."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pending",
+          "docs": [
+            "Closed on success, refunding rent to the admin that opened the",
+            "proposal rather than to whoever happens to accept it."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  112,
+                  101,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  95,
+                  97,
+                  100,
+                  109,
+                  105,
+                  110
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "rent_refund",
+          "docs": [
+            "rent, and the constraint pins it to the recorded proposer."
+          ],
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "cancel_admin_transfer",
+      "docs": [
+        "Withdraw a pending admin transfer."
+      ],
+      "discriminator": [
+        38,
+        131,
+        157,
+        31,
+        240,
+        137,
+        44,
+        215
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pending",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  112,
+                  101,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  95,
+                  97,
+                  100,
+                  109,
+                  105,
+                  110
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "cancel_policy",
       "docs": [
         "Cancel a policy with partial refund."
@@ -152,6 +340,413 @@
         {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "checkpoint_authority",
+      "docs": [
+        "Record who controls the covered account (permissionless crank).",
+        "",
+        "The governance counterpart to `checkpoint_balance`, and it must exist",
+        "separately: a balance reading is blind to a seizure, where the tokens",
+        "never move and only the owner changes, and to a freeze, where nothing",
+        "changes at all except that the agent can no longer act."
+      ],
+      "discriminator": [
+        37,
+        2,
+        123,
+        208,
+        129,
+        116,
+        60,
+        103
+      ],
+      "accounts": [
+        {
+          "name": "cranker",
+          "docs": [
+            "Anyone. Pays rent the first time only."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "policy",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy.holder",
+                "account": "InsurancePolicy"
+              },
+              {
+                "kind": "account",
+                "path": "policy.policy_id",
+                "account": "InsurancePolicy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "covered_token_account",
+          "docs": [
+            "The covered account, derived by address rather than by ownership.",
+            "",
+            "See the handler's note: an ownership constraint would reject exactly",
+            "the account state this instruction exists to record."
+          ]
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "checkpoint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121,
+                  95,
+                  99,
+                  104,
+                  101,
+                  99,
+                  107,
+                  112,
+                  111,
+                  105,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "checkpoint_balance",
+      "docs": [
+        "Record the covered account's balance as the baseline a later exploit",
+        "payout is bounded by (permissionless crank).",
+        "",
+        "Permissionless on purpose: a baseline only the oracle could write",
+        "would put the oracle back in charge of the very number that is",
+        "supposed to constrain it."
+      ],
+      "discriminator": [
+        197,
+        218,
+        21,
+        5,
+        137,
+        190,
+        83,
+        31
+      ],
+      "accounts": [
+        {
+          "name": "cranker",
+          "docs": [
+            "Anyone. Pays rent the first time only."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "policy",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy.holder",
+                "account": "InsurancePolicy"
+              },
+              {
+                "kind": "account",
+                "path": "policy.policy_id",
+                "account": "InsurancePolicy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "covered_token_account",
+          "docs": [
+            "The covered account, derived rather than accepted.",
+            "",
+            "These two constraints are what make the whole mechanism trustworthy.",
+            "Anchor recomputes the associated token address from the policy's agent",
+            "and the protocol's USDC mint and rejects anything else, so the balance",
+            "recorded below is unambiguously the covered agent's."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "policy.agent_address",
+                "account": "InsurancePolicy"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "usdc_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "checkpoint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  99,
+                  104,
+                  101,
+                  99,
+                  107,
+                  112,
+                  111,
+                  105,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
         }
       ],
       "args": []
@@ -469,6 +1064,380 @@
         {
           "name": "agent_address",
           "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "declare_agent_mandate",
+      "docs": [
+        "Declare (or refresh) the operating envelope that is legitimate for an",
+        "agent. Holder-signed, and it matures on a delay for the same reason",
+        "the governance baseline does — a mandate that could be written and",
+        "claimed against in the same breath would prove nothing.",
+        "",
+        "This is what makes an agent-error claim provable at all. The trigger",
+        "covers a loss the agent caused with its *own* authority, so there is",
+        "no unauthorised signer to point at and no change of control to",
+        "observe; without the holder saying in advance what the agent was",
+        "permitted to do, the chain has nothing to check."
+      ],
+      "discriminator": [
+        223,
+        213,
+        161,
+        242,
+        150,
+        86,
+        153,
+        15
+      ],
+      "accounts": [
+        {
+          "name": "holder",
+          "docs": [
+            "The policyholder. Nobody else may say what their agent is permitted to",
+            "do — least of all the oracle, whose discretion this account exists to",
+            "constrain."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "policy",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy.holder",
+                "account": "InsurancePolicy"
+              },
+              {
+                "kind": "account",
+                "path": "policy.policy_id",
+                "account": "InsurancePolicy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mandate",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  97,
+                  103,
+                  101,
+                  110,
+                  116,
+                  95,
+                  109,
+                  97,
+                  110,
+                  100,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "covered_token_account",
+          "docs": [
+            "The covered account, read here only to bound the retention floor.",
+            "",
+            "Derived by Anchor from the policy's own agent address, exactly as in",
+            "`verify_and_payout_agent_error`, so the holder cannot point the bound",
+            "at some richer account of their choosing."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "policy.agent_address",
+                "account": "InsurancePolicy"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "usdc_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "mandate",
+          "type": {
+            "defined": {
+              "name": "AgentMandate"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "declare_governance_baseline",
+      "docs": [
+        "Declare (or refresh) the authority set that is legitimate for an",
+        "agent. Holder-signed, and it matures on a delay — a baseline that",
+        "could be written and claimed against in the same breath would prove",
+        "nothing."
+      ],
+      "discriminator": [
+        184,
+        238,
+        200,
+        182,
+        138,
+        50,
+        106,
+        207
+      ],
+      "accounts": [
+        {
+          "name": "holder",
+          "docs": [
+            "The policyholder. Nobody else may say who is allowed to control their",
+            "agent — least of all the oracle, whose discretion this account exists",
+            "to constrain."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "policy",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy.holder",
+                "account": "InsurancePolicy"
+              },
+              {
+                "kind": "account",
+                "path": "policy.policy_id",
+                "account": "InsurancePolicy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "baseline",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  103,
+                  111,
+                  118,
+                  95,
+                  98,
+                  97,
+                  115,
+                  101,
+                  108,
+                  105,
+                  110,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "manifest",
+          "type": {
+            "defined": {
+              "name": "GovernanceManifest"
+            }
+          }
         }
       ]
     },
@@ -889,6 +1858,132 @@
       ]
     },
     {
+      "name": "migrate_staker_position",
+      "docs": [
+        "Grow a staker position to the current layout. Permissionless and",
+        "idempotent; required once per position after the same upgrade."
+      ],
+      "discriminator": [
+        50,
+        234,
+        67,
+        189,
+        2,
+        159,
+        52,
+        238
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "staker_position",
+          "docs": [
+            "PDA seeds, and its discriminator is verified before it is resized."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "staker"
+              }
+            ]
+          }
+        },
+        {
+          "name": "staker"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "migrate_vault",
+      "docs": [
+        "Grow the vault account to the current layout and seed `loss_index`.",
+        "Idempotent; required once after the loss-socialisation upgrade."
+      ],
+      "discriminator": [
+        139,
+        151,
+        25,
+        211,
+        120,
+        164,
+        24,
+        215
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "docs": [
+            "PDA seeds, and its discriminator is verified before anything is written."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "oracle_submit_claim",
       "docs": [
         "Submit an insurance claim on behalf of a holder (oracle-signed path,",
@@ -994,6 +2089,109 @@
         {
           "name": "trigger_tx_signature",
           "type": "bytes"
+        }
+      ]
+    },
+    {
+      "name": "propose_admin",
+      "docs": [
+        "Propose a new protocol admin. Takes effect only once the candidate",
+        "calls `accept_admin`, so a mistyped key cannot capture the one role",
+        "that can pause the protocol and rotate the oracle authority."
+      ],
+      "discriminator": [
+        121,
+        214,
+        199,
+        212,
+        87,
+        39,
+        117,
+        234
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pending",
+          "docs": [
+            "`init_if_needed` so the admin can replace a proposal without a separate",
+            "cancel. Safe here in a way it is not on the checkpoint accounts: this",
+            "holds no running total and no previous value, and the handler rewrites",
+            "every field, so nothing survives an overwrite."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  112,
+                  101,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  95,
+                  97,
+                  100,
+                  109,
+                  105,
+                  110
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "new_admin",
+          "type": "pubkey"
         }
       ]
     },
@@ -1337,12 +2535,6 @@
       ],
       "args": [
         {
-          "name": "new_admin",
-          "type": {
-            "option": "pubkey"
-          }
-        },
-        {
           "name": "new_oracle_authority",
           "type": {
             "option": "pubkey"
@@ -1627,9 +2819,1302 @@
           "type": "u64"
         }
       ]
+    },
+    {
+      "name": "verify_and_payout_agent_error",
+      "docs": [
+        "Verify an agent-error claim against the holder's declared mandate and",
+        "a balance drop the program measures, and execute payout.",
+        "",
+        "Prefer this over `verify_and_payout` for TRIGGER_AGENT_ERROR. The",
+        "program re-reads the covered token account, compares the drop against",
+        "an envelope the holder signed for before the claim was filed, and",
+        "refuses to pay more than the overshoot. It settles only breaches it",
+        "can measure: a movement to an undeclared destination produces no",
+        "overshoot and goes to a reviewer rather than being paid on the",
+        "oracle's word."
+      ],
+      "discriminator": [
+        28,
+        111,
+        113,
+        195,
+        196,
+        181,
+        253,
+        219
+      ],
+      "accounts": [
+        {
+          "name": "oracle",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "policy",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy.holder",
+                "account": "InsurancePolicy"
+              },
+              {
+                "kind": "account",
+                "path": "policy.policy_id",
+                "account": "InsurancePolicy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_account",
+          "writable": true
+        },
+        {
+          "name": "holder_token_account",
+          "writable": true
+        },
+        {
+          "name": "covered_token_account",
+          "docs": [
+            "The covered account, re-read at payout time.",
+            "",
+            "Derived by Anchor from the policy's own agent address, exactly as in",
+            "`checkpoint_balance`. This is what makes the drop a measurement rather",
+            "than an assertion: the caller cannot point the subtraction at an",
+            "account of its choosing.",
+            "",
+            "`associated_token::authority` is correct *here*, unlike on the",
+            "governance path: an agent error is by definition something the agent",
+            "did while still owning its account, so the owner-equality check this",
+            "compiles into is a constraint rather than an obstacle. A policy whose",
+            "account has changed hands is a governance claim, and this instruction",
+            "failing to load it is the right outcome."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "policy.agent_address",
+                "account": "InsurancePolicy"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "usdc_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "mandate",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  97,
+                  103,
+                  101,
+                  110,
+                  116,
+                  95,
+                  109,
+                  97,
+                  110,
+                  100,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "checkpoint",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  99,
+                  104,
+                  101,
+                  99,
+                  107,
+                  112,
+                  111,
+                  105,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "evidence_record",
+          "docs": [
+            "Immutable record of what was measured. `init` rather than",
+            "`init_if_needed`: one policy, one proven payout, and a second attempt",
+            "should fail loudly rather than overwrite the first."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  97,
+                  103,
+                  101,
+                  110,
+                  116,
+                  95,
+                  101,
+                  114,
+                  114,
+                  111,
+                  114,
+                  95,
+                  101,
+                  118,
+                  105,
+                  100,
+                  101,
+                  110,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "payout_amount",
+          "type": "u64"
+        },
+        {
+          "name": "evidence",
+          "type": {
+            "defined": {
+              "name": "AgentErrorPayoutEvidence"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "verify_and_payout_exploit",
+      "docs": [
+        "Verify an exploit claim against a balance drop the program measures",
+        "for itself, and execute payout.",
+        "",
+        "Prefer this over `verify_and_payout` for TRIGGER_EXPLOIT. The program",
+        "re-reads the covered token account and refuses to pay more than the",
+        "difference from its own earlier checkpoint, so the oracle cannot",
+        "assert a loss that did not happen. What it still asserts — that the",
+        "drop was an exploit rather than the holder moving funds — is committed",
+        "via `bundle_hash` and left publicly falsifiable."
+      ],
+      "discriminator": [
+        124,
+        154,
+        222,
+        249,
+        59,
+        0,
+        10,
+        150
+      ],
+      "accounts": [
+        {
+          "name": "oracle",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "policy",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy.holder",
+                "account": "InsurancePolicy"
+              },
+              {
+                "kind": "account",
+                "path": "policy.policy_id",
+                "account": "InsurancePolicy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_account",
+          "writable": true
+        },
+        {
+          "name": "holder_token_account",
+          "writable": true
+        },
+        {
+          "name": "covered_token_account",
+          "docs": [
+            "The covered account, re-read at payout time.",
+            "",
+            "Derived by Anchor from the policy's own agent address, exactly as in",
+            "`checkpoint_balance`. This is what makes the drop a measurement rather",
+            "than an assertion: the caller cannot point the subtraction at an",
+            "account of its choosing."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "policy.agent_address",
+                "account": "InsurancePolicy"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "usdc_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "checkpoint",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  99,
+                  104,
+                  101,
+                  99,
+                  107,
+                  112,
+                  111,
+                  105,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "evidence_record",
+          "docs": [
+            "Immutable record of what was measured. `init` rather than",
+            "`init_if_needed`: one policy, one proven payout, and a second attempt",
+            "should fail loudly rather than overwrite the first."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  101,
+                  120,
+                  112,
+                  108,
+                  111,
+                  105,
+                  116,
+                  95,
+                  101,
+                  118,
+                  105,
+                  100,
+                  101,
+                  110,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "payout_amount",
+          "type": "u64"
+        },
+        {
+          "name": "evidence",
+          "type": {
+            "defined": {
+              "name": "ExploitPayoutEvidence"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "verify_and_payout_governance",
+      "docs": [
+        "Verify a governance claim against a departure the program observes,",
+        "and execute payout.",
+        "",
+        "The only path where the chain establishes the covered *event* rather",
+        "than merely bounding its size: it compares the holder's own matured",
+        "declaration of who may control the agent against what it reads on the",
+        "account now. The oracle asserts neither side."
+      ],
+      "discriminator": [
+        60,
+        236,
+        2,
+        175,
+        65,
+        246,
+        189,
+        53
+      ],
+      "accounts": [
+        {
+          "name": "oracle",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "policy",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy.holder",
+                "account": "InsurancePolicy"
+              },
+              {
+                "kind": "account",
+                "path": "policy.policy_id",
+                "account": "InsurancePolicy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_account",
+          "writable": true
+        },
+        {
+          "name": "holder_token_account",
+          "writable": true
+        },
+        {
+          "name": "covered_token_account",
+          "docs": [
+            "The covered account, re-read at payout time and derived by *address*.",
+            "",
+            "Not by `associated_token::authority`, which would compile into an",
+            "owner equality check and reject precisely the state this instruction",
+            "exists to observe. The caller still cannot choose the account: the",
+            "address is computed from the policy's own agent and the config's mint."
+          ]
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "baseline",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  103,
+                  111,
+                  118,
+                  95,
+                  98,
+                  97,
+                  115,
+                  101,
+                  108,
+                  105,
+                  110,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "checkpoint",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121,
+                  95,
+                  99,
+                  104,
+                  101,
+                  99,
+                  107,
+                  112,
+                  111,
+                  105,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "evidence_record",
+          "docs": [
+            "Immutable record of what was observed. `init` rather than",
+            "`init_if_needed`: one policy, one proven payout, and a second attempt",
+            "should fail loudly rather than overwrite the first."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  103,
+                  111,
+                  118,
+                  95,
+                  101,
+                  118,
+                  105,
+                  100,
+                  101,
+                  110,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "payout_amount",
+          "type": "u64"
+        },
+        {
+          "name": "evidence",
+          "type": {
+            "defined": {
+              "name": "GovernancePayoutEvidence"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "verify_and_payout_v2",
+      "docs": [
+        "Verify an oracle-manipulation claim against a guardian-signed Pyth",
+        "price and execute payout.",
+        "",
+        "Prefer this over `verify_and_payout` for TRIGGER_ORACLE_MANIPULATION.",
+        "The program checks the reference price itself instead of trusting the",
+        "oracle's word for it, and records what it verified in a",
+        "`ClaimEvidenceRecord` PDA so the payout stays auditable afterwards."
+      ],
+      "discriminator": [
+        98,
+        61,
+        192,
+        52,
+        50,
+        1,
+        184,
+        222
+      ],
+      "accounts": [
+        {
+          "name": "oracle",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "policy",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy.holder",
+                "account": "InsurancePolicy"
+              },
+              {
+                "kind": "account",
+                "path": "policy.policy_id",
+                "account": "InsurancePolicy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_account",
+          "writable": true
+        },
+        {
+          "name": "holder_token_account",
+          "writable": true
+        },
+        {
+          "name": "price_update",
+          "docs": [
+            "Guardian-signed price update, posted by the Pyth receiver program.",
+            "",
+            "Typing it as `Account<'info, PriceUpdateV2>` is what makes this",
+            "trustworthy: Anchor enforces that the account is owned by the Pyth",
+            "receiver, and the receiver only writes one after checking the Wormhole",
+            "guardians' signatures. A fabricated account fails deserialization",
+            "before any of the logic above runs."
+          ]
+        },
+        {
+          "name": "evidence_record",
+          "docs": [
+            "Immutable record of what was proven. `init` rather than",
+            "`init_if_needed`: one policy, one proven payout, and a second attempt",
+            "should fail loudly rather than overwrite the first."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  99,
+                  108,
+                  97,
+                  105,
+                  109,
+                  95,
+                  101,
+                  118,
+                  105,
+                  100,
+                  101,
+                  110,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "payout_amount",
+          "type": "u64"
+        },
+        {
+          "name": "evidence",
+          "type": {
+            "defined": {
+              "name": "PayoutEvidence"
+            }
+          }
+        }
+      ]
     }
   ],
   "accounts": [
+    {
+      "name": "AgentErrorEvidenceRecord",
+      "discriminator": [
+        93,
+        5,
+        236,
+        60,
+        3,
+        112,
+        4,
+        104
+      ]
+    },
+    {
+      "name": "ClaimEvidenceRecord",
+      "discriminator": [
+        99,
+        94,
+        42,
+        175,
+        50,
+        140,
+        223,
+        245
+      ]
+    },
+    {
+      "name": "ExploitEvidenceRecord",
+      "discriminator": [
+        74,
+        213,
+        246,
+        126,
+        28,
+        91,
+        1,
+        39
+      ]
+    },
+    {
+      "name": "GovernanceBaseline",
+      "discriminator": [
+        154,
+        71,
+        126,
+        115,
+        49,
+        136,
+        16,
+        191
+      ]
+    },
+    {
+      "name": "GovernanceEvidenceRecord",
+      "discriminator": [
+        101,
+        219,
+        28,
+        22,
+        100,
+        45,
+        247,
+        148
+      ]
+    },
     {
       "name": "InsurancePolicy",
       "discriminator": [
@@ -1654,6 +4139,58 @@
         202,
         30,
         144
+      ]
+    },
+    {
+      "name": "PendingAdminTransfer",
+      "discriminator": [
+        197,
+        99,
+        208,
+        208,
+        175,
+        41,
+        86,
+        46
+      ]
+    },
+    {
+      "name": "PolicyAgentMandate",
+      "discriminator": [
+        204,
+        90,
+        117,
+        203,
+        57,
+        57,
+        196,
+        75
+      ]
+    },
+    {
+      "name": "PolicyAuthorityCheckpoint",
+      "discriminator": [
+        168,
+        13,
+        75,
+        30,
+        17,
+        105,
+        92,
+        163
+      ]
+    },
+    {
+      "name": "PolicyBalanceCheckpoint",
+      "discriminator": [
+        121,
+        223,
+        251,
+        154,
+        122,
+        25,
+        174,
+        76
       ]
     },
     {
@@ -1698,6 +4235,71 @@
   ],
   "events": [
     {
+      "name": "AdminTransferCancelled",
+      "discriminator": [
+        93,
+        23,
+        69,
+        55,
+        216,
+        128,
+        106,
+        56
+      ]
+    },
+    {
+      "name": "AdminTransferProposed",
+      "discriminator": [
+        203,
+        168,
+        175,
+        51,
+        239,
+        104,
+        20,
+        85
+      ]
+    },
+    {
+      "name": "AdminTransferred",
+      "discriminator": [
+        255,
+        147,
+        182,
+        5,
+        199,
+        217,
+        38,
+        179
+      ]
+    },
+    {
+      "name": "AgentErrorProofVerified",
+      "discriminator": [
+        41,
+        246,
+        155,
+        198,
+        133,
+        9,
+        253,
+        64
+      ]
+    },
+    {
+      "name": "AgentMandateDeclared",
+      "discriminator": [
+        111,
+        78,
+        148,
+        104,
+        84,
+        223,
+        209,
+        102
+      ]
+    },
+    {
       "name": "AttestationUpserted",
       "discriminator": [
         104,
@@ -1708,6 +4310,32 @@
         107,
         153,
         93
+      ]
+    },
+    {
+      "name": "AuthorityCheckpointed",
+      "discriminator": [
+        33,
+        194,
+        196,
+        39,
+        162,
+        97,
+        57,
+        161
+      ]
+    },
+    {
+      "name": "BalanceCheckpointed",
+      "discriminator": [
+        251,
+        113,
+        163,
+        38,
+        70,
+        116,
+        14,
+        208
       ]
     },
     {
@@ -1724,6 +4352,19 @@
       ]
     },
     {
+      "name": "ClaimProofVerified",
+      "discriminator": [
+        66,
+        82,
+        16,
+        20,
+        85,
+        122,
+        11,
+        39
+      ]
+    },
+    {
       "name": "ClaimSubmitted",
       "discriminator": [
         95,
@@ -1734,6 +4375,45 @@
         240,
         174,
         52
+      ]
+    },
+    {
+      "name": "ExploitProofVerified",
+      "discriminator": [
+        80,
+        172,
+        251,
+        136,
+        223,
+        25,
+        86,
+        70
+      ]
+    },
+    {
+      "name": "GovernanceBaselineDeclared",
+      "discriminator": [
+        229,
+        227,
+        190,
+        64,
+        66,
+        196,
+        106,
+        1
+      ]
+    },
+    {
+      "name": "GovernanceProofVerified",
+      "discriminator": [
+        147,
+        232,
+        178,
+        203,
+        162,
+        121,
+        116,
+        150
       ]
     },
     {
@@ -1986,11 +4666,587 @@
     },
     {
       "code": 6031,
+      "name": "InvalidPriceEvidence",
+      "msg": "Price evidence is malformed, for the wrong feed, or at the wrong exponent"
+    },
+    {
+      "code": 6032,
+      "name": "PriceEvidenceSkew",
+      "msg": "Signed price was not published close enough to the trigger transaction"
+    },
+    {
+      "code": 6033,
+      "name": "PriceEvidenceOutOfWindow",
+      "msg": "Trigger transaction falls outside the policy's claim window"
+    },
+    {
+      "code": 6034,
+      "name": "DeviationBelowMinimum",
+      "msg": "Deviation from the signed reference price is below the provable minimum"
+    },
+    {
+      "code": 6035,
+      "name": "PayoutExceedsProvenLoss",
+      "msg": "Payout exceeds the loss the signed price can account for"
+    },
+    {
+      "code": 6036,
+      "name": "CheckpointMissing",
+      "msg": "No balance checkpoint exists for this policy"
+    },
+    {
+      "code": 6037,
+      "name": "CheckpointOutOfWindow",
+      "msg": "Balance checkpoint is too old, or was taken after the claim was filed"
+    },
+    {
+      "code": 6038,
+      "name": "DropBelowMinimum",
+      "msg": "Observed balance drop is below the provable minimum"
+    },
+    {
+      "code": 6039,
+      "name": "PayoutExceedsObservedDrop",
+      "msg": "Payout exceeds the balance drop the program observed"
+    },
+    {
+      "code": 6040,
+      "name": "InvalidCoveredAccount",
+      "msg": "Covered token account does not belong to the policy's agent"
+    },
+    {
+      "code": 6041,
+      "name": "GovernanceBaselineMissing",
+      "msg": "No governance baseline has been declared for this policy"
+    },
+    {
+      "code": 6042,
+      "name": "GovernanceBaselineNotMatured",
+      "msg": "Governance baseline had not matured when the claim was filed"
+    },
+    {
+      "code": 6043,
+      "name": "InvalidGovernanceBaseline",
+      "msg": "Governance baseline is malformed — declare a real token owner"
+    },
+    {
+      "code": 6044,
+      "name": "TooManyGovernanceAuthorities",
+      "msg": "Too many extra authorities for the governance baseline"
+    },
+    {
+      "code": 6045,
+      "name": "AuthorityCheckpointMissing",
+      "msg": "No authority checkpoint exists for this policy"
+    },
+    {
+      "code": 6046,
+      "name": "AuthorityCheckpointOutOfWindow",
+      "msg": "Authority checkpoint is too old, or was taken after the claim was filed"
+    },
+    {
+      "code": 6047,
+      "name": "AuthorityWithinBaseline",
+      "msg": "Control over the covered account is still inside the declared set"
+    },
+    {
+      "code": 6048,
+      "name": "PayoutExceedsProvenGovernanceLoss",
+      "msg": "Payout exceeds the value the program can see was lost or seized"
+    },
+    {
+      "code": 6049,
+      "name": "AgentMandateMissing",
+      "msg": "No agent mandate has been declared for this policy"
+    },
+    {
+      "code": 6050,
+      "name": "AgentMandateNotMatured",
+      "msg": "Agent mandate had not matured when the claim was filed"
+    },
+    {
+      "code": 6051,
+      "name": "InvalidAgentMandate",
+      "msg": "Agent mandate is malformed — declare a real spending envelope"
+    },
+    {
+      "code": 6052,
+      "name": "TooManyMandateCounterparties",
+      "msg": "Too many declared counterparties for the agent mandate"
+    },
+    {
+      "code": 6053,
+      "name": "TooManyMandatePrograms",
+      "msg": "Too many declared programs for the agent mandate"
+    },
+    {
+      "code": 6054,
+      "name": "OutflowWithinMandate",
+      "msg": "The observed outflow stayed inside the declared mandate"
+    },
+    {
+      "code": 6055,
+      "name": "BreachBelowMinimum",
+      "msg": "Mandate breach is below the provable minimum"
+    },
+    {
+      "code": 6056,
+      "name": "PayoutExceedsProvenBreach",
+      "msg": "Payout exceeds the mandate breach the program measured"
+    },
+    {
+      "code": 6057,
+      "name": "InvalidAdminCandidate",
+      "msg": "Proposed admin must be a real key and not the current admin"
+    },
+    {
+      "code": 6058,
+      "name": "NotProposedAdmin",
+      "msg": "Signer is not the proposed admin"
+    },
+    {
+      "code": 6059,
+      "name": "InvalidRentRefund",
+      "msg": "Rent refund account is not the admin that opened the proposal"
+    },
+    {
+      "code": 6060,
+      "name": "InvalidAccountForMigration",
+      "msg": "Account is not a migratable Covantic account"
+    },
+    {
+      "code": 6061,
       "name": "MathOverflow",
       "msg": "Arithmetic overflow"
+    },
+    {
+      "code": 6062,
+      "name": "ZeroPayout",
+      "msg": "Payout amount must be greater than zero"
     }
   ],
   "types": [
+    {
+      "name": "AdminTransferCancelled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "proposed_admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "cancelled_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AdminTransferProposed",
+      "docs": [
+        "The admin role is the only key that can pause the protocol or rotate the",
+        "oracle authority, so every step of a handover is on the record."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "current_admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "proposed_admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "proposed_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AdminTransferred",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "previous_admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "new_admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "accepted_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AgentErrorEvidenceRecord",
+      "docs": [
+        "On-chain record of an agent-error payout the program bounded itself.",
+        "",
+        "The counterpart to `ExploitEvidenceRecord` and `GovernanceEvidenceRecord`,",
+        "recording the same kind of thing: the numbers the *program* derived, not",
+        "the ones it was handed. `observed_drop` is a subtraction between two",
+        "balances read from a constrained account, and `breach_excess` is the",
+        "amount by which that drop exceeded an envelope the holder signed for —",
+        "so anyone can recompute the bound from the checkpoint, the mandate, and",
+        "the payout.",
+        "",
+        "`breach_kind` names which declared bound was crossed — the single-outflow",
+        "cap or the retention floor. Both are quantitative and both were re-derived",
+        "on chain; a breach of the mandate's counterparty or program allowlists",
+        "produces no overshoot and is never settled here, because the program cannot",
+        "inspect a past transaction to check one."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "policy_id",
+            "type": "u64"
+          },
+          {
+            "name": "holder",
+            "type": "pubkey"
+          },
+          {
+            "name": "covered_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "declared_max_single_outflow",
+            "docs": [
+              "The envelope in force when the claim was filed."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "declared_min_retained_balance",
+            "type": "u64"
+          },
+          {
+            "name": "mandate_effective_at",
+            "type": "i64"
+          },
+          {
+            "name": "checkpoint_amount",
+            "type": "u64"
+          },
+          {
+            "name": "checkpoint_slot",
+            "type": "u64"
+          },
+          {
+            "name": "checkpoint_unix_timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "current_amount",
+            "type": "u64"
+          },
+          {
+            "name": "observed_drop",
+            "docs": [
+              "`checkpoint_amount - current_amount`, computed here."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "breach_excess",
+            "docs": [
+              "How far outside the declared envelope the drop landed. Always > 0 on a",
+              "settled claim: this is the bound."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "breach_kind",
+            "docs": [
+              "Which declared bound was crossed. See `BREACH_OUTFLOW_CAP` /",
+              "`BREACH_RETAINED_FLOOR` in the instruction module."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "max_provable_loss",
+            "type": "u64"
+          },
+          {
+            "name": "payout_amount",
+            "type": "u64"
+          },
+          {
+            "name": "bundle_hash",
+            "docs": [
+              "sha256 of the canonical off-chain evidence bundle."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "verified_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AgentErrorPayoutEvidence",
+      "docs": [
+        "What the oracle commits to when claiming an agent-error loss.",
+        "",
+        "Deliberately short, and shorter than it looks like it should be. Everything",
+        "that could be asserted about *magnitude* has been removed — the program",
+        "derives that itself below. What remains is a commitment to the off-chain",
+        "evidence, which is the part the chain cannot check and therefore the part",
+        "that must be permanently on the record."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bundle_hash",
+            "docs": [
+              "sha256 of the canonical off-chain evidence bundle."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "AgentErrorProofVerified",
+      "docs": [
+        "Event: an agent-error payout the program bounded against a declared",
+        "mandate.",
+        "",
+        "Its presence — not the fact that a flag was set — is what separates a",
+        "payout the chain checked from one it merely permitted. `breach_excess` is",
+        "the bound the program derived: how far the measured drop landed outside an",
+        "envelope the holder signed for, and the most the payout could have been."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "policy_id",
+            "type": "u64"
+          },
+          {
+            "name": "covered_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "declared_max_single_outflow",
+            "type": "u64"
+          },
+          {
+            "name": "declared_min_retained_balance",
+            "type": "u64"
+          },
+          {
+            "name": "mandate_effective_at",
+            "type": "i64"
+          },
+          {
+            "name": "checkpoint_amount",
+            "type": "u64"
+          },
+          {
+            "name": "current_amount",
+            "type": "u64"
+          },
+          {
+            "name": "observed_drop",
+            "type": "u64"
+          },
+          {
+            "name": "breach_excess",
+            "type": "u64"
+          },
+          {
+            "name": "breach_kind",
+            "type": "u8"
+          },
+          {
+            "name": "max_provable_loss",
+            "type": "u64"
+          },
+          {
+            "name": "payout_amount",
+            "type": "u64"
+          },
+          {
+            "name": "bundle_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "AgentMandate",
+      "docs": [
+        "What the holder commits to about how their agent is permitted to operate."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "max_single_outflow",
+            "docs": [
+              "Largest single outflow the agent may make, in base units of the",
+              "covered mint."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_window_outflow",
+            "docs": [
+              "Largest cumulative outflow over `window_seconds`."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "window_seconds",
+            "type": "i64"
+          },
+          {
+            "name": "min_retained_balance",
+            "docs": [
+              "Balance the agent must never take the covered account below."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "allowed_counterparties",
+            "docs": [
+              "Destinations the agent may send value to. Capped at",
+              "{@link MAX_MANDATE_COUNTERPARTIES}."
+            ],
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "allowed_programs",
+            "docs": [
+              "Programs the agent may move value through. Capped at",
+              "{@link MAX_MANDATE_PROGRAMS}."
+            ],
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "manifest_hash",
+            "docs": [
+              "sha256 of the off-chain mandate covering anything richer."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "AgentMandateDeclared",
+      "docs": [
+        "Event: a holder declared (or refreshed) the operating envelope for their",
+        "agent.",
+        "",
+        "`effective_at` is the field that matters to an observer: it is when the",
+        "mandate becomes usable as proof, and the gap to `declared_at` is what stops",
+        "a holder from declaring, after an ordinary loss, an envelope narrow enough",
+        "to have been breached by it."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "policy_id",
+            "type": "u64"
+          },
+          {
+            "name": "holder",
+            "type": "pubkey"
+          },
+          {
+            "name": "max_single_outflow",
+            "type": "u64"
+          },
+          {
+            "name": "max_window_outflow",
+            "type": "u64"
+          },
+          {
+            "name": "window_seconds",
+            "type": "i64"
+          },
+          {
+            "name": "min_retained_balance",
+            "type": "u64"
+          },
+          {
+            "name": "counterparty_count",
+            "type": "u8"
+          },
+          {
+            "name": "program_count",
+            "type": "u8"
+          },
+          {
+            "name": "manifest_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "declared_at",
+            "type": "i64"
+          },
+          {
+            "name": "effective_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
     {
       "name": "AttestationUpserted",
       "docs": [
@@ -2014,6 +5270,222 @@
           {
             "name": "expires_at",
             "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AuthorityCheckpointed",
+      "docs": [
+        "Event: an authority checkpoint was written for a policy.",
+        "",
+        "Emitted by the permissionless crank. The gap between consecutive events",
+        "tells an indexer whether a policy had a fresh enough reading of who was in",
+        "charge to prove a claim against at any given moment."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "policy_id",
+            "type": "u64"
+          },
+          {
+            "name": "covered_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "prev_owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "frozen",
+            "type": "bool"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "unix_timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BalanceCheckpointed",
+      "docs": [
+        "Event: a balance checkpoint was written for a policy.",
+        "",
+        "Emitted by the permissionless crank. An indexer can use the gap between",
+        "consecutive events to tell whether a policy's baseline was fresh enough to",
+        "prove a claim against at any given moment."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "policy_id",
+            "type": "u64"
+          },
+          {
+            "name": "covered_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "prev_amount",
+            "type": "u64"
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "unix_timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ClaimEvidenceRecord",
+      "docs": [
+        "On-chain record of the evidence a payout was verified against.",
+        "",
+        "Written by `verify_and_payout_v2` after the program has checked the price",
+        "itself. It exists so a payout can be audited by someone who does not trust",
+        "the oracle backend: the reference price recorded here came out of a",
+        "guardian-signed Pyth update that this program verified, and `bundle_hash`",
+        "commits to the full off-chain evidence, which is published separately. A",
+        "bundle that does not hash to this value is provably not the one the",
+        "payout was made on.",
+        "",
+        "Kept in its own PDA rather than as new fields on `InsurancePolicy`,",
+        "because growing a live account type would force a realloc of every policy",
+        "already on chain."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "policy_id",
+            "docs": [
+              "Policy this evidence belongs to."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "holder",
+            "type": "pubkey"
+          },
+          {
+            "name": "feed_id",
+            "docs": [
+              "Pyth feed the reference price came from."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "expo",
+            "docs": [
+              "Exponent shared by `reference_price` and `executed_price`."
+            ],
+            "type": "i32"
+          },
+          {
+            "name": "reference_price",
+            "docs": [
+              "Price the guardians signed, as published."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "executed_price",
+            "docs": [
+              "Price the transaction actually executed at, committed by the oracle."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "subject_quantity",
+            "docs": [
+              "Quantity of the subject asset, in its own base units."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "subject_decimals",
+            "type": "u8"
+          },
+          {
+            "name": "price_publish_time",
+            "docs": [
+              "When the reference price was published."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "trigger_block_time",
+            "docs": [
+              "Block time of the trigger transaction, committed by the oracle."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "deviation_bps",
+            "docs": [
+              "Deviation the program recomputed, in basis points."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "max_provable_loss",
+            "docs": [
+              "Upper bound on the loss the signed price can support."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "payout_amount",
+            "type": "u64"
+          },
+          {
+            "name": "bundle_hash",
+            "docs": [
+              "sha256 of the canonical off-chain evidence bundle."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "verified_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
           }
         ]
       }
@@ -2050,6 +5522,66 @@
       }
     },
     {
+      "name": "ClaimProofVerified",
+      "docs": [
+        "Event: a payout was verified against a guardian-signed price on chain.",
+        "",
+        "Emitted alongside `ClaimPaid` on the proven path. Indexers can use its",
+        "presence to tell a payout the chain checked from one it merely permitted."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "policy_id",
+            "type": "u64"
+          },
+          {
+            "name": "feed_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "reference_price",
+            "type": "i64"
+          },
+          {
+            "name": "executed_price",
+            "type": "i64"
+          },
+          {
+            "name": "deviation_bps",
+            "type": "u32"
+          },
+          {
+            "name": "max_provable_loss",
+            "type": "u64"
+          },
+          {
+            "name": "payout_amount",
+            "type": "u64"
+          },
+          {
+            "name": "bundle_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "price_publish_time",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
       "name": "ClaimSubmitted",
       "docs": [
         "Event: claim submitted"
@@ -2072,6 +5604,671 @@
           {
             "name": "submitted_at",
             "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ExploitEvidenceRecord",
+      "docs": [
+        "On-chain record of an exploit payout the program bounded itself.",
+        "",
+        "The counterpart to `ClaimEvidenceRecord` on the price path, and it records",
+        "the same kind of thing: the numbers the *program* derived, not the ones it",
+        "was handed. `observed_drop` is a subtraction this program performed",
+        "between two balances it read from a constrained account, so anyone can",
+        "recompute the bound from the two checkpoints and the payout."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "policy_id",
+            "type": "u64"
+          },
+          {
+            "name": "holder",
+            "type": "pubkey"
+          },
+          {
+            "name": "covered_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "checkpoint_amount",
+            "docs": [
+              "Balance at the checkpoint, read by the program."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "checkpoint_slot",
+            "type": "u64"
+          },
+          {
+            "name": "checkpoint_unix_timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "current_amount",
+            "docs": [
+              "Balance at payout, read by the program."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "observed_drop",
+            "docs": [
+              "`checkpoint_amount - current_amount`, computed here."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "drop_bps",
+            "docs": [
+              "The drop as a fraction of the checkpoint, in basis points."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "payout_amount",
+            "type": "u64"
+          },
+          {
+            "name": "bundle_hash",
+            "docs": [
+              "sha256 of the canonical off-chain evidence bundle. The chain proves",
+              "the money left; this commits to the claim about *why*."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "verified_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ExploitPayoutEvidence",
+      "docs": [
+        "What the oracle commits to when claiming an exploit loss.",
+        "",
+        "Deliberately short. Everything that could be asserted about *magnitude*",
+        "has been removed — the program derives that itself below. What remains is",
+        "a commitment to the off-chain evidence, which is the part the chain cannot",
+        "check and therefore the part that must be permanently on the record."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bundle_hash",
+            "docs": [
+              "sha256 of the canonical off-chain evidence bundle."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ExploitProofVerified",
+      "docs": [
+        "Event: an exploit payout was bounded by a drop the program measured.",
+        "",
+        "Emitted alongside `ClaimPaid` on the proven exploit path. Its presence is",
+        "what separates a payout the chain checked from one it merely permitted."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "policy_id",
+            "type": "u64"
+          },
+          {
+            "name": "covered_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "checkpoint_amount",
+            "type": "u64"
+          },
+          {
+            "name": "current_amount",
+            "type": "u64"
+          },
+          {
+            "name": "observed_drop",
+            "type": "u64"
+          },
+          {
+            "name": "drop_bps",
+            "type": "u32"
+          },
+          {
+            "name": "payout_amount",
+            "type": "u64"
+          },
+          {
+            "name": "bundle_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "GovernanceBaseline",
+      "docs": [
+        "The authority set the holder declares as legitimate for their agent.",
+        "",
+        "This account is what makes a governance claim provable in a way the other",
+        "two triggers cannot match, and the reason is worth stating plainly.",
+        "",
+        "`verify_and_payout_v2` works because Pyth hands the chain a",
+        "guardian-signed statement about a past price. `verify_and_payout_exploit`",
+        "works because the program can read a balance twice and subtract. Neither",
+        "can establish *consent* — whether the holder meant for the money to move —",
+        "so both leave causation as an off-chain assertion.",
+        "",
+        "Here consent is on chain. The holder signs, in advance, for who is allowed",
+        "to control the agent. \"Was this authorised?\" stops being an inference and",
+        "becomes a set membership test the program performs for itself.",
+        "",
+        "Two properties carry the weight:",
+        "",
+        "**Maturity.** `effective_at` sits `GOVERNANCE_BASELINE_DELAY` in the",
+        "future. A declaration that could be created and claimed against in the",
+        "same breath would prove nothing — a compromised holder key would simply",
+        "declare a fresh one. With the delay, a fraudulent claim requires",
+        "pre-committing on chain, an hour early, to a lie anyone can later read.",
+        "",
+        "**Retention.** `prev_*` keeps the declaration this one replaced, for the",
+        "same reason `PolicyBalanceCheckpoint` does: a rotation landing between the",
+        "takeover and the claim must not erase the only usable \"before\"."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "policy_id",
+            "type": "u64"
+          },
+          {
+            "name": "holder",
+            "type": "pubkey"
+          },
+          {
+            "name": "token_owner",
+            "docs": [
+              "Expected owner of the covered token account. Normally the agent."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "expected_delegate",
+            "docs": [
+              "Expected delegate. `None` for an agent that never delegates."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "expected_close_authority",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "program_upgrade_authority",
+            "docs": [
+              "Upgrade authority of the agent's own program, when it runs one."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "controller",
+            "docs": [
+              "Multisig / Squads config account governing the agent."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "controller_min_threshold",
+            "docs": [
+              "Threshold that config must not fall below. Recorded rather than",
+              "enforced: the program cannot decode a Squads config, and pretending",
+              "otherwise would be worse than committing to the number and leaving the",
+              "check to a reader who can."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "extra_authorities",
+            "docs": [
+              "Additional addresses permitted to hold control — operator wallets, a",
+              "hot key, a migration destination. Fixed-size so the account's rent and",
+              "stack cost are bounded; `extra_authority_count` says how many slots",
+              "are real, because the zero pubkey must never read as an allowed one."
+            ],
+            "type": {
+              "array": [
+                "pubkey",
+                4
+              ]
+            }
+          },
+          {
+            "name": "extra_authority_count",
+            "type": "u8"
+          },
+          {
+            "name": "manifest_hash",
+            "docs": [
+              "sha256 of the off-chain manifest covering anything richer than the",
+              "fields above. Committed, not interpreted: the chain checks what it can",
+              "read and leaves the rest permanently falsifiable."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "declared_at",
+            "type": "i64"
+          },
+          {
+            "name": "effective_at",
+            "docs": [
+              "When this declaration becomes usable as proof."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "prev_token_owner",
+            "docs": [
+              "The declaration this one replaced."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "prev_effective_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GovernanceBaselineDeclared",
+      "docs": [
+        "Event: a holder declared (or refreshed) the authority set for their agent.",
+        "",
+        "`effective_at` is the field that matters to an observer: it is when the",
+        "declaration becomes usable as proof, and the gap to `declared_at` is what",
+        "stops a compromised key from minting a convenient baseline on demand."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "policy_id",
+            "type": "u64"
+          },
+          {
+            "name": "holder",
+            "type": "pubkey"
+          },
+          {
+            "name": "token_owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "extra_authority_count",
+            "type": "u8"
+          },
+          {
+            "name": "manifest_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "declared_at",
+            "type": "i64"
+          },
+          {
+            "name": "effective_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GovernanceEvidenceRecord",
+      "docs": [
+        "On-chain record of a governance payout the program bounded itself.",
+        "",
+        "The counterpart to `ClaimEvidenceRecord` and `ExploitEvidenceRecord`, and",
+        "it records the same kind of thing: the facts the *program* read, not the",
+        "ones it was handed. Anyone holding the baseline and the two checkpoints",
+        "can recompute every bound below from them."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "policy_id",
+            "type": "u64"
+          },
+          {
+            "name": "holder",
+            "type": "pubkey"
+          },
+          {
+            "name": "covered_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "declared_owner",
+            "docs": [
+              "Who the holder declared should own it."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "observed_owner",
+            "docs": [
+              "Who owns it now, read by the program."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "observed_frozen",
+            "type": "bool"
+          },
+          {
+            "name": "departure_kind",
+            "docs": [
+              "Which departure the payout rests on, for a reader who does not want to",
+              "re-derive it. See `GovernanceDeparture` in the instruction."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "departed_to",
+            "docs": [
+              "The address control actually landed on."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "checkpoint_amount",
+            "docs": [
+              "Balance at the pre-incident authority checkpoint."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "checkpoint_slot",
+            "type": "u64"
+          },
+          {
+            "name": "checkpoint_unix_timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "current_amount",
+            "docs": [
+              "Balance now, read by the program."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "observed_drop",
+            "docs": [
+              "`checkpoint_amount - current_amount`, computed here."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "seized_amount",
+            "docs": [
+              "Value the program can see sitting under foreign control right now."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_provable_loss",
+            "docs": [
+              "The bound the payout was actually held to."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "payout_amount",
+            "type": "u64"
+          },
+          {
+            "name": "bundle_hash",
+            "docs": [
+              "sha256 of the canonical off-chain evidence bundle. The chain proves",
+              "control left the declared set; this commits to the claim about what it",
+              "cost beyond what the chain can see."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "verified_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GovernanceManifest",
+      "docs": [
+        "What the holder commits to about who may control their agent."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "token_owner",
+            "docs": [
+              "Expected owner of the covered token account. Normally the agent."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "expected_delegate",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "expected_close_authority",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "program_upgrade_authority",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "controller",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "controller_min_threshold",
+            "type": "u16"
+          },
+          {
+            "name": "extra_authorities",
+            "docs": [
+              "Extra addresses permitted to hold control. Capped at",
+              "{@link MAX_GOVERNANCE_EXTRA_AUTHORITIES}."
+            ],
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "manifest_hash",
+            "docs": [
+              "sha256 of the off-chain manifest covering anything richer."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "GovernancePayoutEvidence",
+      "docs": [
+        "What the oracle commits to when claiming a governance loss.",
+        "",
+        "Deliberately short — shorter than either of the other proof paths. Nothing",
+        "about *who controls the account* is asserted here, because the program",
+        "reads that for itself below, and nothing about magnitude is asserted",
+        "either, because the program bounds that too. What remains is a commitment",
+        "to the off-chain evidence, which is the part the chain cannot check and",
+        "therefore the part that must be permanently on the record."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bundle_hash",
+            "docs": [
+              "sha256 of the canonical off-chain evidence bundle."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "GovernanceProofVerified",
+      "docs": [
+        "Event: a governance payout was bounded by a departure the program observed.",
+        "",
+        "Emitted alongside `ClaimPaid` on the proven governance path. Its presence",
+        "separates a payout the chain checked from one it merely permitted."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "policy_id",
+            "type": "u64"
+          },
+          {
+            "name": "covered_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "declared_owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "observed_owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "observed_frozen",
+            "type": "bool"
+          },
+          {
+            "name": "departure_kind",
+            "type": "u8"
+          },
+          {
+            "name": "departed_to",
+            "type": "pubkey"
+          },
+          {
+            "name": "observed_drop",
+            "type": "u64"
+          },
+          {
+            "name": "seized_amount",
+            "type": "u64"
+          },
+          {
+            "name": "max_provable_loss",
+            "type": "u64"
+          },
+          {
+            "name": "payout_amount",
+            "type": "u64"
+          },
+          {
+            "name": "bundle_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
           }
         ]
       }
@@ -2303,6 +6500,496 @@
               "PDA bump"
             ],
             "type": "u8"
+          },
+          {
+            "name": "loss_index",
+            "docs": [
+              "Multiplicative index tracking cumulative socialised loss, scaled by",
+              "`LOSS_INDEX_SCALE`. Starts at `LOSS_INDEX_SCALE` and only ever falls.",
+              "Each staker's snapshot lives in `StakerPosition.loss_index_snapshot`;",
+              "a position's live principal is",
+              "`amount_staked * loss_index / loss_index_snapshot`.",
+              "",
+              "**Last field on purpose.** Appending keeps every byte before it at the",
+              "same offset, so an account written by the previous layout still parses",
+              "once grown, and migration is a resize plus one default rather than a",
+              "rewrite."
+            ],
+            "type": "u128"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PayoutEvidence",
+      "docs": [
+        "What the oracle commits to when claiming an oracle-manipulation loss.",
+        "",
+        "Every field here is checked against the guardian-signed price update, the",
+        "policy's own on-chain history, or arithmetic the program performs itself.",
+        "The oracle chooses these numbers; it does not get to have them believed."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "feed_id",
+            "docs": [
+              "Pyth feed the reference price must come from."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "trigger_block_time",
+            "docs": [
+              "Block time of the trigger transaction."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "executed_price",
+            "docs": [
+              "Price the transaction executed at, at the price update's exponent."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "subject_quantity",
+            "docs": [
+              "Quantity of the subject asset, in its own base units."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "subject_decimals",
+            "type": "u8"
+          },
+          {
+            "name": "bundle_hash",
+            "docs": [
+              "sha256 of the canonical off-chain evidence bundle."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "PendingAdminTransfer",
+      "docs": [
+        "A proposed handover of the protocol admin role, awaiting the candidate's",
+        "signature.",
+        "",
+        "This lives in its own PDA rather than as a field on `ProtocolConfig`",
+        "deliberately. `ProtocolConfig` is created once at initialization and sized",
+        "from its struct; adding a field to it would leave the already-deployed",
+        "config account too small to deserialize, requiring a realloc migration",
+        "before the program could read its own config again. A separate account",
+        "that only exists while a transfer is pending has no such problem — the",
+        "deployed config is untouched, and the PDA is closed when the transfer",
+        "completes or is cancelled.",
+        "",
+        "PDA: seeds = [b\"covantic_pending_admin\"] — one at a time, protocol-wide."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "proposed_admin",
+            "docs": [
+              "The only key that may accept this transfer."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "proposed_by",
+            "docs": [
+              "The admin that opened it, and the account rent is refunded to when the",
+              "transfer completes or is cancelled."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "proposed_at",
+            "docs": [
+              "When the proposal was made. Not enforced as an expiry — a stale",
+              "proposal is visible on chain and the admin can cancel it — but it makes",
+              "an abandoned handover obvious to anyone reading the account."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PolicyAgentMandate",
+      "docs": [
+        "The operating envelope the holder declares for their agent.",
+        "",
+        "This account is what makes an agent-error claim provable at all, and the",
+        "reason is worth stating plainly because it is not the same reason the",
+        "other three triggers work.",
+        "",
+        "`verify_and_payout_v2` works because Pyth hands the chain a",
+        "guardian-signed statement about a past price. `verify_and_payout_exploit`",
+        "works because the program can read a balance twice and subtract.",
+        "`verify_and_payout_governance` works because the holder declares who may",
+        "control the agent, so authorisation becomes a set-membership test.",
+        "",
+        "None of those help here. An agent error is a loss the agent caused *with",
+        "its own authority* — precisely the case the exploit path rejects as",
+        "`agent_authorized_movement`. Nothing on chain distinguishes a mistake from",
+        "a decision, because the distinction lives in the holder's intent, and no",
+        "instruction can read intent.",
+        "",
+        "So this account does not try to. It has the holder pre-commit to the",
+        "envelope their agent is permitted to operate in, and then \"was this a",
+        "mistake?\" becomes \"did the agent act outside what its owner declared?\" —",
+        "a comparison of numbers the program holds.",
+        "",
+        "**What that costs, stated once here.** It narrows the covered event. An",
+        "agent that loses money *inside* its declared envelope is not covered,",
+        "because its owner said that was permitted. The narrowing is the mechanism,",
+        "not a concession: it is the same trade `GovernanceBaseline` made when it",
+        "replaced \"was this authorised?\" with \"is this in the declared set?\".",
+        "",
+        "Three properties carry the weight:",
+        "",
+        "**Maturity.** `effective_at` sits `MANDATE_DECLARATION_DELAY` in the",
+        "future, and `verify_and_payout_agent_error` refuses a mandate that had not",
+        "matured before the claim was filed. Without it a holder could watch an",
+        "ordinary loss happen and then declare, retroactively, a mandate narrow",
+        "enough to have been breached by it.",
+        "",
+        "**Retention.** `prev_*` keeps the declaration this one replaced, for the",
+        "same reason `PolicyBalanceCheckpoint` does: a refresh landing between the",
+        "incident and the claim must not erase the only usable \"before\".",
+        "",
+        "**A floor under the numbers the chain can check.** Only the quantitative",
+        "dimensions — `max_single_outflow`, `min_retained_balance` — are re-checked",
+        "on chain against a balance the program reads for itself. The categorical",
+        "ones cannot be: the program cannot inspect the destination or the program",
+        "set of a *past* transaction. Those live in the allowlists below for the",
+        "off-chain verifier, and are recorded rather than enforced. Pretending",
+        "otherwise would be worse than committing to them and leaving the check to",
+        "a reader who can perform it."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "policy_id",
+            "type": "u64"
+          },
+          {
+            "name": "holder",
+            "type": "pubkey"
+          },
+          {
+            "name": "max_single_outflow",
+            "docs": [
+              "Largest single outflow, in base units of the covered mint, the agent is",
+              "permitted to make. **Re-checked on chain.**"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_window_outflow",
+            "docs": [
+              "Largest cumulative outflow over `window_seconds`. Recorded, not",
+              "enforced: the program holds one balance reading per policy and cannot",
+              "sum a window of transfers from it."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "window_seconds",
+            "type": "i64"
+          },
+          {
+            "name": "min_retained_balance",
+            "docs": [
+              "Balance the agent must never take the covered account below.",
+              "**Re-checked on chain.**"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "allowed_counterparties",
+            "docs": [
+              "Destinations the agent may send value to. Fixed-size so the account's",
+              "rent and the stack cost of loading it are bounded;",
+              "`counterparty_count` says how many slots are real, because the zero",
+              "pubkey must never read as a permitted one."
+            ],
+            "type": {
+              "array": [
+                "pubkey",
+                8
+              ]
+            }
+          },
+          {
+            "name": "counterparty_count",
+            "type": "u8"
+          },
+          {
+            "name": "allowed_programs",
+            "docs": [
+              "Programs the agent may move value through. Same shape, same reason."
+            ],
+            "type": {
+              "array": [
+                "pubkey",
+                8
+              ]
+            }
+          },
+          {
+            "name": "program_count",
+            "type": "u8"
+          },
+          {
+            "name": "manifest_hash",
+            "docs": [
+              "sha256 of the off-chain mandate covering anything richer than the",
+              "fields above — per-venue caps, slippage bounds, rate limits.",
+              "Committed, not interpreted."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "declared_at",
+            "type": "i64"
+          },
+          {
+            "name": "effective_at",
+            "docs": [
+              "When this declaration becomes usable as proof."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "prev_max_single_outflow",
+            "docs": [
+              "The declaration this one replaced."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "prev_min_retained_balance",
+            "type": "u64"
+          },
+          {
+            "name": "prev_effective_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PolicyAuthorityCheckpoint",
+      "docs": [
+        "Who controlled the covered account, as read by this program.",
+        "",
+        "The governance path's counterpart to `PolicyBalanceCheckpoint`, and it",
+        "exists for the same reason: the chain cannot be *told* what was true in",
+        "the past, but it can *read* what is true now and record it.",
+        "",
+        "What it records is different, though, and that difference is the whole",
+        "argument for this trigger having its own settlement path. A balance",
+        "checkpoint sees a drain. It is completely blind to two shapes:",
+        "",
+        "- **Seizure.** `SetAuthority(AccountOwner)` moves the account out of the",
+        "agent's control without moving a single token. The balance is",
+        "unchanged, so a subtraction reads zero.",
+        "- **Freeze.** The account is still the agent's and still full, and the",
+        "agent can no longer touch it.",
+        "",
+        "Both are visible here, because both are fields on the token account."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "policy_id",
+            "type": "u64"
+          },
+          {
+            "name": "covered_account",
+            "docs": [
+              "Token account the reading was taken from. Recorded so a reader can",
+              "confirm the verdict was bounded against the account it claims."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "delegate",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "delegated_amount",
+            "type": "u64"
+          },
+          {
+            "name": "close_authority",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "frozen",
+            "type": "bool"
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "Balance at the same instant, so the authority reading and the value it",
+              "governs can never be attributed to different moments."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "unix_timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "prev_owner",
+            "docs": [
+              "The reading this one replaced. Without it, a crank tick landing after",
+              "a takeover would overwrite the only pre-incident record of who was in",
+              "charge — exactly the hole `prev_*` closes on the balance path."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "prev_delegate",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "prev_frozen",
+            "type": "bool"
+          },
+          {
+            "name": "prev_amount",
+            "type": "u64"
+          },
+          {
+            "name": "prev_slot",
+            "type": "u64"
+          },
+          {
+            "name": "prev_unix_timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PolicyBalanceCheckpoint",
+      "docs": [
+        "The \"before\" a drain is measured against, read by the program itself.",
+        "",
+        "This account is the exploit path's answer to the problem that makes it",
+        "different from the price path. `verify_and_payout_v2` works because Pyth",
+        "hands the chain a guardian-signed statement about the past. There is no",
+        "equivalent for \"account X held N at slot S\" — no signed-history oracle for",
+        "balances, and `SlotHashes` reaches back minutes, far short of a one-hour",
+        "lock. So the chain cannot be *told* what the balance was.",
+        "",
+        "It can, however, *read* it. A permissionless crank calls",
+        "`checkpoint_covered_balance`, which reads the agent's covered token",
+        "account — an account Anchor constrains to be the right one — and records",
+        "what it saw. At payout the program reads the same account again and",
+        "subtracts. Nobody asserts either number.",
+        "",
+        "`prev_*` is retained so a checkpoint that was itself written after the",
+        "incident does not erase the only usable baseline."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "policy_id",
+            "type": "u64"
+          },
+          {
+            "name": "covered_account",
+            "docs": [
+              "Token account the balance was read from. Recorded so a reader can",
+              "confirm the payout was bounded against the account it claims."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "unix_timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "prev_amount",
+            "docs": [
+              "The reading this one replaced."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "prev_slot",
+            "type": "u64"
+          },
+          {
+            "name": "prev_unix_timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
           }
         ]
       }
@@ -2388,6 +7075,114 @@
           {
             "name": "holder",
             "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PriceFeedMessage",
+      "repr": {
+        "kind": "c"
+      },
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "feed_id",
+            "docs": [
+              "`FeedId` but avoid the type alias because of compatibility issues with Anchor's `idl-build` feature."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "price",
+            "type": "i64"
+          },
+          {
+            "name": "conf",
+            "type": "u64"
+          },
+          {
+            "name": "exponent",
+            "type": "i32"
+          },
+          {
+            "name": "publish_time",
+            "docs": [
+              "The timestamp of this price update in seconds"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "prev_publish_time",
+            "docs": [
+              "The timestamp of the previous price update. This field is intended to allow users to",
+              "identify the single unique price update for any moment in time:",
+              "for any time t, the unique update is the one such that prev_publish_time < t <= publish_time.",
+              "",
+              "Note that there may not be such an update while we are migrating to the new message-sending logic,",
+              "as some price updates on pythnet may not be sent to other chains (because the message-sending",
+              "logic may not have triggered). We can solve this problem by making the message-sending mandatory",
+              "(which we can do once publishers have migrated over).",
+              "",
+              "Additionally, this field may be equal to publish_time if the message is sent on a slot where",
+              "where the aggregation was unsuccesful. This problem will go away once all publishers have",
+              "migrated over to a recent version of pyth-agent."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "ema_price",
+            "type": "i64"
+          },
+          {
+            "name": "ema_conf",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PriceUpdateV2",
+      "docs": [
+        "A price update account. This account is used by the Pyth Receiver program to store a verified price update from a Pyth price feed.",
+        "It contains:",
+        "- `write_authority`: The write authority for this account. This authority can close this account to reclaim rent or update the account to contain a different price update.",
+        "- `verification_level`: The [`VerificationLevel`] of this price update. This represents how many Wormhole guardian signatures have been verified for this price update.",
+        "- `price_message`: The actual price update.",
+        "- `posted_slot`: The slot at which this price update was posted."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "write_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "verification_level",
+            "type": {
+              "defined": {
+                "name": "VerificationLevel"
+              }
+            }
+          },
+          {
+            "name": "price_message",
+            "type": {
+              "defined": {
+                "name": "PriceFeedMessage"
+              }
+            }
+          },
+          {
+            "name": "posted_slot",
+            "type": "u64"
           }
         ]
       }
@@ -2634,6 +7429,22 @@
               "PDA bump"
             ],
             "type": "u8"
+          },
+          {
+            "name": "loss_index_snapshot",
+            "docs": [
+              "Snapshot of `InsuranceVault.loss_index` when this position's",
+              "`amount_staked` was last revalued. The position's live principal is",
+              "`amount_staked * vault.loss_index / loss_index_snapshot`.",
+              "",
+              "Zero means \"not yet initialised\" — a position written before losses",
+              "were socialised at all. `settle_losses` adopts the current index in",
+              "that case rather than revaluing against a divisor of zero, which is",
+              "also what makes a migrated position safe with no value written.",
+              "",
+              "**Last field on purpose**, for the same reason as `InsuranceVault`."
+            ],
+            "type": "u128"
           }
         ]
       }
@@ -2680,6 +7491,47 @@
           {
             "name": "rewards",
             "type": "u64"
+          },
+          {
+            "name": "remaining",
+            "docs": [
+              "Principal still staked after this withdrawal. Non-zero when the",
+              "solvency floor capped the payout and the request stays open."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VerificationLevel",
+      "docs": [
+        "Pyth price updates are bridged to all blockchains via Wormhole.",
+        "Using the price updates on another chain requires verifying the signatures of the Wormhole guardians.",
+        "The usual process is to check the signatures for two thirds of the total number of guardians, but this can be cumbersome on Solana because of the transaction size limits,",
+        "so we also allow for partial verification.",
+        "",
+        "This enum represents how much a price update has been verified:",
+        "- If `Full`, we have verified the signatures for two thirds of the current guardians.",
+        "- If `Partial`, only `num_signatures` guardian signatures have been checked.",
+        "",
+        "# Warning",
+        "Using partially verified price updates is dangerous, as it lowers the threshold of guardians that need to collude to produce a malicious price update."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Partial",
+            "fields": [
+              {
+                "name": "num_signatures",
+                "type": "u8"
+              }
+            ]
+          },
+          {
+            "name": "Full"
           }
         ]
       }

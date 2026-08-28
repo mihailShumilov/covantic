@@ -9,7 +9,7 @@
     "clean": "rm -rf target/debug target/release"
   },
   "devDependencies": {
-    "@coral-xyz/anchor": "^0.30.1",
+    "@coral-xyz/anchor": "^0.32.1",
     "@solana/spl-token": "^0.4.8",
     "@solana/web3.js": "^1.95.0",
     "@types/node": "^22.0.0",

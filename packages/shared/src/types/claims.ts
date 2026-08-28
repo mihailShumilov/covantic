@@ -1,15 +1,76 @@
-import type { TriggerType } from './policy.js';
+import { TriggerType } from './policy.js';
 
 /** Claim verification status */
 export enum ClaimStatus {
   Pending = 'pending',
   Verifying = 'verifying',
   Approved = 'approved',
+  /** The payout transaction is in flight. Written by the keeper before the
+   *  on-chain call so a retry after an RPC success does not send it twice.
+   *  It was already being written and already in the `claims_open_unique`
+   *  predicate; it just was not declared here. */
+  Paying = 'paying',
   Paid = 'paid',
   Rejected = 'rejected',
   /** Payout attempt failed (e.g. insufficient vault balance, RPC error). */
   Failed = 'failed',
+  /** Verification could not reach a conclusion — a price source was
+   *  unavailable, references disagreed, or the trigger tx was not yet
+   *  indexed. The claim is retried with backoff; it is NEVER auto-rejected,
+   *  because "we could not check" is not "there was no loss". */
+  Indeterminate = 'indeterminate',
+  /** Escalated to a human/committee adjuster after repeated indeterminate
+   *  verification, or because the evidence supports a loss but not strongly
+   *  enough for the auto-pay lane. */
+  Review = 'review',
 }
+
+/** Claim statuses that count as "open" — a policy may hold at most one
+ *  claim in any of these states (enforced by the `claims_open_unique`
+ *  partial index in db/custom-constraints.ts). Keep the two in sync. */
+/**
+ * How specific a trigger's account of an incident is.
+ *
+ * Mirrors `ANOMALY_SPECIFICITY` in the monitor, at the trigger level, and
+ * exists for one job: deciding whether a newly detected threat deserves the
+ * policy's single open-claim slot more than whatever is parked in it.
+ *
+ * Higher wins. A takeover outranks a drain for the reason the monitor's table
+ * gives — the governance verifier can speak to who owns the account now, and
+ * the exploit verifier cannot.
+ */
+export const TRIGGER_SPECIFICITY: Record<TriggerType, number> = {
+  // Never supersedes anything; it is the absence of a trigger.
+  [TriggerType.None]: 0,
+  [TriggerType.GovernanceAttack]: 5,
+  [TriggerType.Exploit]: 4,
+  [TriggerType.OracleManipulation]: 3,
+  [TriggerType.AgentError]: 2,
+};
+
+/**
+ * Open statuses in which nothing automated is still working on the claim.
+ *
+ * These hold the policy's slot without progressing, which is what made them a
+ * denial-of-coverage vector: park a cheap `indeterminate` on a policy and
+ * every later alert for it — including a genuine exploit — was dropped at the
+ * unique index. A claim in one of these may be re-pointed at a
+ * higher-specificity trigger; one in `verifying`, `approved` or `paying` may
+ * not, because a job or an on-chain transaction is mid-flight.
+ */
+export const PARKED_CLAIM_STATUSES: readonly ClaimStatus[] = [
+  ClaimStatus.Indeterminate,
+  ClaimStatus.Review,
+] as const;
+
+export const OPEN_CLAIM_STATUSES: readonly ClaimStatus[] = [
+  ClaimStatus.Pending,
+  ClaimStatus.Verifying,
+  ClaimStatus.Approved,
+  ClaimStatus.Paying,
+  ClaimStatus.Indeterminate,
+  ClaimStatus.Review,
+] as const;
 
 /** Insurance claim */
 export interface Claim {
@@ -85,6 +146,12 @@ export interface VerificationData {
   details?: Record<string, unknown>;
   /** Stringified error from a failed payout attempt */
   payoutError?: string;
+  /** Terminal verdict from the verifier: confirmed | rejected | indeterminate */
+  outcome?: string;
+  /** sha256 of the canonical evidence bundle the verdict was derived from */
+  bundleHash?: string;
+  /** Number of verification attempts made so far (indeterminate retries) */
+  verifyAttempts?: number;
   /** Open-ended overflow for verifier-specific fields */
   [key: string]: unknown;
 }

@@ -1,18 +1,56 @@
+import type { Connection } from '@solana/web3.js';
 import { LOCK_PERIODS, TriggerType } from '@covantic/shared';
 import { HeliusClient } from '../utils/helius.js';
-import { PythClient } from '../utils/pyth.js';
 import { logger } from '../utils/logger.js';
-import { verifyAgentError } from './verifiers/agent-error.js';
+import type { AgentErrorEvidenceBundle } from './agent-error/types.js';
+import type { ExploitEvidenceBundle } from './exploit/types.js';
+import type { GovernanceEvidenceBundle } from './governance/types.js';
+import type { EvidenceBundle, PriceOracle } from './oracle/types.js';
+import type { CohortLookup } from './exploit/signatures.js';
+import {
+  verifyAgentError,
+  type AgentErrorVerifierOptions,
+} from './verifiers/agent-error.js';
 import { verifyExploit } from './verifiers/exploit.js';
-import { verifyGovernanceAttack } from './verifiers/governance-attack.js';
+import {
+  verifyGovernanceAttack,
+  type GovernanceVerifierOptions,
+} from './verifiers/governance-attack.js';
 import { verifyOracleManipulation } from './verifiers/oracle-manipulation.js';
 
+/**
+ * Terminal state of a verification attempt.
+ *
+ * The three-way split is the point. A boolean forces "could not check" to
+ * masquerade as "did not happen", which is how a rate-limited price API used
+ * to permanently close valid claims.
+ */
+export type VerificationOutcome = 'confirmed' | 'rejected' | 'indeterminate';
+
+/** Every evidence shape the keeper may be handed. */
+export type AnyEvidenceBundle =
+  | EvidenceBundle
+  | ExploitEvidenceBundle
+  | GovernanceEvidenceBundle
+  | AgentErrorEvidenceBundle;
+
 export interface VerificationResult {
+  outcome: VerificationOutcome;
+  /** Convenience mirror of `outcome === 'confirmed'`. Always set by the
+   *  builders in verifiers/common.ts so the two cannot drift. */
   verified: boolean;
   lossAmount: number;
   confidence: number;
   details: Record<string, unknown>;
   lockPeriod: number;
+  /** Set only when `outcome === 'indeterminate'` — how long to wait before
+   *  the next attempt. */
+  retryAfterSec?: number;
+  /** Everything the verdict was derived from. Persisted by the keeper so the
+   *  decision can be replayed and audited. One shape per trigger: both carry
+   *  `triggerType`, which is what lets a replay pick the right adjudicator
+   *  without consulting the claim row. */
+  evidence?: AnyEvidenceBundle;
 }
 
 export interface VerifyClaimOptions {
@@ -20,6 +58,40 @@ export interface VerifyClaimOptions {
    *  outflow verifiers use authoritative balance deltas instead of
    *  summing tokenTransfers[]. */
   usdcMint?: string;
+  /** RPC connection used to cross-check the trigger transaction's block time
+   *  against the indexer, and — for exploits — to read the chain's own record
+   *  of who signed for what. Without it an exploit claim cannot be resolved
+   *  at all and returns `indeterminate`. */
+  connection?: Connection | null;
+  /** Policy holder wallet. Value landing in an account the holder controls is
+   *  the holder moving their own money, not a loss the vault owes. */
+  holderAddress?: string;
+  /** Finds other insured agents hit by the same counterparty in the window. */
+  cohort?: CohortLookup;
+  /**
+   * Lookups only the governance path needs: the holder's declared authority
+   * set and the two balance readings its exposure is measured between.
+   *
+   * Injected rather than imported so `claim-oracle` stays free of database
+   * and Anchor-program coupling. Absent, a governance claim resolves to
+   * review — which is the correct behaviour before
+   * `declare_governance_baseline` is deployed, and never a rejection.
+   */
+  governance?: Omit<GovernanceVerifierOptions, 'connection' | 'holderAddress' | 'cohort'>;
+  /**
+   * Lookups only the agent-error path needs: the holder's declared operating
+   * envelope, and the agent's own outflow history.
+   *
+   * Injected for the same reason the governance ones are — so `claim-oracle`
+   * stays free of database and Anchor-program coupling, and so a corpus test
+   * can drive the verifier with neither. Absent, an agent-error claim resolves
+   * to review, which is the correct behaviour before `declare_agent_mandate`
+   * is deployed and never a rejection.
+   */
+  agentError?: Omit<
+    AgentErrorVerifierOptions,
+    'connection' | 'holderAddress' | 'coveredMint'
+  >;
 }
 
 /**
@@ -37,7 +109,7 @@ export async function verifyClaim(
   agentAddress: string,
   coverageAmount: number,
   helius: HeliusClient,
-  pyth: PythClient,
+  priceOracle: PriceOracle,
   options: VerifyClaimOptions = {},
 ): Promise<VerificationResult> {
   logger.info({ triggerType, triggerTxSignature, agentAddress }, 'verifyClaim: dispatching');
@@ -51,26 +123,51 @@ export async function verifyClaim(
   });
 
   if (!tx) {
+    // Indexers lag. A signature that is not resolvable yet is not evidence
+    // that nothing happened, so this retries instead of closing the claim.
     return {
+      outcome: 'indeterminate',
       verified: false,
       lossAmount: 0,
       confidence: 0,
-      details: { reason: 'trigger_tx_not_found', triggerTxSignature },
+      details: {
+        reason: 'trigger_tx_not_found',
+        triggerTxSignature,
+        note: 'Transaction not resolvable yet — indexer lag or wrong cluster.',
+      },
       lockPeriod: lockPeriodFor(triggerType),
+      retryAfterSec: 30,
     };
   }
 
   switch (triggerType) {
     case TriggerType.Exploit:
-      return verifyExploit(tx, agentAddress, coverageAmount, options.usdcMint);
+      return verifyExploit(tx, agentAddress, coverageAmount, priceOracle, {
+        connection: options.connection ?? null,
+        holderAddress: options.holderAddress,
+        cohort: options.cohort,
+      });
     case TriggerType.OracleManipulation:
-      return verifyOracleManipulation(tx, agentAddress, coverageAmount, pyth);
+      return verifyOracleManipulation(tx, agentAddress, coverageAmount, priceOracle, {
+        connection: options.connection ?? null,
+      });
     case TriggerType.AgentError:
-      return verifyAgentError(tx, agentAddress, coverageAmount, options.usdcMint);
+      return verifyAgentError(tx, agentAddress, coverageAmount, priceOracle, {
+        ...(options.agentError ?? {}),
+        connection: options.connection ?? null,
+        holderAddress: options.holderAddress,
+        coveredMint: options.usdcMint,
+      });
     case TriggerType.GovernanceAttack:
-      return verifyGovernanceAttack(tx, agentAddress, coverageAmount);
+      return verifyGovernanceAttack(tx, agentAddress, coverageAmount, priceOracle, {
+        ...(options.governance ?? {}),
+        connection: options.connection ?? null,
+        holderAddress: options.holderAddress,
+        cohort: options.cohort,
+      });
     default:
       return {
+        outcome: 'rejected',
         verified: false,
         lossAmount: 0,
         confidence: 0,

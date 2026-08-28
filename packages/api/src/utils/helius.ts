@@ -1,5 +1,9 @@
 import { logger } from './logger.js';
 
+/** Outbound timeout. Undici defaults to 300s, which is long enough for a
+ *  single stalled request to hold up an entire watcher tick. */
+const HTTP_TIMEOUT_MS = 10_000;
+
 /** Base58 Solana address validation — same alphabet as routes/risk.ts */
 const SOLANA_ADDRESS_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 /** Solana transaction signature: 87–88 Base58 characters */
@@ -31,6 +35,29 @@ const KNOWN_DEX_PROGRAMS = new Set([
   'Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB', // Meteora Pools
 ]);
 
+/**
+ * Central-limit order books.
+ *
+ * A subset of {@link KNOWN_DEX_PROGRAMS}, kept separately because the net
+ * balance change of a transaction means something different here. On an AMM
+ * or an aggregator route, what left and what arrived are the two sides of one
+ * exchange. On an order book they need not be related at all: a single
+ * transaction routinely posts a new order — depositing the asset it offers —
+ * while settling the proceeds of a different order that matched minutes
+ * earlier. Netting the two produces an implied price for a trade that never
+ * happened.
+ *
+ * That is not hypothetical. A Serum market-making transaction in the backtest
+ * corpus posts 2.549 SOL for a new order and settles 322.88 USDC from an
+ * earlier one; read as a swap it implies $126 per SOL against a $172 market,
+ * and the pipeline confirmed a $116 manipulation loss on it.
+ */
+const ORDERBOOK_PROGRAMS = new Set([
+  'srmqPvymJeFKQ4zGQed1GFppgkRHL9kaELCbyksJtPX', // Serum v3 / OpenBook v1
+  'opnb2LAfJYbRMAHHvqjCwQxanZn7ReEHp1k81EohpZb', // OpenBook v2
+  'PhoeNiXZ8ByJGLkxNfZRnkUfjvmuYqLR89jjFHGqdXY', // Phoenix
+]);
+
 /** Known bridge program IDs */
 const KNOWN_BRIDGE_PROGRAMS = new Set([
   'wormDTUJ6AWPNvk59vGQbDvGJmqbDTdgWgAqcLBCgUb', // Wormhole
@@ -45,18 +72,49 @@ const KNOWN_RISKY_PATTERNS = [
   'memo', // Often used in scam txs
 ];
 
-/** Flash loan / leverage programs */
+/** Flash loan / leverage programs.
+ *
+ *  Every entry must be a valid 32-byte base58 pubkey. An entry that is not
+ *  simply never matches, and the detector it feeds fails silently — which is
+ *  exactly what happened to the Kamino id here, whose old value
+ *  ('KLend2g3cP87ber8pJ3wQWZaFFi6TGDKP1UvqWu3n') is one byte short and was
+ *  therefore dead weight in this set from the day it was added. */
 const FLASH_LOAN_PROGRAMS = new Set([
   'So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo', // Solend
-  'MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA', // Marginfi
-  'DjVE6JNiYqPL2QXyCUUh8rNjHrbz9hXHNYt99MQ59qw1', // Drift
-  'KLend2g3cP87ber8pJ3wQWZaFFi6TGDKP1UvqWu3n', // Kamino
+  'MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA', // MarginFi v2
+  'DjVE6JNiYqPL2QXyCUUh8rNjHrbz9hXHNYt99MQ59qw1', // Drift (legacy)
+  'dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH', // Drift v2
+  'KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD', // Kamino Lend
+]);
+
+/** Lending and perpetuals venues — the programs that *read* an oracle to
+ *  value collateral or mark a position.
+ *
+ *  This is the attack surface the swap-shaped detector cannot see. Inflating
+ *  a collateral price and borrowing against it never looks like a mispriced
+ *  swap, because no swap happens; the loss shows up as a loan the protocol
+ *  should never have written. Overlaps FLASH_LOAN_PROGRAMS on purpose — the
+ *  same program can fund the squeeze and price the collateral. */
+const LENDING_PROGRAMS = new Set([
+  'So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo', // Solend
+  'MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA', // MarginFi v2
+  'KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD', // Kamino Lend
+  'dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH', // Drift v2 (perps)
+  '4MangoMjqJ2firMokCjjGgoK8d4MXcrgL7XJaL3w6fVg', // Mango v4
+  'PERPHjGBqRHArX4DySjwM6UJHiR3sWAatqfdBS2qQJu', // Jupiter Perpetuals
 ]);
 
 /** Helius Enhanced Transaction type */
 export interface EnhancedTransaction {
   signature: string;
+  /** Block time, unix seconds. Every retrospective price lookup is anchored
+   *  to this value, so a missing or implausible timestamp must stop
+   *  verification rather than silently fall back to "now". */
   timestamp: number;
+  /** Solana slot. Helius returns it; it was missing from this type, which is
+   *  why slot-indexed evidence (pool state at slot-1 / slot / slot+1) had
+   *  nothing to key off. */
+  slot?: number;
   type: string;
   source: string;
   fee: number;
@@ -169,7 +227,7 @@ export class HeliusClient {
     const params = new URLSearchParams({ 'api-key': this.apiKey, limit: String(limit) });
     const url = `${this.baseUrl}/addresses/${encodeURIComponent(address)}/transactions?${params}`;
 
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
     if (res.status === 404) return [];
     if (!res.ok) {
       throw new Error(`Helius getEnhancedTransactions failed: HTTP ${res.status}`);
@@ -178,12 +236,14 @@ export class HeliusClient {
   }
 
   /** Get token balances for an address. Throws on HTTP failure. */
-  async getTokenBalances(address: string): Promise<{ tokens: TokenBalance[]; nativeBalance: number }> {
+  async getTokenBalances(
+    address: string,
+  ): Promise<{ tokens: TokenBalance[]; nativeBalance: number }> {
     assertAddress(address);
     const params = new URLSearchParams({ 'api-key': this.apiKey });
     const url = `${this.baseUrl}/addresses/${encodeURIComponent(address)}/balances?${params}`;
 
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
     if (res.status === 404) return { tokens: [], nativeBalance: 0 };
     if (!res.ok) {
       throw new Error(`Helius getTokenBalances failed: HTTP ${res.status}`);
@@ -198,7 +258,7 @@ export class HeliusClient {
     const params = new URLSearchParams({ 'api-key': this.apiKey });
     const url = `${this.baseUrl}/addresses/${encodeURIComponent(address)}/info?${params}`;
 
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
     if (res.status === 404) return null;
     if (!res.ok) {
       throw new Error(`Helius getAccountInfo failed: HTTP ${res.status}`);
@@ -214,6 +274,7 @@ export class HeliusClient {
 
     try {
       const res = await fetch(url, {
+        signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // signature is validated above — safe to include in the JSON body
@@ -229,4 +290,11 @@ export class HeliusClient {
   }
 }
 
-export { KNOWN_DEX_PROGRAMS, KNOWN_BRIDGE_PROGRAMS, KNOWN_RISKY_PATTERNS, FLASH_LOAN_PROGRAMS };
+export {
+  KNOWN_DEX_PROGRAMS,
+  ORDERBOOK_PROGRAMS,
+  KNOWN_BRIDGE_PROGRAMS,
+  KNOWN_RISKY_PATTERNS,
+  FLASH_LOAN_PROGRAMS,
+  LENDING_PROGRAMS,
+};

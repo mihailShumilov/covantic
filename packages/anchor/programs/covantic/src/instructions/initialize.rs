@@ -3,7 +3,7 @@ use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token::{Mint, Token, TokenAccount};
 
 use crate::constants::*;
-use crate::state::{InsuranceVault, ProtocolConfig};
+use crate::state::{InsuranceVault, ProtocolConfig, LOSS_INDEX_SCALE};
 
 /// Initialize the protocol: creates config PDA, vault PDA, and vault token account.
 /// Called ONCE at deployment.
@@ -29,6 +29,8 @@ pub fn initialize_handler(ctx: Context<Initialize>, oracle_authority: Pubkey) ->
     vault.total_claims_paid = 0;
     vault.staker_count = 0;
     vault.solvency_ratio = u16::MAX;
+    // Starts whole; only ever falls, and only through `absorb_loss`.
+    vault.loss_index = LOSS_INDEX_SCALE;
     vault.total_staker_rewards = 0;
     vault.reward_per_stake_acc = 0;
     vault.reserve_fund = 0;

@@ -54,6 +54,33 @@ pub fn cancel_policy_handler(ctx: Context<CancelPolicy>) -> Result<()> {
         .checked_div(10000)
         .ok_or(CovanticError::MathOverflow)? as u64;
 
+    // Reduce recorded obligations by exactly what is about to leave.
+    //
+    // This was the one outflow in the program that moved tokens without
+    // moving any counter: the refund left the vault while `total_staked`,
+    // `total_staker_rewards`, `reserve_fund` and `protocol_treasury` all stood
+    // still. The premium had already been split 70/20/10 into those buckets on
+    // `create_policy`, so cancelling handed part of it back twice — once as
+    // tokens and once as an obligation the vault still recorded. Over a
+    // sequence of cancellations the recorded obligations drift above the token
+    // balance, and the shortfall surfaces much later as an opaque SPL
+    // `InsufficientFunds` on whichever staker happens to withdraw last.
+    //
+    // The same waterfall a claim uses, for the same reason: treasury, then
+    // reserve, then staker principal.
+    //
+    // It deliberately does **not** claw back `total_staker_rewards`. The staker
+    // share of that premium was distributed through `reward_per_stake_acc` the
+    // moment it was collected, so reducing the ledger without reversing the
+    // accumulator would recreate exactly the ledger/entitlement mismatch this
+    // is fixing — and the accumulator cannot be reversed cleanly once stakers
+    // have joined or left against it. The consequence is economic and worth
+    // stating plainly: stakers keep the reward entitlement from a cancelled
+    // policy, and the 20% cancellation penalty is what offsets it.
+    if refund > 0 {
+        vault.absorb_loss(refund)?;
+    }
+
     // Transfer refund from vault to holder via PDA signature
     if refund > 0 {
         let vault_bump = vault.bump;
@@ -61,7 +88,7 @@ pub fn cancel_policy_handler(ctx: Context<CancelPolicy>) -> Result<()> {
         let signer_seeds = &[&seeds[..]];
 
         let transfer_ctx = CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
+            ctx.accounts.token_program.key(),
             Transfer {
                 from: ctx.accounts.vault_token_account.to_account_info(),
                 to: ctx.accounts.holder_token_account.to_account_info(),

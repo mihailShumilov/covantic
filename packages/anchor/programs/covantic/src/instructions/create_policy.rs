@@ -105,7 +105,7 @@ pub fn create_policy_handler(
 
     // Transfer USDC from holder to vault
     let transfer_ctx = CpiContext::new(
-        ctx.accounts.token_program.to_account_info(),
+        ctx.accounts.token_program.key(),
         Transfer {
             from: ctx.accounts.holder_token_account.to_account_info(),
             to: ctx.accounts.vault_token_account.to_account_info(),

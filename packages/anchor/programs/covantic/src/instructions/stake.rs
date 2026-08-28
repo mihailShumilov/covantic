@@ -29,7 +29,41 @@ pub fn pending_reward_delta(
         .ok_or(CovanticError::MathOverflow)?
         .checked_div(REWARD_PER_STAKE_SCALE)
         .ok_or(CovanticError::MathOverflow)?;
-    Ok(earned as u64)
+    // Narrowing here was unbounded. A reward that does not fit u64 means the
+    // accumulator is already wrong; truncating would pay a silently wrong
+    // number, so fail the transaction instead.
+    u64::try_from(earned).map_err(|_| error!(CovanticError::MathOverflow))
+}
+
+/// Revalue a position against the losses socialised since it was last touched.
+///
+/// Must run before `crystallize_rewards` and before any read of
+/// `amount_staked` that decides a transfer. Rewards for the window are then
+/// computed on the post-loss principal, which slightly under-credits a staker
+/// whose loss landed late in the window. The exact split needs a checkpoint
+/// per loss event; this errs toward the vault, which is the safe direction
+/// when the alternative is paying rewards on principal that no longer exists.
+pub fn settle_losses(position: &mut StakerPosition, vault: &InsuranceVault) -> Result<()> {
+    // A position written before this accounting existed, or one that has never
+    // seen a loss. Adopt the current index; there is nothing to revalue and a
+    // zero divisor is not a ratio.
+    if position.loss_index_snapshot == 0 || position.amount_staked == 0 {
+        position.loss_index_snapshot = vault.loss_index;
+        return Ok(());
+    }
+    if position.loss_index_snapshot == vault.loss_index {
+        return Ok(());
+    }
+
+    let revalued = (position.amount_staked as u128)
+        .checked_mul(vault.loss_index)
+        .ok_or(CovanticError::MathOverflow)?
+        .checked_div(position.loss_index_snapshot)
+        .ok_or(CovanticError::MathOverflow)?;
+    position.amount_staked =
+        u64::try_from(revalued).map_err(|_| error!(CovanticError::MathOverflow))?;
+    position.loss_index_snapshot = vault.loss_index;
+    Ok(())
 }
 
 /// Crystallize outstanding rewards for a staker into rewards_pending
@@ -64,7 +98,7 @@ pub fn stake_handler(ctx: Context<Stake>, amount: u64) -> Result<()> {
 
     // Transfer USDC from staker to vault
     let transfer_ctx = CpiContext::new(
-        ctx.accounts.token_program.to_account_info(),
+        ctx.accounts.token_program.key(),
         Transfer {
             from: ctx.accounts.staker_token_account.to_account_info(),
             to: ctx.accounts.vault_token_account.to_account_info(),
@@ -73,8 +107,11 @@ pub fn stake_handler(ctx: Context<Stake>, amount: u64) -> Result<()> {
     );
     token::transfer(transfer_ctx, amount)?;
 
-    // Crystallize any pre-existing rewards before changing amount_staked,
-    // then advance the snapshot so the new stake earns from "now".
+    // Losses first, then rewards, both before amount_staked changes. A fresh
+    // position has snapshot 0 and adopts the current index, so a staker who
+    // joins after a loss is not charged for it; an existing one is revalued,
+    // and the added stake lands on top of the post-loss principal.
+    settle_losses(staker_position, vault)?;
     crystallize_rewards(staker_position, vault)?;
 
     // Check if this is a new staker (amount_staked == 0 and deposited_at == 0)
@@ -109,11 +146,16 @@ pub fn stake_handler(ctx: Context<Stake>, amount: u64) -> Result<()> {
 
     // Update share_bps (lazy — informational only)
     if vault.total_staked > 0 {
-        staker_position.share_bps = ((staker_position.amount_staked as u128)
+        // Clamped rather than cast bare: this is only <= 10000 while
+        // amount_staked <= total_staked, an invariant maintained in another
+        // instruction. `InsuranceVault::recalculate_solvency` clamps the
+        // sibling ratio for the same reason — keep the two in step.
+        staker_position.share_bps = (staker_position.amount_staked as u128)
             .checked_mul(10000)
             .ok_or(CovanticError::MathOverflow)?
             .checked_div(vault.total_staked as u128)
-            .ok_or(CovanticError::MathOverflow)?) as u16;
+            .ok_or(CovanticError::MathOverflow)?
+            .min(u16::MAX as u128) as u16;
     }
 
     emit!(Staked {

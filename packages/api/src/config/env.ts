@@ -16,6 +16,82 @@ const envSchema = z.object({
 
   SOLANA_RPC_URL: z.string().url(),
   SOLANA_NETWORK: z.enum(['devnet', 'mainnet-beta', 'localnet']).default('devnet'),
+
+  /**
+   * Settle oracle-manipulation payouts through `verify_and_payout_v2`, which
+   * makes the program verify a guardian-signed Pyth price instead of taking
+   * the oracle's word for it.
+   *
+   * Defaults to off because the instruction only exists in program builds
+   * from this change forward — enabling it against an older deployment makes
+   * every payout fail. Turn it on after redeploying, and expect claims that
+   * cannot be proven to go to review rather than falling back to the
+   * unverified path.
+   */
+  ORACLE_PROOF_ENABLED: z
+    .preprocess((v) => (typeof v === 'string' ? v.toLowerCase() === 'true' : v), z.boolean())
+    .default(false),
+  /**
+   * Route exploit payouts through `verify_and_payout_exploit`, which bounds
+   * the payout by a balance drop the program measures for itself.
+   *
+   * Defaults to off for the same reason as ORACLE_PROOF_ENABLED: the
+   * instruction only exists in program builds from this change forward, and
+   * enabling it against an older deployment makes every exploit payout fail.
+   * Turn it on after redeploying. Once on, an exploit claim that cannot be
+   * proven goes to review rather than falling back to the unverified path —
+   * a fallback would make the whole mechanism decorative.
+   */
+  EXPLOIT_PROOF_ENABLED: z
+    .preprocess((v) => (typeof v === 'string' ? v.toLowerCase() === 'true' : v), z.boolean())
+    .default(false),
+  /**
+   * Route governance payouts through `verify_and_payout_governance`, which
+   * compares the holder's own matured declaration of who may control the
+   * agent against what the program reads on the account now.
+   *
+   * Defaults to off for the same reason as the other two, plus one specific
+   * to this path: it also requires the holder to have declared a baseline. A
+   * policy with no declaration resolves to review whether the flag is on or
+   * off, so turning it on changes nothing for existing policies until they
+   * declare — which is the intended migration, not a bug.
+   */
+  GOVERNANCE_PROOF_ENABLED: z
+    .preprocess((v) => (typeof v === 'string' ? v.toLowerCase() === 'true' : v), z.boolean())
+    .default(false),
+  /**
+   * Route agent-error payouts through `verify_and_payout_agent_error`, which
+   * measures the balance drop itself and refuses to pay more than the amount
+   * by which it exceeded an operating envelope the holder declared.
+   *
+   * Defaults to off for the same reason as the other three, plus one that is
+   * specific to this path and worth knowing before turning it on. It depends
+   * on **both** a holder declaration and a fresh balance checkpoint, and those
+   * two fail differently:
+   *
+   *   - No mandate resolves to `review` before any RPC call, so enabling the
+   *     flag early is harmless for policies that have not declared — the same
+   *     migration the governance flag has.
+   *   - A **missing or stale checkpoint** makes the on-chain call revert, and
+   *     the keeper marks a failed payout `failed`, not `review`.
+   *
+   * So this flag inherits the dangerous half. Do not enable it unless the
+   * `exploit-watcher` crank — which writes `checkpoint_balance` — is confirmed
+   * running, or valid claims become dead ones.
+   */
+  AGENT_ERROR_PROOF_ENABLED: z
+    .preprocess((v) => (typeof v === 'string' ? v.toLowerCase() === 'true' : v), z.boolean())
+    .default(false),
+  /**
+   * Cap on automatic payouts in a rolling hour, in USDC lamports. Zero
+   * disables the breaker.
+   *
+   * This is the control that survives one of the per-claim bounds being
+   * wrong: the failure that destroys a vault is not one bad payout, it is the
+   * same bad payout repeated before anyone looks. Claims over the cap queue
+   * to review rather than closing.
+   */
+  AUTO_PAYOUT_HOURLY_LIMIT_RAW: z.coerce.number().int().nonnegative().default(100_000_000_000),
   PROGRAM_ID: z.string().min(32),
   ORACLE_KEYPAIR_PATH: z.string(),
 
@@ -40,9 +116,32 @@ const envSchema = z.object({
   // this secret.
   ALERT_HMAC_SECRET: z.string().min(32),
 
+  /**
+   * Bearer token for real Helius deliveries, separate from the HMAC key.
+   *
+   * Helius sends this header verbatim on every delivery, so it is exposed to
+   * anything that logs headers. Sharing it with `HELIUS_WEBHOOK_SECRET` meant
+   * seeing one leaked both. Optional: falls back to the shared secret, so an
+   * existing deployment keeps working until it is set.
+   */
+  HELIUS_WEBHOOK_BEARER: z.string().min(32).optional(),
+
+  /**
+   * The covered mint. Optional so a bare dev boot works, but never silently
+   * discarded: the previous preprocessor mapped *any* value under 32 chars to
+   * `undefined`, so the placeholder shipped in `.env.example`
+   * (`YOUR_DEVNET_USDC_MINT`, 21 chars) booted clean and disabled the entire
+   * agent-error auto-claim path — `screenForMandateBreach` needs a covered
+   * mint to find the covered leg, and without one no mandate breach can ever
+   * open a claim. A wrong value now fails validation instead.
+   */
   USDC_MINT: z.preprocess(
-    (v) => (typeof v === 'string' && v.length >= 32 ? v : undefined),
-    z.string().min(32).optional(),
+    (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+    z
+      .string()
+      .min(32, 'USDC_MINT must be a base58 mint address — the .env.example placeholder is not one')
+      .max(44)
+      .optional(),
   ),
 
   TRUST_PROXY: z
@@ -64,5 +163,20 @@ export function loadConfig(): AppConfig {
     process.exit(1);
   }
   cachedConfig = result.data;
+
+  // Absence is legal but never silent. Without a covered mint the agent-error
+  // screen cannot identify the covered leg, so no mandate breach can open a
+  // claim — a whole trigger disabled with nothing in the logs to say so.
+  if (!cachedConfig.USDC_MINT) {
+    logger.error(
+      'USDC_MINT is not set: agent-error claims cannot be opened automatically. ' +
+        'Set it to the covered mint address for this cluster.',
+    );
+  }
+  if (cachedConfig.AGENT_ERROR_PROOF_ENABLED && !cachedConfig.USDC_MINT) {
+    logger.error('AGENT_ERROR_PROOF_ENABLED is on but USDC_MINT is unset — refusing to start.');
+    process.exit(1);
+  }
+
   return cachedConfig;
 }

@@ -4,7 +4,7 @@ use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 use crate::constants::*;
 use crate::errors::CovanticError;
 use crate::events::{UnstakeRequested, Unstaked};
-use crate::instructions::stake::crystallize_rewards;
+use crate::instructions::stake::{crystallize_rewards, settle_losses};
 use crate::state::{InsuranceVault, StakerPosition};
 
 /// Phase 1: Request unstake — starts the 48-hour cooldown period.
@@ -59,10 +59,55 @@ pub fn execute_unstake_handler(ctx: Context<ExecuteUnstake>) -> Result<()> {
     );
 
     // Pull in any rewards accrued since the staker's last interaction.
+    // Losses first: revalue the position against anything socialised since it
+    // was last touched, so rewards and any transfer below are computed on
+    // principal that still exists.
+    settle_losses(staker_position, vault)?;
     crystallize_rewards(staker_position, vault)?;
 
-    let amount = staker_position.amount_staked;
+    let requested = staker_position.amount_staked;
     let rewards = staker_position.rewards_pending;
+
+    // ---- solvency floor on the way out ------------------------------------
+    //
+    // `create_policy` refuses to write any new coverage below
+    // `SOLVENCY_CRITICAL`. Exit now honours the same line: staked capital
+    // cannot leave the vault past the point at which the protocol has already
+    // decided it may not take on more risk. Without this, the ladder was
+    // enforced on one side only — issuance was gated on solvency while the
+    // capital backing policies already sold could withdraw to zero, leaving
+    // holders with live cover and nothing behind it.
+    //
+    // The threshold matches `create_policy` deliberately. At the floor no new
+    // coverage can be written *and* no more capital can leave, so the ratio
+    // can only recover as policies expire. That bounds how long a staker can
+    // be held by `MAX_POLICY_DURATION` instead of leaving it open-ended — a
+    // higher floor here would not, because LOW and MEDIUM policies keep being
+    // written between `SOLVENCY_CRITICAL` and `SOLVENCY_CAUTION`.
+    let reserve_required = if vault.total_coverage > 0 {
+        // Rounded up: the floor is a minimum, and rounding down would let the
+        // last unit of stake leave the vault a hair beneath it.
+        (vault.total_coverage as u128)
+            .checked_mul(SOLVENCY_CRITICAL as u128)
+            .ok_or(CovanticError::MathOverflow)?
+            .div_ceil(10_000)
+    } else {
+        0
+    };
+
+    // Pay out what the floor leaves rather than refusing outright. An
+    // all-or-nothing gate would make being first to exit worth more, which is
+    // the run this is meant to damp; taking a share of what is free removes
+    // the cliff without letting the vault fall through the floor.
+    let free_capital = (vault.total_staked as u128).saturating_sub(reserve_required);
+    let amount = u64::try_from(free_capital.min(requested as u128))
+        .map_err(|_| error!(CovanticError::MathOverflow))?;
+    require!(amount > 0, CovanticError::SolvencyTooLow);
+
+    let remaining = requested
+        .checked_sub(amount)
+        .ok_or(CovanticError::MathOverflow)?;
+
     let total_transfer = amount
         .checked_add(rewards)
         .ok_or(CovanticError::MathOverflow)?;
@@ -82,7 +127,7 @@ pub fn execute_unstake_handler(ctx: Context<ExecuteUnstake>) -> Result<()> {
     let signer_seeds = &[&seeds[..]];
 
     let transfer_ctx = CpiContext::new_with_signer(
-        ctx.accounts.token_program.to_account_info(),
+        ctx.accounts.token_program.key(),
         Transfer {
             from: ctx.accounts.vault_token_account.to_account_info(),
             to: ctx.accounts.staker_token_account.to_account_info(),
@@ -98,26 +143,50 @@ pub fn execute_unstake_handler(ctx: Context<ExecuteUnstake>) -> Result<()> {
         .total_staked
         .checked_sub(amount)
         .ok_or(CovanticError::InsufficientVaultBalance)?;
-    vault.staker_count = vault
-        .staker_count
-        .checked_sub(1)
-        .ok_or(CovanticError::MathOverflow)?;
+    // Only a staker who left entirely stops being a staker.
+    if remaining == 0 {
+        vault.staker_count = vault
+            .staker_count
+            .checked_sub(1)
+            .ok_or(CovanticError::MathOverflow)?;
+    }
     vault.recalculate_solvency();
 
-    // Reset staker position
-    staker_position.amount_staked = 0;
-    staker_position.share_bps = 0;
+    staker_position.amount_staked = remaining;
     staker_position.rewards_claimed = staker_position
         .rewards_claimed
         .checked_add(rewards)
         .ok_or(CovanticError::MathOverflow)?;
     staker_position.rewards_pending = 0;
-    staker_position.unstake_requested_at = 0;
+
+    if remaining == 0 {
+        staker_position.share_bps = 0;
+        staker_position.unstake_requested_at = 0;
+    } else {
+        // The request stays open. The staker served the cooldown already, and
+        // what stopped them was the protocol's own floor, not anything they
+        // did — so they may draw the rest as coverage expires without waiting
+        // another 48 hours.
+        staker_position.share_bps = if vault.total_staked > 0 {
+            u16::try_from(
+                (remaining as u128)
+                    .checked_mul(10000)
+                    .ok_or(CovanticError::MathOverflow)?
+                    .checked_div(vault.total_staked as u128)
+                    .ok_or(CovanticError::MathOverflow)?
+                    .min(u16::MAX as u128),
+            )
+            .map_err(|_| error!(CovanticError::MathOverflow))?
+        } else {
+            0
+        };
+    }
 
     emit!(Unstaked {
         staker: ctx.accounts.staker.key(),
         amount,
         rewards,
+        remaining,
     });
 
     Ok(())

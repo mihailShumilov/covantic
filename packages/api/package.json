@@ -11,6 +11,7 @@
     "start": "node dist/index.js",
     "monitor": "tsx src/workers/monitor-entry.ts",
     "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.typecheck.json",
     "lint": "eslint src/",
     "clean": "rm -rf dist",
     "db:generate": "drizzle-kit generate",
@@ -22,13 +23,18 @@
     "seed:demo": "tsx scripts/seed-demo.ts",
     "demo:exploit": "tsx scripts/simulate-exploit.ts",
     "demo:run": "tsx scripts/run-demo.ts",
-    "test:e2e": "COVANTIC_E2E=1 vitest run tests/e2e.test.ts"
+    "test:e2e": "COVANTIC_E2E=1 vitest run tests/e2e.test.ts",
+    "claim:replay": "tsx scripts/claim-replay.ts",
+    "gov:declare": "tsx scripts/declare-governance-baseline.ts",
+    "mandate:declare": "tsx scripts/declare-agent-mandate.ts",
+    "backtest:fetch": "tsx scripts/backtest-fetch.ts"
   },
   "dependencies": {
-    "@coral-xyz/anchor": "^0.30.1",
+    "@coral-xyz/anchor": "^0.32.1",
     "@covantic/shared": "workspace:*",
     "@fastify/cors": "^10.0.0",
     "@fastify/websocket": "^11.0.0",
+    "@pythnetwork/pyth-solana-receiver": "^0.16.0",
     "@solana/spl-token": "^0.4.0",
     "@solana/web3.js": "^1.95.0",
     "bullmq": "^5.0.0",

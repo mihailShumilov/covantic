@@ -4,14 +4,18 @@ use crate::constants::*;
 use crate::errors::CovanticError;
 use crate::state::ProtocolConfig;
 
-/// Admin-only instruction to rotate protocol authorities and pause state.
+/// Admin-only instruction to rotate the oracle authority, the pause state and
+/// the premium multiplier.
 ///
 /// Each field is optional: pass None to leave the current value untouched.
-/// Transferring admin requires the new admin to accept by counter-signing
-/// the transaction — the new admin must be a writable signer here.
+///
+/// Admin handover is **not** here. This doc comment used to claim the new
+/// admin had to counter-sign, which the code never required — it assigned
+/// `config.admin` outright. That gap is now closed the way the comment always
+/// described: `propose_admin` records a candidate and `accept_admin` requires
+/// that candidate's signature.
 pub fn update_config_handler(
     ctx: Context<UpdateConfig>,
-    new_admin: Option<Pubkey>,
     new_oracle_authority: Option<Pubkey>,
     new_paused: Option<bool>,
     new_premium_multiplier_bps: Option<u16>,
@@ -23,9 +27,11 @@ pub fn update_config_handler(
         CovanticError::UnauthorizedAdmin
     );
 
-    if let Some(admin) = new_admin {
-        config.admin = admin;
-    }
+    // Admin handover deliberately does NOT live here. It is a two-step
+    // propose/accept via `propose_admin` + `accept_admin`, so a mistyped key
+    // cannot take the one role that can pause the protocol and rotate the
+    // oracle authority. Do not reintroduce a `new_admin` parameter.
+
     if let Some(oracle) = new_oracle_authority {
         config.oracle_authority = oracle;
     }
