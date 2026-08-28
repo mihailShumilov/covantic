@@ -13,7 +13,7 @@
  *              Airdrop SOL for fees + mint mock USDC to the agent. Uses
  *              ORACLE_KEYPAIR_PATH as the USDC mint authority.
  *
- *   trigger  --name <name> [--amount 2000] [--sink <pubkey>] [--kind transfer|arm|drain] [--kind transfer|arm|drain]
+ *   trigger  --name <name> [--amount 2000] [--sink <pubkey>] [--kind transfer|arm|drain] [--force]
  *              Sign and broadcast real on-chain activity from the agent.
  *
  *              `--kind transfer` (default) sends an ordinary SPL-USDC transfer
@@ -422,7 +422,7 @@ function printHelp(): void {
 Subcommands:
   create   --name <name> [--force]
   fund     --name <name> [--sol 0.5] [--usdc 5000]
-  trigger  --name <name> [--amount 2000] [--sink <pubkey>]
+  trigger  --name <name> [--amount 2000] [--sink <pubkey>] [--kind transfer|arm|drain] [--force]
 
 Examples:
   pnpm agent:create --name rogue-trader

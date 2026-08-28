@@ -74,6 +74,12 @@ services:
       # simply drops out of the price consensus and says so in the bundle.
       PYTH_HERMES_URL: ${PYTH_HERMES_URL:-}
       PYTH_HERMES_API_KEY: ${PYTH_HERMES_API_KEY:-}
+      # Sweep cadence. Two minutes is the production answer; a demo wants
+      # seconds, because waiting two minutes for a claim to appear reads as a
+      # detector that does not work. Short intervals cost SOL — every exploit
+      # sweep writes an on-chain checkpoint the oracle wallet pays for.
+      EXPLOIT_SWEEP_INTERVAL_MS: ${EXPLOIT_SWEEP_INTERVAL_MS:-120000}
+      ORACLE_SWEEP_INTERVAL_MS: ${ORACLE_SWEEP_INTERVAL_MS:-120000}
       PORT: 4000
       LOG_LEVEL: info
     volumes:
@@ -118,6 +124,12 @@ services:
       # simply drops out of the price consensus and says so in the bundle.
       PYTH_HERMES_URL: ${PYTH_HERMES_URL:-}
       PYTH_HERMES_API_KEY: ${PYTH_HERMES_API_KEY:-}
+      # Sweep cadence. Two minutes is the production answer; a demo wants
+      # seconds, because waiting two minutes for a claim to appear reads as a
+      # detector that does not work. Short intervals cost SOL — every exploit
+      # sweep writes an on-chain checkpoint the oracle wallet pays for.
+      EXPLOIT_SWEEP_INTERVAL_MS: ${EXPLOIT_SWEEP_INTERVAL_MS:-120000}
+      ORACLE_SWEEP_INTERVAL_MS: ${ORACLE_SWEEP_INTERVAL_MS:-120000}
       LOG_LEVEL: info
     volumes:
       - ./keys:/app/keys:ro
