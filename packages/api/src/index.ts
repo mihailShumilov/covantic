@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import fastifyWebSocket from '@fastify/websocket';
 import fastifyCors from '@fastify/cors';
+import { registerCoveredMint } from '@covantic/shared';
 import { loadConfig } from './config/env.js';
 import { runMigrations } from './db/migrate.js';
 import { applyCustomConstraints } from './db/custom-constraints.js';
@@ -22,6 +23,10 @@ const AGENT_CHANNEL_PREFIX = 'agent:';
 async function bootstrap() {
   // 1. Load and validate config
   const config = loadConfig();
+  // Before anything can price a loss. A deployment's mock USDC is not in the
+  // shared registry, and without this every claim stalls at
+  // `position_not_valued`.
+  registerCoveredMint(config.USDC_MINT);
 
   // 2. Auto-migrate DB
   const db = createDbConnection(config.DATABASE_URL);

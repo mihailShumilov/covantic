@@ -1,4 +1,5 @@
 /** Standalone entry point for the transaction monitor process */
+import { registerCoveredMint } from '@covantic/shared';
 import { loadConfig } from '../config/env.js';
 import { createDbConnection } from '../config/database.js';
 import { createRedisConnection } from '../config/redis.js';
@@ -7,6 +8,9 @@ import { logger } from '../utils/logger.js';
 
 async function main() {
   const config = loadConfig();
+  // Same reason as in the API entrypoint: the monitor runs the verifiers too,
+  // and an unregistered covered mint makes every loss unpriceable.
+  registerCoveredMint(config.USDC_MINT);
   const db = createDbConnection(config.DATABASE_URL);
   const redis = createRedisConnection(config.REDIS_URL);
 
