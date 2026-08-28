@@ -87,6 +87,7 @@ export {
   lookupMint,
   isStableMint,
   canonicalMint,
+  registerCoveredMint,
 } from './tokens.js';
 
 // Utils

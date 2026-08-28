@@ -70,9 +70,11 @@ export const MINT_REGISTRY: Readonly<Record<string, TokenMeta>> = Object.freeze(
     kind: 'stable',
     feedKey: 'USDC/USD',
   },
-  // Devnet USDC used by this deployment. Same feed: a devnet mint has no
-  // market of its own, and USDC/USD is the honest reference for what it
-  // stands in for.
+  // A devnet mock USDC from an earlier deployment, kept because policies were
+  // written against it. It is *not* necessarily the mint in use today —
+  // `USDC_MINT` is, and `registerCoveredMint` is what makes that one
+  // priceable. Same feed either way: a devnet mint has no market of its own,
+  // and USDC/USD is the honest reference for what it stands in for.
   '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU': {
     symbol: 'USDC-dev',
     decimals: 6,
@@ -100,9 +102,46 @@ export const MINT_REGISTRY: Readonly<Record<string, TokenMeta>> = Object.freeze(
   },
 });
 
+/**
+ * The covered mint this deployment actually uses, when it is not one of the
+ * mints above.
+ *
+ * Every non-mainnet deployment mints its own mock USDC, and the address
+ * changes whenever someone mints a fresh one. When the registry does not know
+ * it, *nothing can be valued*: `lookupMint` returns null, the loss comes back
+ * unpriced, and every exploit and agent-error claim stalls at
+ * `position_not_valued` — permanently, because a retry re-reads the same
+ * registry. A whole devnet deployment can look like a detection failure when
+ * the only thing wrong is a mint nobody registered.
+ *
+ * Registering the configured mint closes that. It is sound rather than a
+ * convenience: the covered mint is the unit the policy is denominated in, so
+ * a deployment that treats it as anything other than a dollar stable is
+ * already incoherent.
+ */
+let coveredMintOverride: { mint: string; meta: TokenMeta } | null = null;
+
+/**
+ * Declare the mint policies are denominated in, once, at startup.
+ *
+ * A no-op when the mint is already in {@link MINT_REGISTRY} — a real USDC
+ * deployment keeps the registry's entry rather than shadowing it.
+ */
+export function registerCoveredMint(mint: string | undefined, decimals = 6): void {
+  // Unset is a real configuration: a deployment that has not chosen a covered
+  // mint has nothing to register, and silently inventing one would be worse
+  // than leaving losses unpriceable.
+  if (!mint || MINT_REGISTRY[mint]) return;
+  coveredMintOverride = {
+    mint,
+    meta: { symbol: 'USDC-mock', decimals, kind: 'stable', feedKey: 'USDC/USD' },
+  };
+}
+
 /** Registry lookup. Returns null for anything unregistered — callers must
  *  treat that as "cannot price", never as "worth nothing". */
 export function lookupMint(mint: string): TokenMeta | null {
+  if (coveredMintOverride?.mint === mint) return coveredMintOverride.meta;
   return MINT_REGISTRY[mint] ?? null;
 }
 
