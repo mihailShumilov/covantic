@@ -63,6 +63,45 @@ export const PARKED_CLAIM_STATUSES: readonly ClaimStatus[] = [
   ClaimStatus.Review,
 ] as const;
 
+/**
+ * Park reasons that no retry can clear.
+ *
+ * Each one means the *holder's declaration* cannot support this claim, and
+ * that fact is fixed: the two `no_*` reasons say no declaration exists, and
+ * the two `*_not_matured` ones compare a declaration's `effective_at` against
+ * the incident's block time — both already in the past, so waiting changes
+ * nothing.
+ *
+ * They matter because of what they collide with. The most ordinary real theft
+ * is a phished `Approve` followed by a drain, and the approval is a change of
+ * control, so a governance claim opens first and parks here for want of a
+ * baseline. Ranked by specificity alone the drain's exploit claim can never
+ * take the slot — governance outranks it — so the protocol would file the
+ * claim it cannot prove and block the one it can. That is the
+ * denial-of-coverage shape {@link PARKED_CLAIM_STATUSES} was written against,
+ * arriving by a route the ordering did not anticipate.
+ *
+ * Deliberately excludes `baseline_lookup_unavailable` and
+ * `mandate_lookup_unavailable`: those are outages, they do clear on retry, and
+ * treating a temporarily blind verifier as permanently stuck would hand the
+ * slot away for no reason.
+ */
+export const UNRESOLVABLE_PARK_REASONS: readonly string[] = [
+  'no_governance_baseline',
+  'no_mandate_declared',
+  'governance_baseline_not_matured',
+  'mandate_not_matured',
+] as const;
+
+/** True when a parked claim is waiting on a declaration that cannot arrive in
+ *  time for it, and should therefore yield the policy's slot to any claim
+ *  that can actually be adjudicated. */
+export function isPermanentlyParked(reviewReason: string | null | undefined): boolean {
+  return reviewReason !== null && reviewReason !== undefined
+    ? UNRESOLVABLE_PARK_REASONS.includes(reviewReason)
+    : false;
+}
+
 export const OPEN_CLAIM_STATUSES: readonly ClaimStatus[] = [
   ClaimStatus.Pending,
   ClaimStatus.Verifying,

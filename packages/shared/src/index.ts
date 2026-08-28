@@ -23,6 +23,8 @@ export {
   StepStatus,
   OPEN_CLAIM_STATUSES,
   PARKED_CLAIM_STATUSES,
+  UNRESOLVABLE_PARK_REASONS,
+  isPermanentlyParked,
   TRIGGER_SPECIFICITY,
 } from './types/claims.js';
 

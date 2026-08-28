@@ -24,16 +24,20 @@
  *              park a `no_mandate_declared` review in the policy's single open
  *              claim slot forever.
  *
- *              `--kind arm` then `--kind drain` stage the covered event that
- *              needs no declaration at all. `arm` grants a foreign delegate an
- *              allowance and must run **before the policy is bought**; `drain`
- *              then moves the tokens with that delegate's signature. In the
- *              drain the account's owner is not among the signers, so the
- *              verifier resolves it as `unauthorized_movement` from the chain's
- *              own record and an exploit claim opens against the policy exactly
- *              as it was bought. Nothing is declared and nothing matures.
+ *              `--kind drain` stages the covered event, and is all you need:
+ *              it grants a foreign delegate if there is not one already, then
+ *              moves the tokens with that delegate's signature. The account's
+ *              owner is not among the drain's signers, so the verifier
+ *              resolves `unauthorized_movement` from the chain's own record
+ *              and an exploit claim opens. Nothing has to be declared.
  *
- *              The ordering is load-bearing — see `armDelegate`.
+ *              `--kind arm` does only the approval, for when you want it to
+ *              predate the policy. That used to be mandatory — an approval
+ *              against a live policy opens a governance claim which parks for
+ *              want of a baseline — and is not any more: a claim parked on a
+ *              reason no retry can clear yields the slot. Which matches
+ *              reality, where nobody phishing an allowance waits for the
+ *              victim to buy insurance first.
  *
  *              Default sink = oracle keypair's ATA (always exists).
  *
@@ -387,23 +391,57 @@ async function drainAsDelegate(opts: {
   amountUi: number;
   rawAmount: bigint;
 }): Promise<void> {
-  const { connection, name, feePayer, sourceAta, sinkAta, sinkOwner, amountUi, rawAmount } = opts;
+  const { connection, agent, name, feePayer, sourceAta, sinkAta, sinkOwner, amountUi, rawAmount } =
+    opts;
   const path = delegateKeypairPath(name);
-  if (!existsSync(path)) {
-    throw new Error(
-      `No delegate for '${name}'. Run \`pnpm agent:trigger --name ${name} --kind arm\` ` +
-        `before buying the policy.`,
+
+  // No delegate yet? Grant one now. `arm` exists for the case where you want
+  // the approval to predate the policy, but it is no longer a prerequisite:
+  // an approval against a live policy opens a governance claim that parks for
+  // want of a baseline, and a parked claim on a reason no retry can clear now
+  // yields the slot to the exploit claim this drain produces. Which is what
+  // the real sequence looks like anyway — nobody phishing an allowance waits
+  // for the victim to buy insurance first.
+  let delegate: Keypair;
+  if (existsSync(path)) {
+    delegate = Keypair.fromSecretKey(
+      Uint8Array.from(JSON.parse(readFileSync(path, 'utf-8')) as number[]),
+    );
+  } else {
+    delegate = Keypair.generate();
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify(Array.from(delegate.secretKey)));
+    const approveTx = new Transaction().add(
+      createApproveInstruction(sourceAta, delegate.publicKey, agent.publicKey, rawAmount),
+    );
+    approveTx.feePayer = feePayer.publicKey;
+    const approveSig = await sendAndConfirmTransaction(connection, approveTx, [feePayer, agent]);
+    console.log(`\n1/2 approve ${approveSig}`);
+    console.log(
+      `    https://explorer.solana.com/tx/${approveSig}?cluster=${process.env.SOLANA_NETWORK ?? 'devnet'}`,
     );
   }
-  const delegate = Keypair.fromSecretKey(
-    Uint8Array.from(JSON.parse(readFileSync(path, 'utf-8')) as number[]),
-  );
 
   const tx = new Transaction().add(
     createTransferInstruction(sourceAta, sinkAta, delegate.publicKey, rawAmount),
   );
   tx.feePayer = feePayer.publicKey;
-  const sig = await sendAndConfirmTransaction(connection, tx, [feePayer, delegate]);
+  let sig: string;
+  try {
+    sig = await sendAndConfirmTransaction(connection, tx, [feePayer, delegate]);
+  } catch (err) {
+    // A drain spends the whole allowance, so re-running against a stale
+    // delegate fails with `owner does not match` — which reads like a bug in
+    // the script rather than a spent approval. Say what it is.
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('owner does not match')) {
+      throw new Error(
+        `The delegate for '${name}' has no allowance left — a drain spends it in full.\n` +
+          `  Delete ${path} and run this again to grant a fresh one.`,
+      );
+    }
+    throw err;
+  }
   const network = process.env.SOLANA_NETWORK ?? 'devnet';
 
   console.log(`\nDraining agent '${name}' as its delegate:`);
