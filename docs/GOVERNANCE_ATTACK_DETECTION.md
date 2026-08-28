@@ -16,45 +16,50 @@ tests pass; `tsc --noEmit` and `eslint src` are clean; `cargo check` is clean
 and `anchor build` produces both the program binary and the IDL. 43 Anchor
 integration tests pass, including sixteen written for this trigger.
 
-| Phase | State | Where |
-|-------|-------|-------|
-| 1 — Governance baseline (holder-declared authority manifest) | done | `anchor/.../{state/governance_baseline.rs,instructions/declare_governance_baseline.rs}`, `api/scripts/declare-governance-baseline.ts` |
-| 2 — Authority checkpoint (permissionless crank) | done | `anchor/.../{state/authority_checkpoint.rs,instructions/checkpoint_authority.rs}`, `services/governance/checkpoint.ts` |
-| 3 — Authority forensics | done | `services/governance/authority.ts` |
-| 4 — The conjunction: takeover → drain | done | `services/governance/conjunction.ts` |
-| 5 — Governance signatures | done | `services/governance/signatures.ts` |
-| 6 — Evidence bundle, pure adjudicator, replay | done | `services/governance/{types,adjudicate}.ts`, `scripts/claim-replay.ts` |
-| 7 — Detection that fires | done | `services/governance/prefilter.ts`, `workers/exploit-watcher.ts` |
-| 8 — Trust-minimised settlement | code done, **not deployed** | `anchor/.../instructions/verify_and_payout_governance.rs`, `services/governance/proof-poster.ts` |
-| 9 — Validation harness | done | `tests/fixtures/governance-corpus.ts`, `tests/governance-corpus.test.ts` |
+| Phase                                                        | State                       | Where                                                                                                                                 |
+| ------------------------------------------------------------ | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 — Governance baseline (holder-declared authority manifest) | done                        | `anchor/.../{state/governance_baseline.rs,instructions/declare_governance_baseline.rs}`, `api/scripts/declare-governance-baseline.ts` |
+| 2 — Authority checkpoint (permissionless crank)              | done                        | `anchor/.../{state/authority_checkpoint.rs,instructions/checkpoint_authority.rs}`, `services/governance/checkpoint.ts`                |
+| 3 — Authority forensics                                      | done                        | `services/governance/authority.ts`                                                                                                    |
+| 4 — The conjunction: takeover → drain                        | done                        | `services/governance/conjunction.ts`                                                                                                  |
+| 5 — Governance signatures                                    | done                        | `services/governance/signatures.ts`                                                                                                   |
+| 6 — Evidence bundle, pure adjudicator, replay                | done                        | `services/governance/{types,adjudicate}.ts`, `scripts/claim-replay.ts`                                                                |
+| 7 — Detection that fires                                     | done                        | `services/governance/prefilter.ts`, `workers/exploit-watcher.ts`                                                                      |
+| 8 — Trust-minimised settlement                               | code done, **not deployed** | `anchor/.../instructions/verify_and_payout_governance.rs`, `services/governance/proof-poster.ts`                                      |
+| 9 — Validation harness                                       | done                        | `tests/fixtures/governance-corpus.ts`, `tests/governance-corpus.test.ts`                                                              |
 
 **Corpus result:** 5/5 takeover shapes confirmed (recall 1.0 against a 0.8
 floor), 0/14 operational shapes confirmed, and each of the fourteen fails for
-a *different* reason — the corpus is measuring the logic, not one blanket
+a _different_ reason — the corpus is measuring the logic, not one blanket
 refusal. Confirmations land at 0.82–0.87 confidence, under the 0.92
 adjudicator ceiling and therefore under the 0.95 auto-pay bar, so every one
 still requires the chain's own reading.
 
 **Carried forward, with the reason:**
 
-- *Phase 8 deployment.* `GOVERNANCE_PROOF_ENABLED` stays false until the
+- _Phase 8 deployment._ `GOVERNANCE_PROOF_ENABLED` stays false until the
   program is redeployed by hand. Deployment is manual on this project; do not
   run `anchor keys sync`.
-- *No holder-facing UI.* Declaring a baseline is a CLI today
+- _No holder-facing UI._ Declaring a baseline is a CLI today
   (`pnpm gov:declare`). Until a policy declares one, its governance claims
   resolve to review — correct, but it means the mechanism is opt-in per
   policy and nothing prompts the holder to opt in.
-- *No webhook-path detection.* Governance is detected by the pull path only,
+- _No webhook-path detection._ Governance is detected by the pull path only,
   bounded by the sweep interval rather than by webhook delivery. The reasoning
   is recorded at the top of `services/governance/prefilter.ts`; the short
   version is that nothing this screen needs exists in the indexer payload, and
   both ways of faking it are worse than the latency.
-- *Squads configs are undecodable.* A multisig threshold change reports
+- _Squads configs are undecodable._ A multisig threshold change reports
   `unevaluated`, never absent — and when the policy declares a controller, it
   escalates rather than closing. Decoding Squads would need a maintained
   binary decoder, which this codebase deliberately has none of.
-- *Real-incident replay.* The corpus holds takeover *shapes*, not mainnet
-  replays; archival RPC access is not available in this environment.
+- _Real-incident replay._ **Done** for the pipeline as a whole: archival
+  access turned out to be available on the public mainnet endpoint, and 320
+  real transactions now run through all four triggers, this one included, with
+  zero confirmations. What the corpus here still holds is takeover _shapes_,
+  because a governance claim needs a declared baseline and none of those
+  wallets has one — every real transaction resolves to review on this path and
+  so says nothing about discrimination. See `M1_RESULTS.md` §2.3.
 
 ---
 
@@ -82,7 +87,7 @@ account (`anchor-syn`'s associated-token codegen: `let my_owner = account.owner
 account at all — and the balance never dropped anyway, so there would be
 nothing to measure even if it could.
 
-This is not a small gap. It means a seizure was *detected* by the exploit
+This is not a small gap. It means a seizure was _detected_ by the exploit
 screen (`control_change`, critical) and then routed to a settlement path
 structurally incapable of closing it. The governance instructions therefore
 derive the covered account **by address** — `address =
@@ -90,8 +95,8 @@ get_associated_token_address(&policy.agent_address, &usdc_mint.key())` — which
 keeps the caller from choosing the account while allowing the owner to have
 changed. That is exactly the state being observed.
 
-`anchor/tests/covantic.test.ts` pins the finding: *"cannot settle a seizure —
-the covered account stops being the agent's"*.
+`anchor/tests/covantic.test.ts` pins the finding: _"cannot settle a seizure —
+the covered account stops being the agent's"_.
 
 ### Checkpoint staleness measured against `now` is unsatisfiable here
 
@@ -100,7 +105,7 @@ MAX_CHECKPOINT_AGE`, which silently folds its one-hour lock into a two-hour
 allowance. That leaves an hour of slack and works.
 
 Governance's lock is two hours — the entire allowance — so the same comparison
-would have made *every* governance payout fail, including on evidence that was
+would have made _every_ governance payout fail, including on evidence that was
 perfect. The Anchor test caught it on the first run.
 
 `verify_and_payout_governance` measures staleness against
@@ -120,30 +125,30 @@ properly rather than deleting.
 
 **Not reachable: 100% detection recall.** "Was this a governance attack?" is
 an open-world judgement against an adversary who reads this repository. Any
-fixed rule set can be walked around. Recall is a *measured, CI-gated number*
+fixed rule set can be walked around. Recall is a _measured, CI-gated number_
 against a labelled corpus (§11), not a promise.
 
 **Reachable, and strictly more than the other two triggers reach.** This is
 the point worth stating up front, because it inverts the intuition that
 governance is the vaguest of the four triggers:
 
-| Trigger | What the chain can establish for itself |
-|---------|------------------------------------------|
-| Oracle manipulation | A guardian-signed *price*. The historical swap it is being compared against stays an off-chain assertion. |
-| Exploit | A balance *drop*, by subtraction between two readings it took. Why the money left stays an off-chain assertion. |
-| **Governance attack** | **The covered event itself.** Who controls an account is not a transient event and not an off-chain number — it is persistent on-chain state that the program can read directly, before and after, and compare against a set the *holder signed in advance*. |
+| Trigger               | What the chain can establish for itself                                                                                                                                                                                                                      |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Oracle manipulation   | A guardian-signed _price_. The historical swap it is being compared against stays an off-chain assertion.                                                                                                                                                    |
+| Exploit               | A balance _drop_, by subtraction between two readings it took. Why the money left stays an off-chain assertion.                                                                                                                                              |
+| **Governance attack** | **The covered event itself.** Who controls an account is not a transient event and not an off-chain number — it is persistent on-chain state that the program can read directly, before and after, and compare against a set the _holder signed in advance_. |
 
 So the guarantees available here are:
 
-| # | Guarantee | Meaning for a governance claim |
-|---|-----------|--------------------------------|
+| #      | Guarantee                          | Meaning for a governance claim                                                                                                                                                                                                                                                                                                            |
+| ------ | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **G1** | **Soundness on the auto-pay lane** | `verify_and_payout_governance` reads the covered account's current authority set, compares it to a checkpoint the program wrote earlier and to a baseline the holder declared and signed before the incident, and refuses to pay unless control actually left that set. The oracle does not assert the takeover; the program observes it. |
-| **G2** | **Reproducibility** | The verdict is a pure function of an immutable evidence bundle. `sha256(bundle)` is committed on chain. Anyone replaying the bundle gets a byte-identical verdict, forever. |
-| **G3** | **No silent failure** | Every claim ends in exactly one of `paid`, `rejected(reason)`, `indeterminate→review`. A claim is never rejected because an RPC timed out, a Squads config could not be decoded, or no baseline had been declared. |
+| **G2** | **Reproducibility**                | The verdict is a pure function of an immutable evidence bundle. `sha256(bundle)` is committed on chain. Anyone replaying the bundle gets a byte-identical verdict, forever.                                                                                                                                                               |
+| **G3** | **No silent failure**              | Every claim ends in exactly one of `paid`, `rejected(reason)`, `indeterminate→review`. A claim is never rejected because an RPC timed out, a Squads config could not be decoded, or no baseline had been declared.                                                                                                                        |
 
 **The honest boundary, stated once.** The chain can prove that control left
 the declared set and that the new authority is neither the holder nor the
-agent. It cannot prove that the new authority is not a *Sybil* of the holder —
+agent. It cannot prove that the new authority is not a _Sybil_ of the holder —
 a second wallet they also control. That residual is the same one the exploit
 path carries with destination control, and it is bounded the same way: the
 committed bundle, the two-hour lock, and the payout circuit breaker.
@@ -201,14 +206,14 @@ the verifier would answer the wrong question.
 - **D4 — it asks the wrong question.** The decisive branch is
   `if (!programs.governance) → rejected`, where `governance` means "SPL
   Governance or Metadao appeared in the transaction". But the covered subject
-  is an *agent wallet*, not a DAO. A takeover of an agent is a `SetAuthority`,
+  is an _agent wallet_, not a DAO. A takeover of an agent is a `SetAuthority`,
   `Approve`, `FreezeAccount`, a BPF Loader Upgradeable authority change, or a
   Squads config change — none of which touches either program in
   `GOVERNANCE_PROGRAM_IDS`. The verifier therefore rejects essentially every
   real shape with `no_governance_program`.
 
 - **D5 — and it is a false-positive engine in the other direction.** When a
-  governance program *is* present, the only further test is "some account
+  governance program _is_ present, the only further test is "some account
   moved more than 0.01 SOL, or any token balance changed at all". A routine
   Realms vote in a transaction that also pays rent confirms at 0.55 confidence
   for 50% of coverage.
@@ -220,7 +225,7 @@ the verifier would answer the wrong question.
   number.
 
 - **D7 — it violates the three-valued invariant.** The verifier never returns
-  `indeterminate`. Both of its negative branches are *rejections* derived from
+  `indeterminate`. Both of its negative branches are _rejections_ derived from
   the Helius indexer payload alone — the payload that, per `CLAUDE.md`, cannot
   answer authorization. A thin or lagging payload closes a valid claim, which
   is precisely the failure the three-valued rule exists to prevent.
@@ -246,7 +251,7 @@ the verifier would answer the wrong question.
   returns `legacy`, `hasProofPath(4)` is false, and the verifier's ceiling is
   0.55 — below `REVIEW_CONFIDENCE` (0.75). Every real governance claim goes to
   a human. That is the correct fail-safe direction, but it also means the
-  trigger is decorative: it cannot pay, and it can still wrongly *close* a
+  trigger is decorative: it cannot pay, and it can still wrongly _close_ a
   claim via D7.
 
 - **D12 — one constant from an unbounded payout.** If a future change lifted
@@ -357,7 +362,7 @@ pub struct GovernanceBaseline {
 Two properties carry the weight:
 
 **Maturity.** `effective_at = now + GOVERNANCE_BASELINE_DELAY` (1 hour). A
-baseline is not usable to prove a claim until it matures, and an *update* is
+baseline is not usable to prove a claim until it matures, and an _update_ is
 subject to the same delay while the previous manifest is retained. Without
 this, a compromised holder key could declare a fresh baseline and immediately
 claim against it; with it, the same attacker must pre-commit an hour early and
@@ -369,7 +374,7 @@ same reason, as on the balance checkpoint.
 
 **Rejected alternative, recorded so it is not rediscovered:** infer the
 baseline from the first authority checkpoint. It works mechanically, and it
-is strictly worse — it makes the *protocol* guess what the holder intended,
+is strictly worse — it makes the _protocol_ guess what the holder intended,
 which is the guess this whole phase exists to replace with a signature.
 Policies created before this ships have no baseline and must resolve to
 `indeterminate → review`, never to a rejection (see §9).
@@ -386,13 +391,13 @@ It reads, from accounts Anchor **derives rather than accepts** —
 `associated_token::mint = usdc_mint, associated_token::authority = policy.agent_address`,
 exactly as the balance crank does:
 
-| Field | Source | Why it matters |
-|-------|--------|----------------|
-| `owner` | covered ATA | A `SetAuthority(AccountOwner)` seizure moves this and nothing else. |
-| `delegate`, `delegated_amount` | covered ATA | An allowance granted now, pulled later. |
-| `close_authority` | covered ATA | Lets a third party close the account and take the rent — and forces recreation. |
-| `frozen` | covered ATA `state` | **The shape the balance path is blind to.** A frozen account never drops; the agent simply can no longer move it. |
-| `upgrade_authority` | `program_data`, when the baseline declared one | Seizing the agent's program is a takeover of everything the program controls. |
+| Field                          | Source                                         | Why it matters                                                                                                    |
+| ------------------------------ | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `owner`                        | covered ATA                                    | A `SetAuthority(AccountOwner)` seizure moves this and nothing else.                                               |
+| `delegate`, `delegated_amount` | covered ATA                                    | An allowance granted now, pulled later.                                                                           |
+| `close_authority`              | covered ATA                                    | Lets a third party close the account and take the rent — and forces recreation.                                   |
+| `frozen`                       | covered ATA `state`                            | **The shape the balance path is blind to.** A frozen account never drops; the agent simply can no longer move it. |
+| `upgrade_authority`            | `program_data`, when the baseline declared one | Seizing the agent's program is a takeover of everything the program controls.                                     |
 
 Same `prev_*` retention, same `MAX_CHECKPOINT_AGE` bound.
 
@@ -418,7 +423,7 @@ interface Takeover {
   signer: string | null;
   signerIsAgent: boolean;
   signerIsHolder: boolean;
-  signerInManifest: boolean | null;   // null = manifest not available
+  signerInManifest: boolean | null; // null = manifest not available
   viaCpi: boolean;
 }
 ```
@@ -433,7 +438,7 @@ destination is self when it is the holder wallet, the agent wallet, or a token
 account owned by either. This is the check that rejects a holder rotating keys
 to their own second wallet.
 
-`GOVERNANCE_PROGRAM_IDS` widens into a *governance surface* set — BPF Loader
+`GOVERNANCE_PROGRAM_IDS` widens into a _governance surface_ set — BPF Loader
 Upgradeable, Squads v4, SPL Governance, Metadao — but it stays what it is in
 the exploit path: **an audit-trail field, never a verdict input.** The lesson
 is already written into `CLAUDE.md` for exploits and applies verbatim here:
@@ -470,7 +475,7 @@ settlement instruction rather than borrowing the exploit one.**
 
 On the 30-minute window: it is a marketing number, and a patient attacker
 waits thirty-one minutes. The recommendation is to let the window bound the
-*proof* path only — a tight, provable conjunction that can pay automatically —
+_proof_ path only — a tight, provable conjunction that can pay automatically —
 while a takeover whose drain lands later still routes to review rather than
 being denied. That distinction belongs in the coverage table, stated, rather
 than being quietly widened.
@@ -483,23 +488,23 @@ than being quietly widened.
 `present: boolean | null`, `unevaluated` never conflated with `false`, weights
 tuned so no single corroborating signal can carry a verdict alone.
 
-| id | weight | what it establishes |
-|----|--------|---------------------|
-| `authority_left_manifest` | 0.45 | Control sits outside the holder's matured, declared set. The load-bearing one. |
-| `takeover_signer_foreign` | 0.40 | Whoever signed the change is neither agent, holder, nor a manifest signer. |
-| `account_frozen` | 0.30 | Covered account frozen by a foreign freeze authority. |
-| `upgrade_authority_seized` | 0.30 | The agent's program upgrade authority moved. |
-| `drain_follows_takeover` | 0.30 | Material outflow inside the window, after the change. |
-| `victim_cohort` | 0.30 | Another insured agent taken over by the same new authority in the window. |
-| `multisig_threshold_lowered` | 0.25 | Squads config weakened. Reports `null` until a decoder exists. |
-| `delegate_installed_then_pulled` | 0.25 | `approve` followed by a foreign-authority transfer. |
-| `new_authority_first_seen` | 0.20 | The new authority has no history before the incident. |
+| id                               | weight | what it establishes                                                            |
+| -------------------------------- | ------ | ------------------------------------------------------------------------------ |
+| `authority_left_manifest`        | 0.45   | Control sits outside the holder's matured, declared set. The load-bearing one. |
+| `takeover_signer_foreign`        | 0.40   | Whoever signed the change is neither agent, holder, nor a manifest signer.     |
+| `account_frozen`                 | 0.30   | Covered account frozen by a foreign freeze authority.                          |
+| `upgrade_authority_seized`       | 0.30   | The agent's program upgrade authority moved.                                   |
+| `drain_follows_takeover`         | 0.30   | Material outflow inside the window, after the change.                          |
+| `victim_cohort`                  | 0.30   | Another insured agent taken over by the same new authority in the window.      |
+| `multisig_threshold_lowered`     | 0.25   | Squads config weakened. Reports `null` until a decoder exists.                 |
+| `delegate_installed_then_pulled` | 0.25   | `approve` followed by a foreign-authority transfer.                            |
+| `new_authority_first_seen`       | 0.20   | The new authority has no history before the incident.                          |
 
 **Authorization class** — at least one must fire before any pay lane is
 reachable: `authority_left_manifest`, `takeover_signer_foreign`,
 `account_frozen`, `upgrade_authority_seized`.
 
-Note what is *not* on this list: "a governance program was invoked". It was the
+Note what is _not_ on this list: "a governance program was invoked". It was the
 whole of the old verifier and it establishes nothing.
 
 ---
@@ -521,13 +526,13 @@ release funds on its own. That gap is the guarantee.
 The decision shape, stated plainly because it is not the one the current
 verifier makes:
 
-| Condition | Outcome | Why |
-|-----------|---------|-----|
-| No matured baseline for the policy | `indeterminate` → review | The absence of a declaration is our gap, not evidence the holder consented. Every pre-existing policy lands here. |
-| No raw transaction available | `indeterminate` | Authorization is unanswerable from the indexer payload, and it is what the verdict rests on. |
-| Authority matches the matured baseline | **`rejected`** | The one clean rejection, and it rests on a positive on-chain fact rather than an absence. |
-| New authority resolves to holder or agent | `rejected` (`self_rotation`) | Control that stayed in the family was never taken. |
-| Left the baseline, foreign signer, loss in window | `confirmed` | The covered event, observed. |
+| Condition                                           | Outcome                                                                             | Why                                                                                                                                                 |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No matured baseline for the policy                  | `indeterminate` → review                                                            | The absence of a declaration is our gap, not evidence the holder consented. Every pre-existing policy lands here.                                   |
+| No raw transaction available                        | `indeterminate`                                                                     | Authorization is unanswerable from the indexer payload, and it is what the verdict rests on.                                                        |
+| Authority matches the matured baseline              | **`rejected`**                                                                      | The one clean rejection, and it rests on a positive on-chain fact rather than an absence.                                                           |
+| New authority resolves to holder or agent           | `rejected` (`self_rotation`)                                                        | Control that stayed in the family was never taken.                                                                                                  |
+| Left the baseline, foreign signer, loss in window   | `confirmed`                                                                         | The covered event, observed.                                                                                                                        |
 | Left the baseline but the holder or agent signed it | `indeterminate` (`authorized_rotation_anomalous`) when corroboration clears the bar | A stolen holder key signs exactly like the holder. This module does not pretend to separate those two, and escalates rather than paying or denying. |
 
 Then add `TRIGGER_GOVERNANCE_ATTACK` to `claim-replay`'s `engineFor()`.
@@ -547,7 +552,7 @@ Wire it into both paths, for the reason already established for exploits:
 
 - **Webhook path** — `TransactionMonitor.detectAnomalies`. Fast and fragile.
 - **Pull path** — `exploit-watcher.sweepTransactions`, which already fetches
-  the `RawTxView` per transaction, so this is nearly free and is the *stronger*
+  the `RawTxView` per transaction, so this is nearly free and is the _stronger_
   of the two.
 
 **Third job on the watcher tick:** diff this tick's authority checkpoint
@@ -559,7 +564,7 @@ a verifier to verify.
 
 **Fix D2 structurally, not by renaming.** Emit the literal `governance_attack`,
 make `MonitoringEventType` carry that value, and add a unit test asserting
-every `MonitoringEventType` value is a *key* in `EVENT_TO_TRIGGER` — including
+every `MonitoringEventType` value is a _key_ in `EVENT_TO_TRIGGER` — including
 the intentionally-`undefined` ones. That test is what stops this class of bug
 coming back; a rename alone does not.
 
@@ -614,8 +619,7 @@ New constants: `GOVERNANCE_BASELINE_SEED`, `AUTHORITY_CHECKPOINT_SEED`,
 
 Backend wiring: `planProvenSettlement` gains
 `{ kind: 'proven_authority'; bundleHash }` gated on `GOVERNANCE_PROOF_ENABLED`
-(default false, same as its two siblings), and `hasProofPath()` gains trigger
-4. The `unprovable` branch already fails closed and needs no change — which is
+(default false, same as its two siblings), and `hasProofPath()` gains trigger 4. The `unprovable` branch already fails closed and needs no change — which is
 the property that makes the whole path non-decorative: an attacker who can
 stop a proof from being built gets review, not the legacy behaviour.
 
@@ -639,7 +643,7 @@ seized then the program drains; multisig threshold lowered then drain; takeover
 whose drain is laundered through a DEX; one new authority taking over two
 insured agents in the same window.
 
-**Negatives** — the half that matters, and every one is a shape the *current*
+**Negatives** — the half that matters, and every one is a shape the _current_
 verifier confirms or would:
 
 - a routine Realms vote in a transaction that also moves rent — confirmed
@@ -647,7 +651,7 @@ verifier confirms or would:
 - the holder rotating the agent key to a wallet inside the declared manifest;
 - the agent granting a delegate to a lending protocol and repaying it;
 - `closeAccount` sweeping dust back to the holder;
-- a Squads config change that *raises* the threshold;
+- a Squads config change that _raises_ the threshold;
 - a program upgrade performed by the declared upgrade authority;
 - an ATA closed and recreated during a mint migration.
 
@@ -680,7 +684,7 @@ against fixtures are worth less than thresholds tuned against traffic.
 
 Steps 1–2 are the ones that stop valid claims being wrongly closed (D7), and
 they ship without touching the program. Everything after that is about being
-able to *pay* one.
+able to _pay_ one.
 
 ---
 

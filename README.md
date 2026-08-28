@@ -49,21 +49,21 @@ Solana (Anchor 1.1.2) · Next.js 16 · Fastify 5 · PostgreSQL 18 · Helius · P
 
 ## Coverage Triggers
 
-| Trigger | Condition | Lock Period |
-|---------|-----------|-------------|
-| Smart Contract Exploit | Balance drop >50% in single slot | 0 hours |
-| Oracle Manipulation | Price deviation >5% from TWAP | 1 hour |
-| Critical Agent Error | Movement outside the holder's declared mandate | 6 hours |
-| Governance Attack | Control of the agent leaves the holder's declared authority set | 2 hours |
+| Trigger                | Condition                                                       | Lock Period |
+| ---------------------- | --------------------------------------------------------------- | ----------- |
+| Smart Contract Exploit | Balance drop >50% in single slot                                | 0 hours     |
+| Oracle Manipulation    | Price deviation >5% from TWAP                                   | 1 hour      |
+| Critical Agent Error   | Movement outside the holder's declared mandate                  | 6 hours     |
+| Governance Attack      | Control of the agent leaves the holder's declared authority set | 2 hours     |
 
-The agent-error trigger covers a loss the agent caused with its *own*
+The agent-error trigger covers a loss the agent caused with its _own_
 authority — which is exactly the case no forensic evidence can separate from a
 deliberate decision, because the difference lives in the holder's intent. So
 the holder declares it in advance: `pnpm mandate:declare` records the envelope
 the agent may operate in — how much it may move at once, over a window, and
 what balance it must never fall below — and the declaration matures an hour
 later. A claim is then proven by comparing the movement against the holder's
-own statement, and the vault pays the amount by which the movement *exceeded*
+own statement, and the vault pays the amount by which the movement _exceeded_
 it, so the declared cap acts as a deductible the holder authored. A loss inside
 the declared envelope is not covered.
 
@@ -77,12 +77,12 @@ the takeover falls outside 30 minutes is not denied, it goes to a reviewer.
 
 ## Risk Tiers
 
-| Tier | Annual Premium | Score Range |
-|------|---------------|-------------|
-| LOW | 1.0% | 0 — 0.25 |
-| MEDIUM | 2.5% | 0.25 — 0.50 |
-| HIGH | 5.0% | 0.50 — 0.75 |
-| EXTREME | Declined | 0.75+ |
+| Tier    | Annual Premium | Score Range |
+| ------- | -------------- | ----------- |
+| LOW     | 1.0%           | 0 — 0.25    |
+| MEDIUM  | 2.5%           | 0.25 — 0.50 |
+| HIGH    | 5.0%           | 0.50 — 0.75 |
+| EXTREME | Declined       | 0.75+       |
 
 ## Development
 
@@ -108,6 +108,7 @@ pnpm mandate:declare --policy <id> --max-single <usdc>   # Declare the agent's o
 - [`docs/API.md`](docs/API.md) — HTTP + WebSocket reference
 - [`docs/LOCAL_DEVELOPMENT.md`](docs/LOCAL_DEVELOPMENT.md) — local setup & troubleshooting
 - [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — production deploy playbook
+- [`docs/M1_RESULTS.md`](docs/M1_RESULTS.md) — measured detection results: corpora, mainnet backtest, coverage limits
 - [`docs/EXPLOIT_DETECTION.md`](docs/EXPLOIT_DETECTION.md) · [`docs/ORACLE_MANIPULATION_DETECTION.md`](docs/ORACLE_MANIPULATION_DETECTION.md) · [`docs/GOVERNANCE_ATTACK_DETECTION.md`](docs/GOVERNANCE_ATTACK_DETECTION.md) · [`docs/AGENT_ERROR_DETECTION.md`](docs/AGENT_ERROR_DETECTION.md) — one per trigger: detection, verification, settlement
 
 ## License

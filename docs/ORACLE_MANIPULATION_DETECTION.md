@@ -8,45 +8,62 @@ Scope: `TriggerType.OracleManipulation` (2) — detection, verification, and set
 ## Implementation status
 
 All eight phases are implemented on `feature/actions-detection-improvement`.
-183 tests pass; `tsc --noEmit` and `eslint src/ tests/` are clean.
+465 API tests pass; `tsc --noEmit` and `eslint src/ tests/` are clean.
+Measured results across all four detectors are in `M1_RESULTS.md`.
 
-| Phase | State | Where |
-|-------|-------|-------|
-| 1 — Evidence spine, block-time anchoring | done | `services/oracle/{types,hash,tx-time}.ts`, `price-sources/pyth-hermes.ts` |
-| 2 — Execution reconstruction | done | `services/oracle/{execution,valuation}.ts`, `shared/src/tokens.ts` |
-| 3 — Multi-source consensus | done | `services/oracle/{consensus.ts,price-sources/cex.ts}` |
-| 4 — Manipulation discriminators | done | `services/oracle/signatures.ts` |
-| 5 — Proactive detection | done | `services/oracle/prefilter.ts`, `workers/oracle-watcher.ts` |
-| 6 — Trust-minimised settlement | code done, **not deployed** | `anchor/.../verify_and_payout_v2.rs`, `services/oracle/proof-poster.ts` |
-| 7 — Determinism and replay | done | `services/oracle/adjudicate.ts`, `scripts/claim-replay.ts` |
-| 8 — Validation harness | partial | `tests/fixtures/corpus.ts`, `tests/oracle-corpus.test.ts` |
+| Phase                                    | State                       | Where                                                                                        |
+| ---------------------------------------- | --------------------------- | -------------------------------------------------------------------------------------------- |
+| 1 — Evidence spine, block-time anchoring | done                        | `services/oracle/{types,hash,tx-time}.ts`, `price-sources/pyth-hermes.ts`                    |
+| 2 — Execution reconstruction             | done                        | `services/oracle/{execution,valuation}.ts`, `shared/src/tokens.ts`                           |
+| 3 — Multi-source consensus               | done                        | `services/oracle/{consensus.ts,price-sources/cex.ts}`                                        |
+| 4 — Manipulation discriminators          | done                        | `services/oracle/signatures.ts`                                                              |
+| 5 — Proactive detection                  | done                        | `services/oracle/prefilter.ts`, `workers/oracle-watcher.ts`                                  |
+| 6 — Trust-minimised settlement           | code done, **not deployed** | `anchor/.../verify_and_payout_v2.rs`, `services/oracle/proof-poster.ts`                      |
+| 7 — Determinism and replay               | done                        | `services/oracle/adjudicate.ts`, `scripts/claim-replay.ts`                                   |
+| 8 — Validation harness                   | done                        | `tests/fixtures/corpus.ts`, `tests/oracle-corpus.test.ts`, `tests/incident-backtest.test.ts` |
 
 **Carried forward, with the reason:**
 
-- *Phase 6 deployment.* **IDL generation is fixed** — the program migrated to
+- _Phase 6 deployment._ **IDL generation is fixed** — the program migrated to
   Anchor 1.1.2 (with `pyth-solana-receiver-sdk` 2.0.0), which replaced the
   `anchor-syn` 0.30.1 `Span::source_file()` call that current Rust removed.
   `anchor build` now produces both the binary and the IDL, and the integration
   suite runs. `ORACLE_PROOF_ENABLED` still stays false until the program is
   **redeployed** — the instruction is built but not yet on devnet.
-- *Corpus A (real incident replay).* The collector is timestamp-driven so
-  mainnet history works unchanged, but 2022 transactions need archival RPC
-  access this environment does not have. Cases drop into
-  `tests/fixtures/corpus.ts` unchanged when it does.
-- *Live devnet attack simulator.* Needs a funded devnet pool with real
+- _Real incident replay._ **Done** — and it did not need a paid archival
+  provider after all. `getTransaction`, `getBlock` and `getBlockTime` all
+  reach long-term storage on the public mainnet endpoint. See
+  `tests/fixtures/incidents/` and `M1_RESULTS.md` §2.3.
+- _Live devnet attack simulator._ Needs a funded devnet pool with real
   liquidity to manipulate. Not built.
-- *Pool-state signals.* `pool_displacement` and `liquidity_drain` need
+- _Pool-state signals._ `pool_displacement` and `liquidity_drain` need
   reserves at a historical slot. They report as **unevaluated**, never as
   absent, and the confidence score is docked for each check that could not run.
-- *Depth-implied slippage.* Not subtracted yet, so `SLIPPAGE_UNCERTAINTY_FLOOR`
+  Note that one question filed under this heading turned out not to need
+  archival state at all: how much of a venue's reserve the _agent's own_ order
+  consumed is in the transaction's own `preTokenBalances`, and is now measured
+  by `venue_depth_self_inflicted`.
+- _Depth-implied slippage._ Not subtracted yet, so `SLIPPAGE_UNCERTAINTY_FLOOR`
   (3%) stands in for it. That biases the loss estimate upward, which is the
   known cost of the gap.
 
-**Coverage limit worth knowing:** liquid staking tokens (JitoSOL, mSOL) are
-priced by Pyth alone — no exchange lists them — so they fall below the
-three-source bar and route to review rather than auto-confirming. Verified
-against live sources: SOL/USD and BTC/USD get four sources, USDC/USD gets
-three, JITOSOL/USD gets one.
+**Coverage limits worth knowing.**
+
+Liquid staking tokens (JitoSOL, mSOL) are priced by Pyth alone — no exchange
+lists them — so they fall below the three-source bar and route to review
+rather than auto-confirming.
+
+Two source counts stated here previously were wrong, and both were found while
+building the backtest. Hermes now answers `401 unauthorized` without a
+credential, and Kraken's public OHLC route serves only a recent window while
+silently answering older requests with the latest candles — so it contributed
+nothing to any _retrospective_ lookup, which is every lookup a claim makes.
+Real retrospective consensus was therefore two sources, not four. OKX and
+Bybit were added on `history-candles` and `kline`, both of which serve minute
+candles years back; SOL/USD, BTC/USD and ETH/USD now get four independent
+exchanges on a February 2022 timestamp, verified against the corpus.
+
+Order-book venues are a separate gap: see `M1_RESULTS.md` §3.2.
 
 ---
 
@@ -61,13 +78,13 @@ walked around, and any claim of perfect recall is marketing, not engineering.
 **Reachable, and what this plan delivers — provable settlement.** Three hard
 guarantees, each testable:
 
-| # | Guarantee | Meaning |
-|---|-----------|---------|
+| #      | Guarantee                          | Meaning                                                                                                                                                                                                                                                 |
+| ------ | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **G1** | **Soundness on the auto-pay lane** | Every automatic payout is backed by a Wormhole-signed Pyth price attestation that the **on-chain program itself verifies**. The backend cannot pay out on a price it invented, and a stolen oracle key cannot drain the vault by asserting a fake loss. |
-| **G2** | **Reproducibility** | The verdict is a *pure function* of an immutable evidence bundle. `sha256(bundle)` is committed on-chain. Anyone replaying the bundle gets a byte-identical verdict, forever. |
-| **G3** | **No silent failure** | Every claim terminates in exactly one of `paid`, `rejected(reasons[])`, `indeterminate→review`. A claim is never rejected because an upstream API returned 429. |
+| **G2** | **Reproducibility**                | The verdict is a _pure function_ of an immutable evidence bundle. `sha256(bundle)` is committed on-chain. Anyone replaying the bundle gets a byte-identical verdict, forever.                                                                           |
+| **G3** | **No silent failure**              | Every claim terminates in exactly one of `paid`, `rejected(reasons[])`, `indeterminate→review`. A claim is never rejected because an upstream API returned 429.                                                                                         |
 
-Recall becomes a *measured, CI-gated metric* against a labelled corpus (§8) rather
+Recall becomes a _measured, CI-gated metric_ against a labelled corpus (§8) rather
 than a promise. False positives on the auto-pay lane are driven to zero **by
 construction** — anything the evidence does not conclusively support goes to the
 review lane instead of being paid.
@@ -88,12 +105,12 @@ Helius webhook ──▶ TransactionMonitor.detectAnomalies ──▶ alert bus 
                                                             (chain trusts the amount)
 ```
 
-| Stage | File | Status |
-|-------|------|--------|
-| Detection | `packages/api/src/services/transaction-monitor.ts:174` | **Missing.** `detectAnomalies` only emits `large_transfer` and `failed_tx`. |
-| Trigger event | `oracle_deviation` | Emitted by **nothing** in production — only `POST /api/demo/simulate-exploit` (`routes/monitoring.ts:188`). |
-| Verification | `services/verifiers/oracle-manipulation.ts` | Works, but on the wrong inputs (§2). |
-| Settlement | `anchor/.../verify_and_payout.rs:36` | Accepts any `payout_amount ≤ coverage` from the oracle signer. No price evidence checked. |
+| Stage         | File                                                   | Status                                                                                                      |
+| ------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| Detection     | `packages/api/src/services/transaction-monitor.ts:174` | **Missing.** `detectAnomalies` only emits `large_transfer` and `failed_tx`.                                 |
+| Trigger event | `oracle_deviation`                                     | Emitted by **nothing** in production — only `POST /api/demo/simulate-exploit` (`routes/monitoring.ts:188`). |
+| Verification  | `services/verifiers/oracle-manipulation.ts`            | Works, but on the wrong inputs (§2).                                                                        |
+| Settlement    | `anchor/.../verify_and_payout.rs:36`                   | Accepts any `payout_amount ≤ coverage` from the oracle signer. No price evidence checked.                   |
 
 **Headline finding:** the production detector for the trigger we sell insurance
 against does not exist. Every `OracleManipulation` claim today originates from the
@@ -110,22 +127,22 @@ Ordered by impact on the three guarantees.
 **D13 — The chain verifies nothing about the price.** `verify_and_payout.rs`
 checks `payout_amount ≤ policy.coverage_amount`, the lock period, and that the
 signer is `config.oracle_authority`. A compromised oracle key pays itself the full
-coverage of every active policy. *Breaks G1.*
+coverage of every active policy. _Breaks G1._
 
 **D12 — No evidence is persisted.** `claims.verification_data` keeps a handful of
 scalars. The signed price update, the slot, the pool state, the source set — none
-of it is stored. Nothing can be audited or replayed after the fact. *Breaks G2.*
+of it is stored. Nothing can be audited or replayed after the fact. _Breaks G2._
 
 ### Correctness of the price reference
 
 **D1 — Wrong point in time.** `oracle-manipulation.ts:137` calls
-`pyth.getSpotPrice()`, which is the price *at verification time*. The trigger tx
+`pyth.getSpotPrice()`, which is the price _at verification time_. The trigger tx
 may be minutes or hours old. A quiet 10% market drift between execution and
 verification manufactures a payout; a drift the other way hides a real attack.
 This is the most severe verification bug.
 
 **D2 — One oracle is used to adjudicate oracle manipulation.** Pyth is both the
-reference *and* a plausible attack surface. If the manipulated feed is the one we
+reference _and_ a plausible attack surface. If the manipulated feed is the one we
 price against, the verifier confirms the attacker's price as fair.
 
 **D3 — The confidence interval is thrown away.** `PythClient.getPrice` returns
@@ -135,7 +152,7 @@ is itself a manipulation signal.
 
 **D4 — A transient outage permanently destroys a valid claim.** Hermes 429 or a
 network blip → `pyth_unavailable` → `verified:false` → `rejectClaim`
-(`claim-keeper.ts:341`). The claim is closed. *Breaks G3.*
+(`claim-keeper.ts:341`). The claim is closed. _Breaks G3._
 
 ### Correctness of the executed price
 
@@ -147,7 +164,7 @@ mis-price. The code also reads `tokenTransfers[]` while `common.ts` already know
 
 **D6 — Pair coverage is effectively zero.** `PRICE_FEED_FOR_MINT` has two entries
 (wSOL and native `SOL`); `STABLE_USDC_MINTS` has two. Everything else short-circuits
-to `no_pyth_feed`. Non-USDC pairs are impossible even when *both* legs have feeds.
+to `no_pyth_feed`. Non-USDC pairs are impossible even when _both_ legs have feeds.
 
 **D9 — Loss ignores the honest cost of trading.** `(implied − spot) × amount`
 charges the vault for the DEX fee tier and for the depth-implied slippage the agent
@@ -221,7 +238,7 @@ Two invariants the layout enforces:
 
 ## 4. Phase 1 — Evidence spine and time correctness
 
-*Fixes D1, D3, D4, D12. Prerequisite for everything else.*
+_Fixes D1, D3, D4, D12. Prerequisite for everything else._
 
 **1.1 Historical, signed prices.** Replace `getSpotPrice` with:
 
@@ -245,6 +262,7 @@ hex Wormhole accumulator update. `binary.data[0]` is the artefact the on-chain
 receiver verifies in Phase 6 — store it verbatim.
 
 **1.2 Anchor the query to the transaction, not to `now`.**
+
 - Add `slot` to `EnhancedTransaction` (Helius returns it; the local type omits it).
 - Cross-check `timestamp` against `getTransaction().blockTime` via `SolanaRpcAnalyzer`.
 - Fetch the last update with `publish_time ≤ blockTime` **and** the first with
@@ -258,8 +276,13 @@ units of `max(conf, σ_floor)`, not raw percent (Phase 4).
 
 ```ts
 type Outcome = 'manipulation' | 'no_manipulation' | 'indeterminate';
-interface Verdict { outcome: Outcome; lossAmount: number; confidence: number;
-                    reasons: Reason[]; retryAfterSec?: number }
+interface Verdict {
+  outcome: Outcome;
+  lossAmount: number;
+  confidence: number;
+  reasons: Reason[];
+  retryAfterSec?: number;
+}
 ```
 
 `claim-keeper.ts:340` must branch on `outcome`, not on a boolean. `indeterminate`
@@ -278,19 +301,19 @@ must never close a claim.**
 
 ## 5. Phase 2 — Correct execution reconstruction
 
-*Fixes D5, D6, D9.*
+_Fixes D5, D6, D9._
 
 **2.1 Net deltas, not transfer legs.** Build the agent's true position change from
 `accountData[].tokenBalanceChanges`, netted per mint, including native SOL from
 `nativeTransfers` minus `fee`. Then classify explicitly:
 
-| Shape | Handling |
-|-------|----------|
-| 1 mint out, 1 mint in | normal swap → price it |
+| Shape                     | Handling                                               |
+| ------------------------- | ------------------------------------------------------ |
+| 1 mint out, 1 mint in     | normal swap → price it                                 |
 | 1 out, N in / N out, 1 in | aggregate the priced side; require every leg priceable |
-| N↔N | `unsupported_shape` → review, never auto-reject |
-| net zero | `self_transfer` → not a swap |
-| wSOL wrap/unwrap present | collapse wSOL and native SOL into one position |
+| N↔N                       | `unsupported_shape` → review, never auto-reject        |
+| net zero                  | `self_transfer` → not a swap                           |
+| wSOL wrap/unwrap present  | collapse wSOL and native SOL into one position         |
 
 **2.2 Real mint registry.** Move to `@covantic/shared`:
 `mint → { feedId, decimals, kind: 'stable' | 'priced' }`. Seed with wSOL, USDC
@@ -311,17 +334,17 @@ explicit unsupported classification — never a wrong number.
 
 ## 6. Phase 3 — Multi-source consensus
 
-*Fixes D2. This is the conceptual core.*
+_Fixes D2. This is the conceptual core._
 
 **Rule: never adjudicate manipulation of feed X using only feed X.**
 
-| Source | What it gives | Independence |
-|--------|---------------|--------------|
-| Pyth Hermes (historical) | signed price + conf at `blockTime` | publisher set A |
-| Switchboard On-Demand | independent aggregate | publisher set B |
-| Jupiter Quote API | routed execution price at the real size | venue-level |
-| On-chain pool state @ slot | `sqrtPrice`/reserves at `slot−1`, `slot`, `slot+1` | the venue itself |
-| CEX klines (Coinbase/Binance, 1-min) | fully off-chain reference | out-of-band |
+| Source                               | What it gives                                      | Independence     |
+| ------------------------------------ | -------------------------------------------------- | ---------------- |
+| Pyth Hermes (historical)             | signed price + conf at `blockTime`                 | publisher set A  |
+| Switchboard On-Demand                | independent aggregate                              | publisher set B  |
+| Jupiter Quote API                    | routed execution price at the real size            | venue-level      |
+| On-chain pool state @ slot           | `sqrtPrice`/reserves at `slot−1`, `slot`, `slot+1` | the venue itself |
+| CEX klines (Coinbase/Binance, 1-min) | fully off-chain reference                          | out-of-band      |
 
 ```
 fairPrice   = weighted median of available sources
@@ -335,13 +358,13 @@ The CEX reference matters more than it looks: it is the only source an on-chain
 attacker cannot touch at all. It is the tiebreak when the chain-native sources split.
 
 **Acceptance.** Poison one source in a test harness → verdict unchanged. Poison two
-→ `indeterminate`, not a payout. That property test *is* the D2 fix.
+→ `indeterminate`, not a payout. That property test _is_ the D2 fix.
 
 ---
 
 ## 7. Phase 4 — Manipulation discriminators
 
-*Fixes D7, D8, D10. This is what separates an attack from a bad trade.*
+_Fixes D7, D8, D10. This is what separates an attack from a bad trade._
 
 ### Hard requirements (all must hold for the auto-pay lane)
 
@@ -354,15 +377,15 @@ attacker cannot touch at all. It is the tiebreak when the chain-native sources s
 
 ### Structural signatures (weighted evidence, ≥1 required)
 
-| Signature | How it is checked | Weight |
-|-----------|-------------------|--------|
-| **Price reversion** | pool price at `slot+1..slot+N` returns to pre-event consensus | highest — honest moves persist, manipulations snap back |
-| Same-slot displacement | pool price at `slot−1` vs `slot` jumps beyond `k·σ` | high |
-| Sandwich / atomic pattern | same signer or funder touches the pool immediately before and after in the block | high |
-| Flash loan co-occurrence | `FLASH_LOAN_PROGRAMS` in the tx or in the attacker's tx in the same slot | high |
-| Oracle conf blowout | Pyth `conf/price` spikes above its trailing baseline at `blockTime` | medium |
-| Publisher divergence | one Pyth publisher deviates from the component median | medium |
-| Liquidity drain-and-restore | reserves drop >X% then recover within N slots | medium |
+| Signature                   | How it is checked                                                                | Weight                                                  |
+| --------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| **Price reversion**         | pool price at `slot+1..slot+N` returns to pre-event consensus                    | highest — honest moves persist, manipulations snap back |
+| Same-slot displacement      | pool price at `slot−1` vs `slot` jumps beyond `k·σ`                              | high                                                    |
+| Sandwich / atomic pattern   | same signer or funder touches the pool immediately before and after in the block | high                                                    |
+| Flash loan co-occurrence    | `FLASH_LOAN_PROGRAMS` in the tx or in the attacker's tx in the same slot         | high                                                    |
+| Oracle conf blowout         | Pyth `conf/price` spikes above its trailing baseline at `blockTime`              | medium                                                  |
+| Publisher divergence        | one Pyth publisher deviates from the component median                            | medium                                                  |
+| Liquidity drain-and-restore | reserves drop >X% then recover within N slots                                    | medium                                                  |
 
 ### Adaptive threshold (replaces the fixed 3%)
 
@@ -390,13 +413,13 @@ positives, and every verdict carries the `reasons[]` that produced it.
 
 ## 8. Phase 5 — Proactive detection
 
-*Fixes the "detector does not exist" gap. Highest value per hour of work.*
+_Fixes the "detector does not exist" gap. Highest value per hour of work._
 
 **5.1 `workers/oracle-watcher.ts`.** Subscribe to the Hermes SSE stream for the feeds
 insured agents are exposed to, plus `onAccountChange` for the pools they actually
 trade. Raise an `oracle_deviation` candidate on cross-source divergence, a conf
 blowout, or a pool-vs-consensus gap — then correlate to insured agents' txs in that
-slot window. This detects the *manipulation event*, not just its victim.
+slot window. This detects the _manipulation event_, not just its victim.
 
 **5.2 Cheap pre-filter in `TransactionMonitor.detectAnomalies`.** Insured agent +
 DEX program + implied price off the cached consensus by more than a loose bound →
@@ -414,7 +437,7 @@ the demo endpoint disabled.
 
 ## 9. Phase 6 — Trust-minimized settlement
 
-*Fixes D13. This is the part that earns the phrase "proof".*
+_Fixes D13. This is the part that earns the phrase "proof"._
 
 **9.1 On-chain price verification.** Add to `packages/anchor/programs/covantic/Cargo.toml`:
 
@@ -439,7 +462,7 @@ policy.evidence_hash = evidence.bundle_hash;
 
 `get_price_no_older_than` is wrong here by construction — it fails on anything older
 than its `maximum_age`, and every claim we settle is retrospective. Use
-`get_price_unchecked` and enforce the *skew against the trigger block time* instead.
+`get_price_unchecked` and enforce the _skew against the trigger block time_ instead.
 
 **9.2 Posting the historical update.** Off-chain, `@pythnetwork/pyth-solana-receiver`:
 `newTransactionBuilder({ closeUpdateAccounts: true })` →
@@ -447,13 +470,13 @@ than its `maximum_age`, and every claim we settle is retrospective. Use
 `addPriceConsumerInstructions(...)` emitting `verify_and_payout_v2`. Rent is
 reclaimed in the same transaction.
 
-*Constraint:* the Wormhole guardian set that signed the VAA must still be accepted
+_Constraint:_ the Wormhole guardian set that signed the VAA must still be accepted
 on-chain. Post the proof inside the existing lock window (oracle manipulation =
 1h), not weeks later. The archived binary blob keeps off-chain replay valid forever
 regardless.
 
-**9.3 The honest boundary.** The chain can verify the *price* cryptographically. It
-cannot read the historical swap transaction, so the *executed* price stays an
+**9.3 The honest boundary.** The chain can verify the _price_ cryptographically. It
+cannot read the historical swap transaction, so the _executed_ price stays an
 oracle-committed input. Three mitigations close that gap as far as Solana allows:
 
 - **(a)** the full bundle is published and its `sha256` committed on-chain — a false
@@ -484,13 +507,22 @@ than an unqualified "100%" that a judge or auditor can puncture in one question.
 
 ## 11. Phase 8 — Validation harness
 
-How the recall claim gets *earned* rather than asserted.
+How the recall claim gets _earned_ rather than asserted.
 
-| Corpus | Contents | Gate |
-|--------|----------|------|
-| **A — real positives** | Historical mainnet manipulations replayed through the collector (Mango Oct-2022, Cypher, thin-pool sandwich cases). The collector is timestamp-driven, so mainnet history works unchanged. | recall ≥ target |
-| **B — hard negatives** | Honest high-slippage swaps in genuinely volatile minutes, legitimate thin-pool trades, stale-route executions, plain agent-error losses. | **FP = 0** |
-| **C — synthetic** | `pnpm attack:simulate` — actually move a thin devnet pool, then swap against it. Real end-to-end positives through the live pipeline. | 100% detected |
+| Corpus                       | Contents                                                                                                                                                                                                                                          | Gate         |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| **A — manipulation shapes**  | Constructed positives: reference held while the fill diverged, flash-loan co-occurrence, multi-hop squeezes.                                                                                                                                      | recall ≥ 0.8 |
+| **B — hard negatives**       | Honest high-slippage swaps in genuinely volatile minutes, legitimate thin-pool trades, stale-route executions, plain agent-error losses.                                                                                                          | **FP = 0**   |
+| **C — real mainnet traffic** | `pnpm backtest:fetch` — 320 real transactions where a wallet ended up holding less, sampled from blocks between 2022 and 2024, plus the Wormhole exploit replayed from mainnet. Committed as cassettes and replayed offline. See `M1_RESULTS.md`. | **FP = 0**   |
+
+Corpus C is the one that found things. Two false positives came out of its
+first run, both invisible to A and B because both needed a real transaction to
+exist: a fill that moved because the order took 75% of the pool's depth, and a
+Serum transaction whose net deltas belong to two different orders. Both are
+fixed; the write-up is in `M1_RESULTS.md` §3.
+
+A live devnet attack simulator (`pnpm attack:simulate`) is still not built. It
+needs a funded devnet pool with real liquidity to manipulate.
 
 Plus: determinism test (same bundle → same verdict), a no-network test proving
 `adjudicate` makes zero I/O, and property tests (`loss ≤ coverage`, deviation
@@ -506,12 +538,12 @@ availability, time-to-verdict, challenge-window activity.
 
 ## 12. Confidence lanes
 
-| Confidence | Conditions | Action |
-|-----------|------------|--------|
-| ≥ 0.95 | all hard requirements met, on-chain proof verified, challenge window clean | auto-pay |
-| 0.70–0.95 | hard requirements met, weak structural evidence | multisig / committee review |
-| < 0.70 | requirements unmet | reject with structured `reasons[]`, appeal path open |
-| `indeterminate` | sources unavailable or in disagreement | retry with backoff → review. **Never auto-reject.** |
+| Confidence      | Conditions                                                                 | Action                                               |
+| --------------- | -------------------------------------------------------------------------- | ---------------------------------------------------- |
+| ≥ 0.95          | all hard requirements met, on-chain proof verified, challenge window clean | auto-pay                                             |
+| 0.70–0.95       | hard requirements met, weak structural evidence                            | multisig / committee review                          |
+| < 0.70          | requirements unmet                                                         | reject with structured `reasons[]`, appeal path open |
+| `indeterminate` | sources unavailable or in disagreement                                     | retry with backoff → review. **Never auto-reject.**  |
 
 `claim-keeper` currently ignores confidence entirely (D11) — this table is the fix.
 
@@ -535,6 +567,7 @@ Phase 6 (on-chain verification) + Phase 7 (replay). This is the headline capabil
 and the honest answer to "how do you know the payout was justified?"
 
 **Risks / dependencies**
+
 - Slot-indexed historical pool state needs archival RPC (Helius archival or Triton).
 - Wormhole guardian-set validity bounds how late a proof can be posted (§9.2).
 - Hermes rate limits → cache by `(feedId, slot)`; the mapping is immutable.

@@ -13,7 +13,7 @@ magnitude because the program can read a balance twice and subtract. A
 governance takeover is provable because the holder declares in advance who may
 control the agent and the program performs a set-membership test.
 
-An *agent error* is a loss the agent caused **with its own authority**. It is
+An _agent error_ is a loss the agent caused **with its own authority**. It is
 precisely the case `adjudicateExploit` rejects as `agent_authorized_movement`.
 Nothing on chain distinguishes a mistake from a decision, because the
 distinction lives in the holder's intent — and intent is not a fact any
@@ -34,18 +34,18 @@ pass; `tsc --noEmit` and `eslint src` are clean; `cargo check` is clean and
 `anchor build --no-idl --ignore-keys` produces the program binary with no
 stack-frame overflow.
 
-| Phase | State | Where |
-|-------|-------|-------|
-| 0 — Stop the bleeding | done | `services/event-vocabulary.ts`, `services/transaction-monitor.ts` |
-| 1 — Mandate on chain | code done, **not deployed** | `anchor/.../state/agent_mandate.rs`, `anchor/.../instructions/declare_agent_mandate.rs` |
-| 2 — Mandate reader + pure breach evaluator | done | `services/agent-error/{mandate,breach}.ts` |
-| 3 — Outflow baseline | done | `services/agent-error/baseline.ts`, `db/migrations/0003_agent_outflow_history.sql` |
-| 4 — Detection that fires | done | `services/agent-error/prefilter.ts`, `transaction-monitor.ts` |
-| 5 — Evidence bundle, pure adjudicator, replay | done | `services/agent-error/{types,adjudicate}.ts`, `scripts/claim-replay.ts` |
-| 6 — Trust-minimised settlement | code done, **not deployed** | `anchor/.../instructions/verify_and_payout_agent_error.rs`, `services/agent-error/proof-poster.ts`, `services/settlement-plan.ts` |
-| 7 — Trigger re-attribution | done | `workers/claim-keeper.ts` |
-| 8 — Validation harness | done | `tests/fixtures/agent-error-corpus.ts`, `tests/agent-error-{corpus,adjudicate,breach}.test.ts` |
-| 9 — Holder CLI | done | `scripts/declare-agent-mandate.ts` (`pnpm mandate:declare`) |
+| Phase                                         | State                       | Where                                                                                                                             |
+| --------------------------------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| 0 — Stop the bleeding                         | done                        | `services/event-vocabulary.ts`, `services/transaction-monitor.ts`                                                                 |
+| 1 — Mandate on chain                          | code done, **not deployed** | `anchor/.../state/agent_mandate.rs`, `anchor/.../instructions/declare_agent_mandate.rs`                                           |
+| 2 — Mandate reader + pure breach evaluator    | done                        | `services/agent-error/{mandate,breach}.ts`                                                                                        |
+| 3 — Outflow baseline                          | done                        | `services/agent-error/baseline.ts`, `db/migrations/0003_agent_outflow_history.sql`                                                |
+| 4 — Detection that fires                      | done                        | `services/agent-error/prefilter.ts`, `transaction-monitor.ts`                                                                     |
+| 5 — Evidence bundle, pure adjudicator, replay | done                        | `services/agent-error/{types,adjudicate}.ts`, `scripts/claim-replay.ts`                                                           |
+| 6 — Trust-minimised settlement                | code done, **not deployed** | `anchor/.../instructions/verify_and_payout_agent_error.rs`, `services/agent-error/proof-poster.ts`, `services/settlement-plan.ts` |
+| 7 — Trigger re-attribution                    | done                        | `workers/claim-keeper.ts`                                                                                                         |
+| 8 — Validation harness                        | done                        | `tests/fixtures/agent-error-corpus.ts`, `tests/agent-error-{corpus,adjudicate,breach}.test.ts`                                    |
+| 9 — Holder CLI                                | done                        | `scripts/declare-agent-mandate.ts` (`pnpm mandate:declare`)                                                                       |
 
 **Corpus result:** 5/5 breach shapes confirmed (recall 1.0 against a 0.8
 floor), 0/11 operational shapes confirmed. The negative set includes every
@@ -53,22 +53,24 @@ shape the retired verifier paid out on.
 
 **Carried forward, with the reason:**
 
-- *Deployment.* `AGENT_ERROR_PROOF_ENABLED` stays false until the program is
+- _Deployment._ `AGENT_ERROR_PROOF_ENABLED` stays false until the program is
   redeployed — it rides the same pending redeploy as the other three flags.
   This one is the flag to be careful with: see §10.
-- *Underwriting cannot price the envelope.* The plan's Phase 9 was "the quote
+- _Underwriting cannot price the envelope._ The plan's Phase 9 was "the quote
   path reads the mandate", and it turns out to be **impossible as designed**.
   See §16 — this is the one place the plan was wrong rather than merely
   incomplete, and the mitigation that shipped instead is narrower than pricing
   would have been.
-- *No UI.* Declaring a mandate is a CLI (`pnpm mandate:declare`), exactly as
+- _No UI._ Declaring a mandate is a CLI (`pnpm mandate:declare`), exactly as
   declaring a governance baseline is. Both need a UI.
-- *Non-USDC assets.* The mandate is denominated in the covered mint, and the
+- _Non-USDC assets._ The mandate is denominated in the covered mint, and the
   settlement instruction reads only the covered ATA. An agent that loses SOL
   or a non-covered SPL token outside its envelope is not covered here.
-- *Real-incident replay.* The corpus holds breach *shapes*, not mainnet
-  replays; archival RPC access is not available in this environment. Cases drop
-  into the same structure unchanged when it is.
+- _Real-incident replay._ **Done** for the pipeline as a whole — 320 real
+  mainnet transactions through all four triggers, zero confirmations. The
+  corpus here still holds breach _shapes_, because an agent-error claim needs
+  a declared mandate and none of those wallets has one, so every real
+  transaction resolves to review on this path. See `M1_RESULTS.md` §2.3.
 
 ---
 
@@ -130,20 +132,20 @@ measure. A categorical-only breach still confirms off chain and still reaches a
 human; it simply never reaches the instruction. `planProvenSettlement` fails it
 closed as `breach_not_chain_checkable`, which matters because a payout that
 reverts is marked `failed`, not `review` — turning a valid claim into a dead
-one. The guarantee is now unconditional: *every proven agent-error payout is
-bounded by an overshoot above a cap the holder signed for.*
+one. The guarantee is now unconditional: _every proven agent-error payout is
+bounded by an overshoot above a cap the holder signed for._
 
 ### Seeding `prev_*` from the new declaration silently disabled the maturity delay
 
 `envelope_at` falls back to `prev_*` when the current declaration had not
-matured before the claim. The natural thing to write for a *first* declaration
+matured before the claim. The natural thing to write for a _first_ declaration
 is `prev_* = the new values, prev_effective_at = now` — which is what
 `declare_governance_baseline` does for its own `prev_token_owner`.
 
 Here that destroys the mechanism completely: the fallback makes a brand-new
 declaration usable as proof the instant it is written, which is exactly what
 the hour-long delay exists to prevent. The Anchor test
-*"refuses a mandate that had not matured when the claim was filed"* caught it.
+_"refuses a mandate that had not matured when the claim was filed"_ caught it.
 A first declaration now has `prev_effective_at = 0`, which fails the maturity
 check and sends the claim to a reviewer.
 
@@ -173,7 +175,7 @@ balance it must never fall below — then "critical agent error" becomes
 doing so."** That is falsifiable, pre-committed, and partly checkable by the
 program itself.
 
-This narrows the covered event. An agent that loses money *inside* its
+This narrows the covered event. An agent that loses money _inside_ its
 declared envelope is not covered, because its owner said that was permitted.
 The narrowing is not a concession — it is the entire mechanism. It is the same
 trade the governance trigger already made when it replaced "was this
@@ -181,11 +183,11 @@ authorised?" with "is this in the declared set?".
 
 With that definition, three guarantees, each testable:
 
-| # | Guarantee | Meaning for an agent-error claim |
-|---|-----------|----------------------------------|
+| #      | Guarantee                          | Meaning for an agent-error claim                                                                                                                                                                                                                                                                                                                           |
+| ------ | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **G1** | **Soundness on the auto-pay lane** | `verify_and_payout_agent_error` reads the covered token account itself, compares it against a checkpoint the program wrote earlier, and refuses to pay more than the drop it measured **or** more than the amount by which that drop exceeded a cap the holder signed for and which matured before the claim was filed. The oracle chooses neither number. |
-| **G2** | **Reproducibility** | The verdict is a pure function of an immutable evidence bundle. `sha256(bundle)` is committed on chain. `pnpm claim:replay` re-derives it forever. Today this trigger produces **no bundle at all** (§2). |
-| **G3** | **No silent failure** | Every claim ends in exactly one of `paid`, `rejected(reason)`, `indeterminate→review`. A missing mandate is `review`, never a rejection: the absence of a declaration is a gap in our records, not evidence against the holder. |
+| **G2** | **Reproducibility**                | The verdict is a pure function of an immutable evidence bundle. `sha256(bundle)` is committed on chain. `pnpm claim:replay` re-derives it forever. Today this trigger produces **no bundle at all** (§2).                                                                                                                                                  |
+| **G3** | **No silent failure**              | Every claim ends in exactly one of `paid`, `rejected(reason)`, `indeterminate→review`. A missing mandate is `review`, never a rejection: the absence of a declaration is a gap in our records, not evidence against the holder.                                                                                                                            |
 
 The honest boundary, stated once and repeated where it bites (§10): **the chain
 can prove how much left and that it exceeded a declared cap. It cannot see the
@@ -210,15 +212,15 @@ Helius webhook ──▶ TransactionMonitor.detectAnomalies ──▶ alert bus 
                                                         decideLane           ──▶ review
 ```
 
-| Stage | File | Status |
-|-------|------|--------|
-| Detection — size | `services/transaction-monitor.ts:264` | Fires on `>1,000` summed `tokenAmount` **across every mint**, unit-blind. |
-| Detection — failure | `services/transaction-monitor.ts:273` | Fires on any `transactionError`. |
-| Detection — the advertised rule | — | **Does not exist.** README and the coverage table promise "Transfer >100x agent average". No per-agent transfer average is computed anywhere in the repo. |
-| Verification | `services/verifiers/agent-error.ts` | Program-membership decision tree. No evidence bundle, no adjudicator, no version. |
-| Replay | `scripts/claim-replay.ts:54` | `engineFor` has no case for trigger 3 → every agent-error claim is `not_replayable`. |
-| Settlement | `services/settlement-plan.ts:80` | Falls through to `legacy` by explicit comment: *"Agent error has no proof path."* |
-| Lane | `services/confidence-lanes.ts:85` | `hasProofPath(3)` is false → every confirmed claim is escalated. |
+| Stage                           | File                                  | Status                                                                                                                                                    |
+| ------------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Detection — size                | `services/transaction-monitor.ts:264` | Fires on `>1,000` summed `tokenAmount` **across every mint**, unit-blind.                                                                                 |
+| Detection — failure             | `services/transaction-monitor.ts:273` | Fires on any `transactionError`.                                                                                                                          |
+| Detection — the advertised rule | —                                     | **Does not exist.** README and the coverage table promise "Transfer >100x agent average". No per-agent transfer average is computed anywhere in the repo. |
+| Verification                    | `services/verifiers/agent-error.ts`   | Program-membership decision tree. No evidence bundle, no adjudicator, no version.                                                                         |
+| Replay                          | `scripts/claim-replay.ts:54`          | `engineFor` has no case for trigger 3 → every agent-error claim is `not_replayable`.                                                                      |
+| Settlement                      | `services/settlement-plan.ts:80`      | Falls through to `legacy` by explicit comment: _"Agent error has no proof path."_                                                                         |
+| Lane                            | `services/confidence-lanes.ts:85`     | `hasProofPath(3)` is false → every confirmed claim is escalated.                                                                                          |
 
 **Headline finding: this trigger is currently a denial-of-coverage vector
 against the other three, and the project's own fleet manufactures it on
@@ -273,7 +275,7 @@ and what it chose was which programs appeared in the transaction.
 
 **D2 — The trigger is the dumping ground.** `EVENT_TO_TRIGGER` routes three
 different event types here (`agent_error`, `large_transfer`, `failed_tx`), two
-of which describe *observations* rather than *losses*. A trigger that means
+of which describe _observations_ rather than _losses_. A trigger that means
 three things means none.
 
 ### Settlement trust
@@ -305,8 +307,8 @@ This is a fabricated number on a payout path, and it sits above
 `MIN_LOSS_RAW`, so it confirms.
 
 **V2 — A reverted transaction is not a loss.** `adjudicateExploit` already
-states the correct reading — *"Transaction reverted; no funds moved. Fee-only
-loss is not an exploit"* — and hands it to this trigger. This trigger should
+states the correct reading — _"Transaction reverted; no funds moved. Fee-only
+loss is not an exploit"_ — and hands it to this trigger. This trigger should
 hand it back: fee burn is an operational signal, not a covered event, unless
 the product decides to cover it explicitly with a declared threshold.
 
@@ -323,7 +325,7 @@ tell an agent error (agent's own authority) from an exploit (someone else's) —
 which is the one distinction that defines this trigger against its neighbour.
 
 **V5 — No holder-destination check.** `isSelfTransfer` compares against the
-agent address only. Value landing in an account the *holder* controls is the
+agent address only. Value landing in an account the _holder_ controls is the
 holder moving their own money; the exploit path checks this
 (`authorization.allDestinationsSelf`), this one does not.
 
@@ -335,12 +337,12 @@ worthless airdrop token trips it; 0.4 WBTC does not. The threshold is a count
 of tokens, compared against a number that was reasoned about as dollars.
 
 **T2 — The advertised rule is unimplemented.** "100x agent average" requires a
-per-agent outflow history. `agent_balance_snapshots` records *holdings*, not
-*flows*, and nothing derives an average from it.
+per-agent outflow history. `agent_balance_snapshots` records _holdings_, not
+_flows_, and nothing derives an average from it.
 
 **T3 — `failed_tx` has no rate dimension.** One failure and a hundred
 failures produce identical, individually-claimable events. If broken-agent
-behaviour is worth covering at all, it is worth covering as a *rate*, and the
+behaviour is worth covering at all, it is worth covering as a _rate_, and the
 loss is fee burn over a window — a quantity nothing currently measures.
 
 **T4 — Specificity ranking is right but untested at the boundary.**
@@ -503,14 +505,14 @@ be written and claimed against in the same breath would prove nothing: a
 holder who wanted to convert an ordinary loss into a covered one would simply
 declare a mandate narrow enough to have been breached, retroactively. With the
 delay, and with `verify_and_payout_agent_error` refusing a mandate that had
-not matured *before the claim was filed*, that manoeuvre has to be committed
+not matured _before the claim was filed_, that manoeuvre has to be committed
 to on chain, in public, an hour ahead of an incident the holder must then
 arrange to happen.
 
 **The opposite abuse, and why it does not work either.** A holder could
 declare an absurdly narrow mandate — `max_single_outflow = 1` — so that every
 transfer breaches it. Three things bound that, and they are meant to ship
-together: the payout is capped by the drop the chain *measured*, so a breach
+together: the payout is capped by the drop the chain _measured_, so a breach
 with no loss pays nothing; `MIN_PROVABLE_MANDATE_BREACH` puts a floor under
 what is worth an instruction at all; and Phase 9 makes the mandate an
 underwriting input, so a mandate that makes ordinary operation a breach is
@@ -535,7 +537,7 @@ pub const MIN_PROVABLE_MANDATE_BREACH: u64 = 1_000_000; // 1 USDC
 `services/agent-error/mandate.ts` reads the PDA and applies the maturity rule,
 mirroring `governance/checkpoint.ts:readBaseline` — including its subtlety:
 the comparison off chain uses the claim row's `createdAt`, which is
-necessarily *earlier* than the `policy.claim_submitted_at` the program will
+necessarily _earlier_ than the `policy.claim_submitted_at` the program will
 use, making the off-chain check strictly stricter. A mandate this accepts is
 one the program will accept, never the reverse.
 
@@ -559,13 +561,13 @@ export interface MandateBreachReport {
 Five dimensions, and the split between them is what §10's trust boundary
 rests on:
 
-| Dimension | Kind | Re-checkable on chain? |
-|-----------|------|------------------------|
-| `single_outflow` | quantitative | **yes** — against the measured drop |
-| `retained_balance` | quantitative | **yes** — against the current balance |
-| `window_outflow` | quantitative | only with a Phase 3 outflow checkpoint |
-| `counterparty` | categorical | no — the program cannot read a past tx |
-| `program` | categorical | no — same |
+| Dimension          | Kind         | Re-checkable on chain?                 |
+| ------------------ | ------------ | -------------------------------------- |
+| `single_outflow`   | quantitative | **yes** — against the measured drop    |
+| `retained_balance` | quantitative | **yes** — against the current balance  |
+| `window_outflow`   | quantitative | only with a Phase 3 outflow checkpoint |
+| `counterparty`     | categorical  | no — the program cannot read a past tx |
+| `program`          | categorical  | no — same                              |
 
 ---
 
@@ -585,7 +587,7 @@ median, p95, and `observedFrom`. Staleness is explicit, following
 `BASELINE_MAX_AGE_SEC`: past the bound, the ratio it supports reports as
 **unevaluated**, never as absent and never as zero.
 
-This baseline is a *detection* input and a confidence input. It is deliberately
+This baseline is a _detection_ input and a confidence input. It is deliberately
 **not** a verdict input on its own: "this transfer is unusual for this agent"
 is a reason to look, not a reason to pay. The mandate is what the verdict rests
 on.
@@ -646,8 +648,8 @@ The decision, in order. The ordering is the design:
 1. `!position || !authorization` → **indeterminate** `incomplete_evidence_bundle`.
 2. `!hasRawTx` → **indeterminate** `no_chain_record`. Authorization is
    unanswerable from the indexer payload, and step 5 turns on it.
-3. `!mandate` → **indeterminate** `no_mandate_declared` → review. *The absence
-   of a declaration is a gap in our records, not the holder's consent.*
+3. `!mandate` → **indeterminate** `no_mandate_declared` → review. _The absence
+   of a declaration is a gap in our records, not the holder's consent._
 4. `mandate.effectiveAt > claimSubmittedAt` → **indeterminate**
    `mandate_not_matured` → review. Never a rejection: a holder who declared
    late is not a holder who lied.
@@ -668,7 +670,7 @@ The decision, in order. The ordering is the design:
 11. Otherwise → **confirmed**, `reason: mandate_breach`, with
     `lossAmount` per §10.
 
-Confidence is scored on how well established the *breach* is, not on how large
+Confidence is scored on how well established the _breach_ is, not on how large
 the loss is: how many dimensions breached and agree, whether the baseline was
 fresh, how much price confidence the valuation carried, and how many checks
 came back `unevaluated`. Same lopsided budget as the exploit adjudicator, for
@@ -742,15 +744,15 @@ been an oracle-supplied boolean choosing which bound applied — discretion,
 inside a proof path whose entire purpose is to remove it.
 
 So the instruction settles only breaches it can measure. `breach_kind` records
-*which* of the two quantitative bounds was crossed — the outflow cap or the
+_which_ of the two quantitative bounds was crossed — the outflow cap or the
 retention floor — and both are re-derived on chain. A categorical-only breach
 still confirms off chain and still reaches a human; `planProvenSettlement`
 fails it closed as `breach_not_chain_checkable` rather than sending a
 transaction that would revert, because the keeper marks a failed payout
 `failed` rather than `review`.
 
-The guarantee is unconditional as a result: *every proven agent-error payout is
-bounded by an overshoot above a cap the holder signed for.* A narrower set of
+The guarantee is unconditional as a result: _every proven agent-error payout is
+bounded by an overshoot above a cap the holder signed for._ A narrower set of
 claims settle automatically than the plan imagined, with a guarantee that has
 no asterisk.
 
@@ -785,9 +787,9 @@ This rides the **same pending redeploy** as the other three proof flags; see
 the program-deploy runbook for the build flags and the keypair trap. One
 asymmetry matters and is specific to this trigger:
 
-- A missing *declaration* resolves to `review` before any RPC, so enabling the
+- A missing _declaration_ resolves to `review` before any RPC, so enabling the
   flag early is harmless — the governance case.
-- A missing *checkpoint* makes the on-chain call revert, and the keeper marks
+- A missing _checkpoint_ makes the on-chain call revert, and the keeper marks
   the claim **`failed`, not `review`** — the exploit case.
 
 Agent error depends on **both**, so it inherits the dangerous half. Do not set
@@ -829,16 +831,16 @@ reusing the `TxSpec` builders from the exploit corpus. The same asymmetric
 gate: **zero confirmations across the negatives is a hard CI failure**, while
 recall across the positives is a tracked number with a floor.
 
-Every negative below is a shape the *current* verifier confirms or would
+Every negative below is a shape the _current_ verifier confirms or would
 confirm. The list is a record of the specific ways a program-membership
 heuristic gets this wrong, kept so the answers cannot quietly revert.
 
 **Negatives — must never confirm**
 
 1. Large swap through an allowed venue, inside the declared cap → `within_mandate`.
-2. Bridge transfer to a declared counterparty → `within_mandate`. *(Today: confirmed at 0.5.)*
-3. Transfer through an unrecognised program to a declared counterparty, inside the cap → `within_mandate`. *(Today: confirmed at 0.6 — the worst false positive in the file.)*
-4. Reverted transaction, fee-only → `transaction_reverted_no_loss`. *(Today: confirmed at 0.6 on an invented 1 USDC.)*
+2. Bridge transfer to a declared counterparty → `within_mandate`. _(Today: confirmed at 0.5.)_
+3. Transfer through an unrecognised program to a declared counterparty, inside the cap → `within_mandate`. _(Today: confirmed at 0.6 — the worst false positive in the file.)_
+4. Reverted transaction, fee-only → `transaction_reverted_no_loss`. _(Today: confirmed at 0.6 on an invented 1 USDC.)_
 5. Transfer between the agent's own token accounts → `self_transfer`.
 6. Holder sweeping the treasury back to a wallet they control → `self_transfer`.
 7. Drain by a foreign transfer authority → `not_agent_authorized` (Exploit).
@@ -872,25 +874,25 @@ is supposed to constrain them.
 
 Both declarations still need a UI.
 
-The other half of the plan's Phase 9 — *the quote path reads the mandate and
-prices it* — could not be built. §16 says why, and what shipped instead.
+The other half of the plan's Phase 9 — _the quote path reads the mandate and
+prices it_ — could not be built. §16 says why, and what shipped instead.
 
 ---
 
 ## 14. Sequencing
 
-| Order | Phase | Blocked by | Needs redeploy |
-|-------|-------|-----------|----------------|
-| 1 | 0 — Stop the bleeding | nothing | no |
-| 2 | 1 — Mandate on chain | — | yes (rides the pending one) |
-| 3 | 2 — Reader + breach evaluator | 1 | no |
-| 4 | 3 — Outflow baseline | — | no |
-| 5 | 4 — Detection | 2, 3 | no |
-| 6 | 5 — Bundle + adjudicator + replay | 2 | no |
-| 7 | 6 — Settlement | 1, 5 | yes |
-| 8 | 7 — Re-attribution | 5 | no |
-| 9 | 8 — Corpus | 5 | no |
-| 10 | 9 — Holder CLI | 1 | no |
+| Order | Phase                             | Blocked by | Needs redeploy              |
+| ----- | --------------------------------- | ---------- | --------------------------- |
+| 1     | 0 — Stop the bleeding             | nothing    | no                          |
+| 2     | 1 — Mandate on chain              | —          | yes (rides the pending one) |
+| 3     | 2 — Reader + breach evaluator     | 1          | no                          |
+| 4     | 3 — Outflow baseline              | —          | no                          |
+| 5     | 4 — Detection                     | 2, 3       | no                          |
+| 6     | 5 — Bundle + adjudicator + replay | 2          | no                          |
+| 7     | 6 — Settlement                    | 1, 5       | yes                         |
+| 8     | 7 — Re-attribution                | 5          | no                          |
+| 9     | 8 — Corpus                        | 5          | no                          |
+| 10    | 9 — Holder CLI                    | 1          | no                          |
 
 Phases 3 and 4 are independent of the on-chain work and can proceed while the
 redeploy is pending. Phase 8 should be written alongside Phase 5, not after it:
@@ -907,7 +909,7 @@ categorical settlement branch the plan specified.
 1. Redeploy the program. Phases 1 and 6 are built and tested but the deployed
    devnet program predates them, so `AGENT_ERROR_PROOF_ENABLED` stays false.
    It rides the same pending redeploy as the other three flags.
-2. Confirm the `exploit-watcher` crank is running *before* setting the flag.
+2. Confirm the `exploit-watcher` crank is running _before_ setting the flag.
    This trigger depends on a fresh balance checkpoint, and a missing one makes
    the payout revert — which the keeper records as `failed`, not `review`.
 3. A UI for declaring a mandate. Until then, holders who never run
@@ -957,21 +959,23 @@ categorical settlement branch the plan specified.
   requires a declaration today. Policies without one resolve to review — the
   intended migration, not a bug.
 - **Detection recall is a measured number, not a promise.** The corpus holds
-  breach *shapes*, not replays of real incidents, for the same reason the other
-  three plans say so: archival RPC access is not available in this environment,
-  and cases drop into the same structure unchanged when it is.
+  breach _shapes_ rather than replays. That is now a statement about this
+  path specifically, not about access: real mainnet transactions are replayed
+  in `tests/incident-backtest.test.ts`, but without a declared mandate they
+  all resolve to review here, so they measure the false-positive side and
+  nothing about recall.
 
 ---
 
 ## 16. The one thing the plan got structurally wrong
 
-The plan's Phase 9 was *"the quote path reads the mandate and folds its width
-into the risk score"*, and it was the stated mitigation for the trigger's
+The plan's Phase 9 was _"the quote path reads the mandate and folds its width
+into the risk score"_, and it was the stated mitigation for the trigger's
 weakest edge: a holder who declares an absurdly narrow envelope so that
 ordinary operation breaches it.
 
 **It cannot be built as described.** `PolicyAgentMandate` is a PDA seeded by
-the *policy*, so it cannot exist before the policy does — and a quote is
+the _policy_, so it cannot exist before the policy does — and a quote is
 issued before there is a policy to seed it from. There is nothing for the quote
 path to read.
 
@@ -985,7 +989,7 @@ genuinely left.
 
 **What shipped instead** is narrower, and it uses the outflow history Phase 3
 built. `adjudicateAgentError` escalates — never rejects — when the declared cap
-sits below the *median* payment the agent has actually been making, because
+sits below the _median_ payment the agent has actually been making, because
 more than half its ordinary operation would breach such an envelope. That is
 either a claim generator or a holder deliberately restraining a misbehaving
 agent, and nothing available to the adjudicator separates those two readings,
@@ -998,8 +1002,8 @@ remaining defences are the ones parametric insurance has always had — the
 coverage limit, the premium, and the rolling payout breaker — plus the fact
 that every declaration and every claim is public.
 
-**The real fix, for whoever picks this up.** Seed the mandate by *agent
-address* rather than by policy, as `RiskAttestation` already is. A holder could
+**The real fix, for whoever picks this up.** Seed the mandate by _agent
+address_ rather than by policy, as `RiskAttestation` already is. A holder could
 then declare before buying, the quote could price the envelope, and
 `create_policy` could require a matured declaration for agent-error coverage.
 It is a change to the account model — seeds, the reader, the poster, the CLI
