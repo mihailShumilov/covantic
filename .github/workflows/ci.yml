@@ -58,20 +58,66 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: 'pnpm'
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/anchor
       - name: Install Solana CLI
         run: |
           sh -c "$(curl -sSfL https://release.anza.xyz/v2.1.21/install)"
           echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+      # From crates.io, not npm. The npm distribution of anchor-cli ships a
+      # launcher that cannot find its own binary and *exits zero* when it
+      # fails, so every `anchor build` and `anchor test` in this job used to
+      # succeed without running: the program was never compiled and the
+      # integration suite never executed, under a green check. It also pinned
+      # 0.31.1, a major version below the one this program needs.
+      #
+      # Keep this equal to `anchor_version` in packages/anchor/Anchor.toml.
+      # The CLI reads that field and goes looking for a matching toolchain
+      # when they differ, which in CI means a download that is not there.
       - name: Install Anchor CLI
-        run: npm i -g @coral-xyz/anchor-cli@0.31.1
-      - run: solana --version && anchor --version && rustc --version
-      - run: cd packages/anchor && anchor build --no-idl
-      - run: cd packages/anchor && anchor test --skip-build
+        run: cargo install anchor-cli --version 1.0.2 --locked
+      # Anchor 1.x runs its integration tests against surfpool, not
+      # solana-test-validator, and fails with "Failed to spawn `surfpool`" if
+      # it is absent — which is what `anchor test` would have done here even
+      # once the CLI itself worked.
+      - name: Install surfpool
+        run: |
+          set -euo pipefail
+          curl -fsSL -o surfpool.tar.gz \
+            https://github.com/txtx/surfpool/releases/download/v1.5.0/surfpool-linux-x64.tar.gz
+          tar -xzf surfpool.tar.gz
+          sudo install -m 0755 surfpool /usr/local/bin/surfpool
+          rm surfpool.tar.gz surfpool
+      # The guard against that failure mode recurring. `set -euo pipefail`
+      # plus an explicit version match means a toolchain that is absent,
+      # broken, or the wrong major fails here rather than silently downgrading
+      # the two steps below into no-ops.
+      - name: Verify toolchain
+        run: |
+          set -euo pipefail
+          solana --version
+          rustc --version
+          anchor --version
+          anchor --version | grep -Eq 'anchor-cli 1\.0\.2'
+          surfpool --version
+      - run: pnpm install --frozen-lockfile
+      # --ignore-keys because the deploy keypair is not in the repo: a fresh
+      # checkout generates a new one, and Anchor then refuses to build over
+      # the program ID declared in the source. Syncing instead would rewrite
+      # `declare_id!` to a key nothing is deployed under.
+      - run: cd packages/anchor && anchor build --no-idl --ignore-keys
+      # --provider.cluster localnet, explicitly: Anchor.toml sets the provider
+      # to devnet for day-to-day work, and inheriting that here would have the
+      # test run deploy to a live cluster with a wallet CI does not have.
+      - run: cd packages/anchor && anchor test --skip-build --provider.cluster localnet
 
   test-web:
     runs-on: ubuntu-latest
