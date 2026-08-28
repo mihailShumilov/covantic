@@ -25,6 +25,11 @@ RUN pnpm --filter shared build && pnpm --filter api build
 EXPOSE 4000
 # Drop privileges. The image only reads from /app and writes nothing at
 # runtime, so there is no reason for the process to be root.
+#
+# One deployment consequence, learned the hard way: the mounted key material
+# in ./keys must be readable by uid 1000. It was root-owned 0600 and every
+# container using it failed with EACCES on the first deploy of this image.
+# `chown -R 1000:1000 docker/keys` — chown only; the 0600 stays.
 USER node
 
 CMD ["pnpm", "--filter", "api", "start"]

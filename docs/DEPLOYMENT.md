@@ -13,6 +13,7 @@ bash scripts/setup-server.sh
 ```
 
 The script will:
+
 1. Install Docker, Git, and configure the firewall
 2. Clone the repo (or pull latest)
 3. Generate `.env` with a strong DB password — pauses for you to fill in API keys
@@ -24,13 +25,13 @@ The script will:
 
 ## What You Need Before Starting
 
-| Item | Where to get it |
-|------|----------------|
-| Ubuntu VDS (Hetzner, etc.) | Any provider with Docker support |
-| Domain DNS A record | Point `covantic.org` → server IP |
-| Helius API key | https://dev.helius.xyz/ |
-| Oracle keypair | `solana-keygen new -o keys/oracle-keypair.json` |
-| USDC mint (devnet) | Created by `scripts/setup-local.sh` or manually |
+| Item                       | Where to get it                                 |
+| -------------------------- | ----------------------------------------------- |
+| Ubuntu VDS (Hetzner, etc.) | Any provider with Docker support                |
+| Domain DNS A record        | Point `covantic.org` → server IP                |
+| Helius API key             | https://dev.helius.xyz/                         |
+| Oracle keypair             | `solana-keygen new -o keys/oracle-keypair.json` |
+| USDC mint (devnet)         | Created by `scripts/setup-local.sh` or manually |
 
 ## Manual Setup (Step by Step)
 
@@ -80,6 +81,7 @@ NEXT_PUBLIC_WS_URL=wss://covantic.org
 ```
 
 Copy oracle keypair:
+
 ```bash
 mkdir -p docker/keys
 # From your local machine:
@@ -172,11 +174,13 @@ PostgreSQL (5432) and Redis (6379) are NOT exposed — only accessible within th
 ### Update & Redeploy
 
 **One command** (pulls, builds, migrates, restarts):
+
 ```bash
 bash scripts/deploy.sh
 ```
 
 **Quick update** (rebuild only changed services):
+
 ```bash
 cd ~/covantic
 git pull --ff-only
@@ -187,11 +191,13 @@ docker image prune -f
 ```
 
 **Restart without rebuild:**
+
 ```bash
 docker compose -f docker/docker-compose.prod.yml --env-file .env restart api web monitor
 ```
 
 **Restart single service:**
+
 ```bash
 docker compose -f docker/docker-compose.prod.yml --env-file .env restart api
 ```
@@ -230,20 +236,22 @@ $COMPOSE ps                   # service status
 
 ## Troubleshooting
 
-| Problem | Fix |
-|---------|-----|
-| API 500 errors | `$COMPOSE logs api` — check DB connection |
-| Nginx 502 | Service not ready — `$COMPOSE ps`, rebuild if needed |
-| SSL cert expired | `$COMPOSE exec certbot certbot renew --force-renewal` then `$COMPOSE exec nginx nginx -s reload` |
-| Out of disk | `docker system prune -a` (removes all unused images) |
-| DB migration fail | `$COMPOSE exec postgres psql -U covantic -d covantic` to debug |
-| Container won't start | `$COMPOSE logs <service>` — check for env var issues |
-| Build fails (node-gyp) | Dockerfile.web includes `python3 make g++ linux-headers eudev-dev` — ensure it's up to date |
-| Helius webhook 401 | Token mismatch between Helius and `HELIUS_WEBHOOK_SECRET`. Re-run `sync-helius-webhook.ts` after rotating the secret. |
-| Insured events not firing claims | `curl https://covantic.org/api/monitoring/metrics` — if `monitor.matched:active` stays 0, the webhook or its address list is wrong. Re-run the sync script. |
+| Problem                                | Fix                                                                                                                                                                                         |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| API 500 errors                         | `$COMPOSE logs api` — check DB connection                                                                                                                                                   |
+| Nginx 502                              | Service not ready — `$COMPOSE ps`, rebuild if needed                                                                                                                                        |
+| SSL cert expired                       | `$COMPOSE exec certbot certbot renew --force-renewal` then `$COMPOSE exec nginx nginx -s reload`                                                                                            |
+| Out of disk                            | `docker system prune -a` (removes all unused images)                                                                                                                                        |
+| DB migration fail                      | `$COMPOSE exec postgres psql -U covantic -d covantic` to debug                                                                                                                              |
+| Container won't start                  | `$COMPOSE logs <service>` — check for env var issues                                                                                                                                        |
+| Build fails (node-gyp)                 | Dockerfile.web includes `python3 make g++ linux-headers eudev-dev` — ensure it's up to date                                                                                                 |
+| Helius webhook 401                     | Token mismatch between Helius and `HELIUS_WEBHOOK_SECRET`. Re-run `sync-helius-webhook.ts` after rotating the secret.                                                                       |
+| Insured events not firing claims       | `curl https://covantic.org/api/monitoring/metrics` — if `monitor.matched:active` stays 0, the webhook or its address list is wrong. Re-run the sync script.                                 |
 | Policies stuck as `Active` past expiry | `curl .../api/policies/<id>/why-active` — `owner-mismatch` = stale DB row, auto-heals on next indexer tick. `rpc-error` = RPC flaky; check oracle wallet SOL balance (expiry-crank signer). |
-| Claim never pays out after trigger | Check `ALERT_HMAC_SECRET` matches across monitor + api + claim-keeper containers; unsigned alerts are dropped silently. |
-| Oracle wallet out of SOL | On-chain crank (expire_policy) and attestation publisher need gas. Top up with `solana airdrop` on devnet or send SOL on mainnet. |
+| Claim never pays out after trigger     | Check `ALERT_HMAC_SECRET` matches across monitor + api + claim-keeper containers; unsigned alerts are dropped silently.                                                                     |
+| `EACCES` opening `/app/keys/*.json`    | The api/monitor/fleet containers run as `node` (uid 1000), and the key material is mounted from `docker/keys`. `chown -R 1000:1000 docker/keys` — chown only, leave the `0600` alone.       |
+| A `*_PROOF_ENABLED` flag has no effect | There is no `env_file` in the compose stack: a variable reaches a container only if it is named in that service's `environment:` block. Setting one in `.env` alone changes nothing.        |
+| Oracle wallet out of SOL               | On-chain crank (expire_policy) and attestation publisher need gas. Top up with `solana airdrop` on devnet or send SOL on mainnet.                                                           |
 
 ## Architecture
 
