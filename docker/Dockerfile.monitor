@@ -18,6 +18,9 @@ RUN pnpm --filter shared build && pnpm --filter api build
 
 # Drop privileges. The image only reads from /app and writes nothing at
 # runtime, so there is no reason for the process to be root.
+#
+# The mounted key material in ./keys must be readable by uid 1000 — see the
+# note in Dockerfile.api. `chown -R 1000:1000 docker/keys`, chown only.
 USER node
 
 CMD ["pnpm", "--filter", "api", "run", "monitor"]

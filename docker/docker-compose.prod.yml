@@ -15,7 +15,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U covantic"]
+      test: ['CMD-SHELL', 'pg_isready -U covantic']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -35,7 +35,7 @@ services:
     volumes:
       - redisdata:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      test: ['CMD', 'redis-cli', '-a', '${REDIS_PASSWORD}', 'ping']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -60,6 +60,20 @@ services:
       PROGRAM_ID: ${PROGRAM_ID}
       ORACLE_KEYPAIR_PATH: /app/keys/oracle-keypair.json
       USDC_MINT: ${USDC_MINT}
+      # Proof paths. Off until the program carrying the four verify_and_payout
+      # instructions is deployed — enabling one against an older program makes
+      # every payout on that trigger fail. They have to be listed here to be
+      # settable at all: there is no `env_file`, so a variable that is not
+      # named in this block never reaches the process, and setting it in .env
+      # would look like it worked while changing nothing.
+      ORACLE_PROOF_ENABLED: ${ORACLE_PROOF_ENABLED:-false}
+      EXPLOIT_PROOF_ENABLED: ${EXPLOIT_PROOF_ENABLED:-false}
+      GOVERNANCE_PROOF_ENABLED: ${GOVERNANCE_PROOF_ENABLED:-false}
+      AGENT_ERROR_PROOF_ENABLED: ${AGENT_ERROR_PROOF_ENABLED:-false}
+      # The public Hermes host answers 401 without a credential; unset, Pyth
+      # simply drops out of the price consensus and says so in the bundle.
+      PYTH_HERMES_URL: ${PYTH_HERMES_URL:-}
+      PYTH_HERMES_API_KEY: ${PYTH_HERMES_API_KEY:-}
       PORT: 4000
       LOG_LEVEL: info
     volumes:
@@ -90,6 +104,20 @@ services:
       PROGRAM_ID: ${PROGRAM_ID}
       ORACLE_KEYPAIR_PATH: /app/keys/oracle-keypair.json
       USDC_MINT: ${USDC_MINT}
+      # Proof paths. Off until the program carrying the four verify_and_payout
+      # instructions is deployed — enabling one against an older program makes
+      # every payout on that trigger fail. They have to be listed here to be
+      # settable at all: there is no `env_file`, so a variable that is not
+      # named in this block never reaches the process, and setting it in .env
+      # would look like it worked while changing nothing.
+      ORACLE_PROOF_ENABLED: ${ORACLE_PROOF_ENABLED:-false}
+      EXPLOIT_PROOF_ENABLED: ${EXPLOIT_PROOF_ENABLED:-false}
+      GOVERNANCE_PROOF_ENABLED: ${GOVERNANCE_PROOF_ENABLED:-false}
+      AGENT_ERROR_PROOF_ENABLED: ${AGENT_ERROR_PROOF_ENABLED:-false}
+      # The public Hermes host answers 401 without a credential; unset, Pyth
+      # simply drops out of the price consensus and says so in the bundle.
+      PYTH_HERMES_URL: ${PYTH_HERMES_URL:-}
+      PYTH_HERMES_API_KEY: ${PYTH_HERMES_API_KEY:-}
       LOG_LEVEL: info
     volumes:
       - ./keys:/app/keys:ro
@@ -110,8 +138,7 @@ services:
   fleet:
     image: covantic-api:latest
     container_name: covantic-fleet
-    command:
-      ["pnpm", "--filter", "api", "exec", "tsx", "scripts/fleet-start.ts"]
+    command: ['pnpm', '--filter', 'api', 'exec', 'tsx', 'scripts/fleet-start.ts']
     environment:
       NODE_ENV: production
       SOLANA_NETWORK: ${SOLANA_NETWORK:-devnet}
@@ -161,8 +188,8 @@ services:
     # stale cert from memory until a manual restart -> TLS expiry outage.
     command: /bin/sh -c "trap exit TERM; while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g 'daemon off;'"
     ports:
-      - "80:80"
-      - "443:443"
+      - '80:80'
+      - '443:443'
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
