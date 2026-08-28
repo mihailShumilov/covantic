@@ -91,6 +91,11 @@ export const UNRESOLVABLE_PARK_REASONS: readonly string[] = [
   'no_mandate_declared',
   'governance_baseline_not_matured',
   'mandate_not_matured',
+  // Not a declaration problem, the same dead end by another route: a claim
+  // that cannot locate its own trigger transaction has nothing to adjudicate,
+  // and the keeper only settles on this after exhausting its retries. Holding
+  // the slot on it keeps a policy deaf for no benefit.
+  'trigger_tx_not_found',
 ] as const;
 
 /** True when a parked claim is waiting on a declaration that cannot arrive in
