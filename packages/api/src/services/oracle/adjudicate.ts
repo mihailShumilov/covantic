@@ -28,6 +28,17 @@ export const ADJUDICATOR_VERSION = '1.0.0';
 
 export type Outcome = 'confirmed' | 'rejected' | 'indeterminate';
 
+/**
+ * Share of a venue's reserve above which the agent's own order, rather than
+ * anyone's manipulation, is what set the fill price.
+ *
+ * Half is not a tuned number, it is a structural one: an order taking half a
+ * constant-product pool's reserve moves that pool's price by at least 100%
+ * whatever anyone else did first, so the execution shortfall is fully
+ * accounted for without a second explanation.
+ */
+const DOMINANT_DEPTH_SHARE = 0.5;
+
 export interface Verdict {
   outcome: Outcome;
   lossAmount: number;
@@ -182,6 +193,53 @@ export function adjudicate(bundle: EvidenceBundle): Verdict {
   const lossAmount = capToCoverage(uiToRaw(excessLossUsd), bundle.coverageRaw);
   if (lossAmount < MIN_PAYABLE_LOSS_RAW) {
     return rejected('loss_below_dust', { ...facts, lossAmount, floor: MIN_PAYABLE_LOSS_RAW });
+  }
+
+  // The agent's own order size, if it was most of the venue, explains the
+  // fill on its own. Checked before the manipulation shapes because it is an
+  // answer to the same evidence: a fill far off an unmoved reference is what
+  // both a squeeze and a market order into a thin pool look like, and only
+  // one of them is a covered event.
+  // An order book first, because it is the stronger objection: where the net
+  // deltas are not one exchange, the deviation computed from them is not a
+  // measurement of anything and there is nothing for the depth rule to weigh.
+  if (signatures?.findings.some((f) => f.id === 'orderbook_settlement' && f.present === true)) {
+    return indeterminate(
+      'orderbook_execution_not_reconstructible',
+      {
+        ...facts,
+        note:
+          'Fill and settlement legs on an order book belong to different orders and cannot ' +
+          "be paired from balance deltas alone. Measuring this properly needs the market's " +
+          'own fill records; until then the honest answer is a reviewer, not a number.',
+      },
+      1_800,
+    );
+  }
+
+  const depth = signatures?.findings.find((f) => f.id === 'venue_depth_self_inflicted');
+  const depthShare = typeof depth?.detail.depthShare === 'number' ? depth.detail.depthShare : null;
+
+  if (depth?.present === true && depthShare !== null) {
+    const depthFacts = { ...facts, depthShare, dominantShare: DOMINANT_DEPTH_SHARE };
+
+    if (depthShare >= DOMINANT_DEPTH_SHARE) {
+      // Past this point the pool's curve accounts for the shortfall
+      // arithmetically. Denying is a statement the evidence supports, not a
+      // guess: the venue's own reserves say where the price came from.
+      return rejected('slippage_explained_by_order_size', depthFacts);
+    }
+    return indeterminate(
+      'material_self_inflicted_slippage',
+      {
+        ...depthFacts,
+        note:
+          'The order took a large enough share of the venue to move the price by itself. ' +
+          'That does not rule out manipulation on top of it, and separating the two needs a ' +
+          'reviewer rather than a threshold.',
+      },
+      1_800,
+    );
   }
 
   // A bad price is not an attack without a shape to go with it. Nothing

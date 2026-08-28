@@ -25,11 +25,13 @@ import {
  *   - the positives are manipulation *shapes* (reference held while the fill
  *     diverged, flash-loan co-occurrence), not replays of real incidents.
  *
- * Replaying real mainnet incidents needs archival access to transactions from
- * 2022, which the collector supports (it is timestamp-driven) but this
- * environment has no credentials for. Those cases belong in this same
- * structure once an archival endpoint is available; the runner does not care
- * where a case came from.
+ * Real mainnet transactions live next door, in
+ * `tests/incident-backtest.test.ts` and `fixtures/incidents/`. That corpus
+ * covers what this one structurally cannot — transactions nobody imagined —
+ * and it found two false positives on its first run that every case here
+ * passes. Neither file replaces the other: this one pins the specific answers
+ * that must not regress, that one asks whether the answers hold up against
+ * traffic nobody chose.
  */
 
 export const AGENT = 'AgentWalletAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -377,7 +379,9 @@ export const NEGATIVES: CorpusCase[] = [
     label: 'negative',
     why: 'Nothing was traded, so nothing was mispriced.',
     tx: mkTx({
-      instructions: [{ programId: 'UnknownProgram1111111111111111111111111111', accounts: [], data: '' }],
+      instructions: [
+        { programId: 'UnknownProgram1111111111111111111111111111', accounts: [], data: '' },
+      ],
       accountData: [
         delta('ata-usdc', USDC_MINT, -250_000_000, 6),
         delta('ata-sol', WRAPPED_SOL, 1_000_000_000, 9),

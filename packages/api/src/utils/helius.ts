@@ -35,6 +35,29 @@ const KNOWN_DEX_PROGRAMS = new Set([
   'Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB', // Meteora Pools
 ]);
 
+/**
+ * Central-limit order books.
+ *
+ * A subset of {@link KNOWN_DEX_PROGRAMS}, kept separately because the net
+ * balance change of a transaction means something different here. On an AMM
+ * or an aggregator route, what left and what arrived are the two sides of one
+ * exchange. On an order book they need not be related at all: a single
+ * transaction routinely posts a new order — depositing the asset it offers —
+ * while settling the proceeds of a different order that matched minutes
+ * earlier. Netting the two produces an implied price for a trade that never
+ * happened.
+ *
+ * That is not hypothetical. A Serum market-making transaction in the backtest
+ * corpus posts 2.549 SOL for a new order and settles 322.88 USDC from an
+ * earlier one; read as a swap it implies $126 per SOL against a $172 market,
+ * and the pipeline confirmed a $116 manipulation loss on it.
+ */
+const ORDERBOOK_PROGRAMS = new Set([
+  'srmqPvymJeFKQ4zGQed1GFppgkRHL9kaELCbyksJtPX', // Serum v3 / OpenBook v1
+  'opnb2LAfJYbRMAHHvqjCwQxanZn7ReEHp1k81EohpZb', // OpenBook v2
+  'PhoeNiXZ8ByJGLkxNfZRnkUfjvmuYqLR89jjFHGqdXY', // Phoenix
+]);
+
 /** Known bridge program IDs */
 const KNOWN_BRIDGE_PROGRAMS = new Set([
   'wormDTUJ6AWPNvk59vGQbDvGJmqbDTdgWgAqcLBCgUb', // Wormhole
@@ -269,6 +292,7 @@ export class HeliusClient {
 
 export {
   KNOWN_DEX_PROGRAMS,
+  ORDERBOOK_PROGRAMS,
   KNOWN_BRIDGE_PROGRAMS,
   KNOWN_RISKY_PATTERNS,
   FLASH_LOAN_PROGRAMS,

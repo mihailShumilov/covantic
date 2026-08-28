@@ -31,10 +31,11 @@ import { BLOCK_TIME, COVERAGE_RAW, type TxSpec } from './exploit-corpus.js';
  * ordinary operations. So any confirmation on the negatives fails the build,
  * with no allowance, while recall on the positives is a tracked floor.
  *
- * What is here and what is not: these are breach and operation *shapes*, not
- * replays of real incidents. Replaying mainnet history needs archival RPC
- * access this environment does not have; those cases drop into this same
- * structure unchanged when it does.
+ * What is here and what is not: these are breach and operation *shapes*. Real
+ * mainnet transactions are replayed in `tests/incident-backtest.test.ts`, but
+ * an agent-error verdict needs a declared mandate and the sampled wallets have
+ * none, so every one of them resolves to review on this path. The
+ * discrimination this file tests has to be tested here.
  */
 
 export { BLOCK_TIME, COVERAGE_RAW };
@@ -282,10 +283,7 @@ export const NEGATIVES: AgentErrorCase[] = [
     tx: {
       signers: [AGENT],
       otherKeys: [AGENT_USDC_ATA, OTHER_ATA],
-      pre: [
-        bal(AGENT_USDC_ATA, AGENT, OPENING_BALANCE),
-        bal(OTHER_ATA, AGENT, 0, SCAM_MINT),
-      ],
+      pre: [bal(AGENT_USDC_ATA, AGENT, OPENING_BALANCE), bal(OTHER_ATA, AGENT, 0, SCAM_MINT)],
       post: [
         bal(AGENT_USDC_ATA, AGENT, OPENING_BALANCE - 900 * 10 ** 6),
         bal(OTHER_ATA, AGENT, 1_000_000_000, SCAM_MINT),

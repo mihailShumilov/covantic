@@ -22,10 +22,11 @@ import { SQUADS_V4 } from './governance.js';
  * "a governance program appeared and some balance moved" gets this wrong,
  * kept so the answers cannot quietly revert.
  *
- * What is here and what is not: these are takeover and operation *shapes*,
- * not replays of real incidents. Replaying mainnet history needs archival RPC
- * access this environment does not have; those cases drop into this same
- * structure unchanged when it does.
+ * What is here and what is not: these are takeover and operation *shapes*.
+ * Real mainnet transactions are replayed in `tests/incident-backtest.test.ts`,
+ * but a governance verdict needs a declared baseline and the sampled wallets
+ * have none, so every one of them resolves to review on this path. The
+ * discrimination this file tests has to be tested here.
  */
 
 export const OPERATOR = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';

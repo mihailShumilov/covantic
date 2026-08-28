@@ -1,4 +1,5 @@
 import type { Connection } from '@solana/web3.js';
+import { fetchRawTxView } from '../exploit/raw-tx.js';
 import { logger } from '../../utils/logger.js';
 import type { EnhancedTransaction } from '../../utils/helius.js';
 import type { ProgramClassification } from '../verifiers/common.js';
@@ -34,7 +35,13 @@ export type SignatureId =
   | 'flash_loan_present'
   | 'sandwich_adjacent'
   | 'pool_displacement'
-  | 'liquidity_drain';
+  | 'liquidity_drain'
+  /** Exculpatory: the fill moved because the agent's own order was most of
+   *  the venue's depth. Never counts towards the manipulation score. */
+  | 'venue_depth_self_inflicted'
+  /** Exculpatory: the venue is an order book, so the transaction's net
+   *  balance change need not be one exchange at all. */
+  | 'orderbook_settlement';
 
 export interface SignatureFinding {
   id: SignatureId;
@@ -67,6 +74,9 @@ export interface SignatureContext {
   blockTime: number;
   slot: number | null;
   oracle: PriceOracle;
+  /** The insured wallet. Needed to tell the agent's own accounts from the
+   *  venue's, which is the whole of the depth calculation. */
+  agentAddress: string;
   /** Feed of the leg carrying the deviation. */
   subjectFeedKey: string;
   /** Price the fill implies for that leg's asset. */
@@ -92,6 +102,23 @@ const REFERENCE_HELD_RATIO = 0.5;
 /** Confidence or dispersion this many times its own recent baseline is a
  *  dislocation, not noise. */
 const BLOWOUT_MULTIPLE = 3;
+
+/**
+ * Signatures that argue *against* manipulation.
+ *
+ * They are findings like any other and belong in the bundle, but they must
+ * never reach `present[]` or `score`: the adjudicator treats a non-empty
+ * `present[]` as "there is a manipulation shape here", and an exculpatory
+ * finding satisfying that test would be precisely backwards.
+ */
+const EXCULPATORY: ReadonlySet<SignatureId> = new Set([
+  'venue_depth_self_inflicted',
+  'orderbook_settlement',
+]);
+
+/** Below this share of a venue's pre-trade reserve, an order is a price
+ *  taker and its own impact is not the story. */
+const DEPTH_SHARE_FLOOR = 0.1;
 
 export async function collectSignatures(ctx: SignatureContext): Promise<SignatureReport> {
   const findings: SignatureFinding[] = [];
@@ -182,14 +209,39 @@ export async function collectSignatures(ctx: SignatureContext): Promise<Signatur
     });
   }
 
+  // --- was this an order book rather than a swap? --------------------------
+  findings.push({
+    id: 'orderbook_settlement',
+    present: ctx.programs.orderBook,
+    weight: 0,
+    detail: {
+      note:
+        'A central-limit order book was invoked. Posting an order and settling an earlier ' +
+        'one happen in the same transaction, so the net balance change is not necessarily ' +
+        'a single fill and the implied price derived from it is not necessarily a price.',
+    },
+  });
+
+  // --- did the agent's own order move the venue? ----------------------------
+  const depth = await measureVenueDepthImpact(ctx);
+  if (depth.present === null) {
+    unevaluated.push({ id: 'venue_depth_self_inflicted', reason: depth.reason });
+  } else {
+    findings.push({
+      id: 'venue_depth_self_inflicted',
+      present: depth.present,
+      weight: 0,
+      detail: depth.detail,
+    });
+  }
+
   // --- not yet implementable ------------------------------------------------
   unevaluated.push({ id: 'pool_displacement', reason: 'needs_archival_pool_state' });
   unevaluated.push({ id: 'liquidity_drain', reason: 'needs_archival_pool_state' });
 
-  const present = findings.filter((f) => f.present === true).map((f) => f.id);
-  const score = findings
-    .filter((f) => f.present === true)
-    .reduce((sum, f) => sum + f.weight, 0);
+  const scored = findings.filter((f) => f.present === true && !EXCULPATORY.has(f.id));
+  const present = scored.map((f) => f.id);
+  const score = scored.reduce((sum, f) => sum + f.weight, 0);
 
   return {
     findings,
@@ -199,6 +251,104 @@ export async function collectSignatures(ctx: SignatureContext): Promise<Signatur
     referenceVolatility,
     referenceDriftRatio,
     sampledAt: series.samples.map((s) => s.at),
+  };
+}
+
+/**
+ * How much of the venue's own reserve the agent's order consumed.
+ *
+ * A constant-product pool prices an order against its reserves, so an order
+ * that takes most of one side moves the price by arithmetic, not by anyone's
+ * intent. The distinction matters more than it might sound: "the fill was far
+ * off every reference and the references never moved" is *also* what taking
+ * three quarters of a pool looks like, which is how the first real
+ * transaction this pipeline was ever backtested against — the Wormhole
+ * attacker buying $18M of SOL out of a pool holding 162,000 — came back
+ * confirmed as oracle manipulation with a $5M loss.
+ *
+ * The measurement needs the venue's balance *before* the trade, and the
+ * transaction carries it: `preTokenBalances` covers every account the
+ * transaction touched, the agent's and the venue's alike. That is why this
+ * runs where `pool_displacement` cannot. Displacement asks what a third party
+ * did to the pool beforehand and genuinely needs an archival slot read; this
+ * asks only what the agent's own order did, and the answer is in the
+ * transaction's own record.
+ *
+ * Reported as the largest share taken from any single account the agent does
+ * not own. Absent an owner on a balance entry the account is skipped rather
+ * than assumed foreign — attributing the agent's own vault to the venue would
+ * invent an impact that never happened.
+ */
+async function measureVenueDepthImpact(ctx: SignatureContext): Promise<{
+  present: boolean | null;
+  reason: string;
+  detail: Record<string, unknown>;
+}> {
+  if (!ctx.connection) {
+    return { present: null, reason: 'no_connection', detail: {} };
+  }
+
+  const view = await fetchRawTxView(ctx.connection, ctx.tx.signature);
+  if (!view) return { present: null, reason: 'chain_record_unavailable', detail: {} };
+
+  const before = new Map<string, { amountRaw: number; owner: string | null; mint: string }>();
+  for (const snap of view.preTokenBalances) {
+    before.set(snap.account, { amountRaw: snap.amountRaw, owner: snap.owner, mint: snap.mint });
+  }
+
+  let worst: {
+    account: string;
+    mint: string;
+    share: number;
+    preRaw: number;
+    takenRaw: number;
+  } | null = null;
+
+  for (const snap of view.postTokenBalances) {
+    const pre = before.get(snap.account);
+    if (!pre || pre.owner === null || pre.owner === ctx.agentAddress) continue;
+    if (pre.amountRaw <= 0) continue;
+
+    // Only reserves the agent drew *down*. A venue account that grew is the
+    // side the agent paid into, and paying into a pool is not price impact
+    // the agent suffered.
+    const taken = pre.amountRaw - snap.amountRaw;
+    if (taken <= 0) continue;
+
+    const share = taken / pre.amountRaw;
+    if (!worst || share > worst.share) {
+      worst = {
+        account: snap.account,
+        mint: pre.mint,
+        share,
+        preRaw: pre.amountRaw,
+        takenRaw: taken,
+      };
+    }
+  }
+
+  if (!worst) {
+    return {
+      present: false,
+      reason: 'no_venue_reserve_drawn',
+      detail: { note: 'No account outside the agent gave up a balance it held before.' },
+    };
+  }
+
+  return {
+    present: worst.share >= DEPTH_SHARE_FLOOR,
+    reason: 'measured',
+    detail: {
+      depthShare: Number(worst.share.toFixed(6)),
+      account: worst.account,
+      mint: worst.mint,
+      reserveBeforeRaw: worst.preRaw,
+      takenRaw: worst.takenRaw,
+      floor: DEPTH_SHARE_FLOOR,
+      note:
+        'Share of a single venue reserve consumed by this order. A large share means the ' +
+        "fill price is the pool's curve answering the order's own size.",
+    },
   };
 }
 
@@ -293,7 +443,9 @@ async function detectSandwich(ctx: SignatureContext): Promise<{
     // this check needs. web3.js does not narrow its return type for that
     // variant, hence the local shape.
     const txs = (block.transactions ?? []) as unknown as AccountsOnlyTx[];
-    const index = txs.findIndex((t) => (t.transaction?.signatures ?? []).includes(ctx.tx.signature));
+    const index = txs.findIndex((t) =>
+      (t.transaction?.signatures ?? []).includes(ctx.tx.signature),
+    );
     if (index < 0) return { present: null, reason: 'tx_not_in_block', detail: {} };
 
     const keysOf = (i: number): Set<string> => {

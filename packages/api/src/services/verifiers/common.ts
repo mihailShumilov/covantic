@@ -2,6 +2,7 @@ import { USDC_DECIMALS } from '@covantic/shared';
 import type { AnyEvidenceBundle, VerificationResult } from '../claim-oracle.js';
 import {
   KNOWN_DEX_PROGRAMS,
+  ORDERBOOK_PROGRAMS,
   KNOWN_BRIDGE_PROGRAMS,
   FLASH_LOAN_PROGRAMS,
   LENDING_PROGRAMS,
@@ -33,6 +34,10 @@ export interface ProgramClassification {
    *  other flags, because the same program can be both the lender and the
    *  flash-loan source. */
   lending: boolean;
+  /** A central-limit order book was invoked. Implies `dex`, and means the
+   *  transaction's net balance change may not be a single exchange — see
+   *  ORDERBOOK_PROGRAMS in utils/helius.ts. */
+  orderBook: boolean;
   unknown: string[];
 }
 
@@ -51,12 +56,16 @@ export function classifyPrograms(tx: EnhancedTransaction): ProgramClassification
     flashLoan: false,
     governance: false,
     lending: false,
+    orderBook: false,
     unknown: [],
   };
   for (const pid of seen) {
     // Checked outside the exclusive chain below: a lending program is also a
     // flash-loan source, and bucketing it once would lose one of the two.
     if (LENDING_PROGRAMS.has(pid)) classification.lending = true;
+    // Also outside the exclusive chain: an order book is a DEX, and the flag
+    // qualifies that membership rather than replacing it.
+    if (ORDERBOOK_PROGRAMS.has(pid)) classification.orderBook = true;
 
     if (KNOWN_DEX_PROGRAMS.has(pid)) {
       classification.dex = true;
@@ -90,9 +99,7 @@ export function totalOutgoing(
  *  an account the agent itself owns. Covers the self-ATA and
  *  mint-to-self false-positive patterns. */
 export function isSelfTransfer(tx: EnhancedTransaction, agentAddress: string): boolean {
-  const outgoing = (tx.tokenTransfers ?? []).filter(
-    (t) => t.fromUserAccount === agentAddress,
-  );
+  const outgoing = (tx.tokenTransfers ?? []).filter((t) => t.fromUserAccount === agentAddress);
   if (outgoing.length === 0) return false;
   return outgoing.every((t) => t.toUserAccount === agentAddress);
 }

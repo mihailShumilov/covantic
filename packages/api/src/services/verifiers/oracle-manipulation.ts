@@ -14,11 +14,7 @@ import { reconstructExecution, type ExecutionSummary } from '../oracle/execution
 import { bundleHash } from '../oracle/hash.js';
 import { collectSignatures } from '../oracle/signatures.js';
 import { resolveTxTime } from '../oracle/tx-time.js';
-import {
-  isSourceUnavailable,
-  type EvidenceBundle,
-  type PriceOracle,
-} from '../oracle/types.js';
+import { isSourceUnavailable, type EvidenceBundle, type PriceOracle } from '../oracle/types.js';
 import { valueLegs, type ValuationFailure } from '../oracle/valuation.js';
 import {
   classifyPrograms,
@@ -237,6 +233,7 @@ export async function verifyOracleManipulation(
       blockTime: txTime.blockTime,
       slot: txTime.slot,
       oracle,
+      agentAddress,
       subjectFeedKey: subject.leg.feedKey as string,
       impliedPrice: otherSideUsd / subject.leg.amountUi,
       referencePrice: subject.leg.priceUsd,
