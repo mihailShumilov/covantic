@@ -67,6 +67,7 @@ import {
 import {
   createApproveInstruction,
   createTransferInstruction,
+  getAccount,
   getOrCreateAssociatedTokenAccount,
   mintTo,
 } from '@solana/spl-token';
@@ -393,21 +394,35 @@ async function drainAsDelegate(opts: {
 }): Promise<void> {
   const { connection, agent, name, feePayer, sourceAta, sinkAta, sinkOwner, amountUi, rawAmount } =
     opts;
-  const path = delegateKeypairPath(name);
+  const network = process.env.SOLANA_NETWORK ?? 'devnet';
+  const explorer = (sig: string) => `https://explorer.solana.com/tx/${sig}?cluster=${network}`;
 
-  // No delegate yet? Grant one now. `arm` exists for the case where you want
-  // the approval to predate the policy, but it is no longer a prerequisite:
-  // an approval against a live policy opens a governance claim that parks for
-  // want of a baseline, and a parked claim on a reason no retry can clear now
-  // yields the slot to the exploit claim this drain produces. Which is what
-  // the real sequence looks like anyway — nobody phishing an allowance waits
-  // for the victim to buy insurance first.
+  // Whether a usable delegate exists is a fact about the token account, not
+  // about whether a keypair file happens to be on disk. Reading the account
+  // settles both questions at once — is there a delegate, and does it still
+  // have room for this transfer — and a drain spends its allowance in full, so
+  // the saved delegate is stale far more often than not.
+  const path = delegateKeypairPath(name);
+  const account = await getAccount(connection, sourceAta);
+  const saved = existsSync(path)
+    ? Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(path, 'utf-8')) as number[]))
+    : null;
+  const usable =
+    saved !== null &&
+    account.delegate !== null &&
+    account.delegate.equals(saved.publicKey) &&
+    account.delegatedAmount >= rawAmount;
+
   let delegate: Keypair;
-  if (existsSync(path)) {
-    delegate = Keypair.fromSecretKey(
-      Uint8Array.from(JSON.parse(readFileSync(path, 'utf-8')) as number[]),
-    );
+  if (usable && saved) {
+    delegate = saved;
   } else {
+    // Grant one. `arm` exists for staging an approval that predates the
+    // policy, but it is not a prerequisite: an approval against a live policy
+    // opens a governance claim that parks for want of a baseline, and a claim
+    // parked on a reason no retry can clear yields the slot to the exploit
+    // claim this drain produces. Which is what the real sequence looks like
+    // anyway — nobody phishing an allowance waits for the victim to insure.
     delegate = Keypair.generate();
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, JSON.stringify(Array.from(delegate.secretKey)));
@@ -417,32 +432,14 @@ async function drainAsDelegate(opts: {
     approveTx.feePayer = feePayer.publicKey;
     const approveSig = await sendAndConfirmTransaction(connection, approveTx, [feePayer, agent]);
     console.log(`\n1/2 approve ${approveSig}`);
-    console.log(
-      `    https://explorer.solana.com/tx/${approveSig}?cluster=${process.env.SOLANA_NETWORK ?? 'devnet'}`,
-    );
+    console.log(`    ${explorer(approveSig)}`);
   }
 
   const tx = new Transaction().add(
     createTransferInstruction(sourceAta, sinkAta, delegate.publicKey, rawAmount),
   );
   tx.feePayer = feePayer.publicKey;
-  let sig: string;
-  try {
-    sig = await sendAndConfirmTransaction(connection, tx, [feePayer, delegate]);
-  } catch (err) {
-    // A drain spends the whole allowance, so re-running against a stale
-    // delegate fails with `owner does not match` — which reads like a bug in
-    // the script rather than a spent approval. Say what it is.
-    const message = err instanceof Error ? err.message : String(err);
-    if (message.includes('owner does not match')) {
-      throw new Error(
-        `The delegate for '${name}' has no allowance left — a drain spends it in full.\n` +
-          `  Delete ${path} and run this again to grant a fresh one.`,
-      );
-    }
-    throw err;
-  }
-  const network = process.env.SOLANA_NETWORK ?? 'devnet';
+  const sig = await sendAndConfirmTransaction(connection, tx, [feePayer, delegate]);
 
   console.log(`\nDraining agent '${name}' as its delegate:`);
   console.log(`  Delegate: ${delegate.publicKey.toBase58()}`);
