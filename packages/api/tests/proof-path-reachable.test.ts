@@ -44,7 +44,14 @@ const claim = (verificationData: Record<string, unknown>) =>
 describe('INV-PROOF-01 — this pass’s evidence hash reaches the plan', () => {
   it('routes to the proven instruction on the hash produced this pass', () => {
     // The row carries no hash — exactly the state of a first verdict.
-    const plan = planProvenSettlement(claim({ breachProvable: true }), config(), 'abc123');
+    // The row carries nothing at all — not the hash, and not `breachProvable`.
+    // Both are produced by this pass's verdict, and threading only the first
+    // was the incomplete fix: the plan then answered
+    // `breach_not_chain_checkable` on a breach the chain measures perfectly.
+    const plan = planProvenSettlement(claim({}), config(), {
+      details: { breachProvable: true },
+      bundleHash: 'abc123',
+    });
 
     expect(plan.kind).toBe('proven_mandate');
     expect(plan.kind === 'proven_mandate' && plan.bundleHash).toBe('abc123');
@@ -54,7 +61,10 @@ describe('INV-PROOF-01 — this pass’s evidence hash reaches the plan', () => 
     // The guard itself must survive: routing to a proven instruction without a
     // commitment to the off-chain evidence would put an unverifiable claim on
     // chain.
-    const plan = planProvenSettlement(claim({ breachProvable: true }), config(), null);
+    const plan = planProvenSettlement(claim({}), config(), {
+      details: { breachProvable: true },
+      bundleHash: null,
+    });
 
     expect(plan.kind).toBe('unprovable');
     expect(plan.kind === 'unprovable' && plan.reason).toBe('no_bundle_hash');
@@ -74,7 +84,10 @@ describe('INV-PROOF-01 — this pass’s evidence hash reaches the plan', () => 
     // A breach only the backend can see produces no overshoot for the program
     // to measure, and sending it would revert — recorded `failed`, which is
     // closed, rather than `review`.
-    const plan = planProvenSettlement(claim({ breachProvable: false }), config(), 'abc123');
+    const plan = planProvenSettlement(claim({}), config(), {
+      details: { breachProvable: false },
+      bundleHash: 'abc123',
+    });
 
     expect(plan.kind === 'unprovable' && plan.reason).toBe('breach_not_chain_checkable');
   });
@@ -87,6 +100,8 @@ describe('INV-PROOF-01 — this pass’s evidence hash reaches the plan', () => 
       'utf8',
     );
 
-    expect(keeper).toMatch(/planProvenSettlement\(claim, config, evidenceHash\)/);
+    expect(keeper).toMatch(
+      /planProvenSettlement\(claim, config, \{\s*details: result\.details,\s*bundleHash: evidenceHash,?\s*\}\)/,
+    );
   });
 });

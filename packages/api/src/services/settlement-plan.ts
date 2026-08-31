@@ -33,27 +33,37 @@ export type SettlementPlan =
   | { kind: 'unprovable'; reason: string };
 
 /**
- * @param freshBundleHash the hash `recordEvidence` produced on *this* pass.
+ * @param fresh what *this* pass established — the verdict's own details and
+ * the hash `recordEvidence` just produced.
  *
- * Required, and the reason is the whole defect this parameter closes. The
- * keeper computes the hash, then decides the lane, then persists the hash — so
- * reading it back off `claim.verificationData` reads the row as it was loaded
- * *before* this pass, where the hash for this verdict does not exist yet.
- * Every proof path therefore planned `no_bundle_hash` on its first pass, and a
- * confirmed verdict has no second pass: it goes to review.
+ * Every input this function needs is computed during the pass and persisted
+ * only *after* the lane is decided. Reading them back off
+ * `claim.verificationData` reads the row as loaded before the pass, where none
+ * of them exists yet — so the plan is `unprovable` on the pass that first
+ * produces a verdict, and a confirmed verdict has no second pass: it goes to
+ * review.
  *
- * The consequence is larger than it looks. All four proven instructions were
- * unreachable on real claims. What had been observed paying were simulated
- * ones, which `syntheticVerification` scores at confidence 1.0 — above
- * `AUTO_PAY_CONFIDENCE`, the one lane that settles without asking for chain
- * proof at all.
+ * That made all four proven instructions unreachable on real claims. What had
+ * been observed paying were simulated ones, which `syntheticVerification`
+ * scores at confidence 1.0 — above `AUTO_PAY_CONFIDENCE`, the one lane that
+ * settles without asking for chain proof at all.
+ *
+ * The first attempt at this fix threaded only `bundleHash` and was still
+ * wrong: `breachProvable` is computed by the same verdict, in the same pass,
+ * and reading it stale yields `breach_not_chain_checkable` on a breach the
+ * chain can measure perfectly well. Merging the whole detail bag is the fix;
+ * threading fields one at a time is how the second one got missed.
  */
 export function planProvenSettlement(
   claim: ClaimRow,
   config: AppConfig,
-  freshBundleHash?: string | null,
+  fresh?: { details?: Record<string, unknown>; bundleHash?: string | null },
 ): SettlementPlan {
-  const data = (claim.verificationData ?? {}) as VerificationData & {
+  const data = {
+    ...((claim.verificationData ?? {}) as Record<string, unknown>),
+    ...(fresh?.details ?? {}),
+    ...(fresh?.bundleHash ? { bundleHash: fresh.bundleHash } : {}),
+  } as VerificationData & {
     proof?: ProofInputs;
     blockTime?: number;
     bundleHash?: string;
@@ -65,9 +75,7 @@ export function planProvenSettlement(
   // chain for either proof instruction to read.
   if (data.simulated === true) return { kind: 'legacy' };
 
-  // This pass's hash first; the persisted one only for a later pass over a
-  // claim whose evidence was recorded earlier.
-  const hash = freshBundleHash ?? data.bundleHash;
+  const hash = data.bundleHash;
 
   if (claim.triggerType === TriggerType.OracleManipulation) {
     if (!config.ORACLE_PROOF_ENABLED) return { kind: 'legacy' };
