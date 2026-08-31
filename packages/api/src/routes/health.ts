@@ -66,9 +66,25 @@ export async function healthRoutes(app: FastifyInstance) {
     { preHandler: [opsReadRateLimit] },
     async (request, reply) => {
       const status = app.solanaReader.status();
-      const verdict = status.endpoints.some((e) => e.healthy && e.cooldownSec === 0)
-        ? 'ok'
-        : 'no-endpoint-available';
+      // Three states, not two.
+      //
+      // `ok` used to mean "at least one endpoint answers", which reported
+      // green while the pool ran on its last endpoint — and a single endpoint
+      // is not a pool: it is the single point of failure the pool exists to
+      // remove, with no corroboration available for the reads that close
+      // claims. That is how a vendor's quota exhaustion went unnoticed for six
+      // hours behind a healthy status.
+      //
+      // `degraded` is deliberately not `no-endpoint-available`: settlement is
+      // still working, and paging as though it had stopped would train an
+      // operator to ignore the page that means it has.
+      const usable = status.endpoints.filter((e) => e.healthy && e.cooldownSec === 0).length;
+      const verdict =
+        usable === 0
+          ? 'no-endpoint-available'
+          : usable < status.endpoints.length
+            ? 'degraded'
+            : 'ok';
 
       // Per-endpoint detail only for an operator. To an anonymous caller,
       // `rateLimited` and `tripped` are a live success signal for a
@@ -79,7 +95,7 @@ export async function healthRoutes(app: FastifyInstance) {
       if (!isOperator(request, app.config)) {
         reply.send({
           status: verdict,
-          endpointsHealthy: status.endpoints.filter((e) => e.healthy && e.cooldownSec === 0).length,
+          endpointsHealthy: usable,
           endpointsConfigured: status.endpoints.length,
           timestamp: new Date().toISOString(),
         });
