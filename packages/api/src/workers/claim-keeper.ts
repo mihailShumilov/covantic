@@ -786,7 +786,7 @@ async function processClaim(claimId: string, deps: ProcessDeps): Promise<void> {
   // few lines up and it is not persisted until after this decision, so reading
   // it off the claim would find the value from a previous pass — which, for a
   // verdict reached on the first pass, is nothing at all.
-  const plan = planProvenSettlement(claim, config, evidenceHash);
+  const plan = planProvenSettlement(claim, config, { details: result.details, bundleHash: evidenceHash });
   const lane = decideLane({
     triggerType: claim.triggerType,
     confidence: result.confidence,
