@@ -7,6 +7,23 @@ import { logger } from '../utils/logger.js';
 // Load .env from monorepo root (src/config -> src -> api -> packages -> root)
 loadDotenv({ path: resolve(import.meta.dirname, '../../../../.env') });
 
+/**
+ * An optional string that treats an empty value as absent.
+ *
+ * `docker-compose.prod.yml` passes `${VAR:-}` for every optional variable, so
+ * an unset one arrives as `''` rather than `undefined` — and `''` satisfies
+ * neither `.optional()` nor `.min(n)`. That is not hypothetical: shipping
+ * `HELIUS_WEBHOOK_BEARER` in the compose env block without this took the api
+ * and monitor containers into a restart loop on the first deploy, because a
+ * bearer nobody had set failed `.min(32)`.
+ *
+ * `USDC_MINT` learned the same lesson earlier. This is that fix, shared, so
+ * the next optional variable added to compose inherits it.
+ */
+function optionalEnv<T extends z.ZodTypeAny>(schema: T) {
+  return z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), schema);
+}
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().default(4099),
@@ -24,9 +41,10 @@ const envSchema = z.object({
    * one endpoint, and every checkpoint and claim path down with it when that
    * provider hits its quota.
    */
-  SOLANA_RPC_FALLBACK_URLS: z
-    .string()
-    .optional()
+  SOLANA_RPC_FALLBACK_URLS: optionalEnv(
+    z
+      .string()
+      .optional()
     .refine(
       (raw) =>
         !raw ||
@@ -41,6 +59,7 @@ const envSchema = z.object({
       // strictly easier position to reach than compromising a provider.
       { message: 'every entry must be an https URL' },
     ),
+  ),
   /**
    * Rank endpoints by how fresh their slot is before each read.
    *
@@ -191,7 +210,7 @@ const envSchema = z.object({
    * seeing one leaked both. Optional: falls back to the shared secret, so an
    * existing deployment keeps working until it is set.
    */
-  HELIUS_WEBHOOK_BEARER: z.string().min(32).optional(),
+  HELIUS_WEBHOOK_BEARER: optionalEnv(z.string().min(32).optional()),
 
   /**
    * The covered mint. Optional so a bare dev boot works, but never silently
