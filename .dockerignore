@@ -21,3 +21,13 @@ redisdata/
 .idea/
 *.md
 !README.md
+
+# Env backups hold the same secrets as .env, and the timestamped names slip
+# past the `.env` rule. `.gitignore` already carries this; a Dockerfile that
+# ever grows a broad COPY would otherwise bake them into a layer.
+.env.bak-*
+.env.*.local
+
+# Key material at any depth, not just the context root. Docker ignore patterns
+# are path-anchored, so a bare `keys/` misses packages/*/keys/.
+**/keys/

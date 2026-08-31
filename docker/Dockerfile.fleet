@@ -1,3 +1,10 @@
+# The autonomous agent fleet runner.
+#
+# Separate from Dockerfile.api on purpose. The fleet is the least-trusted
+# process in the stack — it drives throwaway agents and deliberately lands
+# malformed transactions — and it runs a TypeScript file through `tsx`, so it
+# needs devDependencies the settlement process should not be shipping.
+#
 # Pinned by digest: `node:22-alpine` is a moving tag, so two builds months
 # apart are two different base images and a rebuild is not reproducible.
 # Bump deliberately — `docker manifest inspect node:22-alpine` for the current
@@ -26,14 +33,11 @@ COPY packages/anchor/target/idl/ ./packages/anchor/target/idl/
 # Build
 RUN pnpm --filter shared build && pnpm --filter api build
 
-# Drop the build toolchain from the runtime image. `start` is
-# `node dist/index.js`, so nothing here needs tsx, vitest, esbuild or the
-# TypeScript compiler once the build has run. The fleet runner, which does
-# need them, has its own image (docker/Dockerfile.fleet) rather than sharing
-# this one — a settlement process should not ship a script runner.
-RUN pnpm prune --prod && pnpm store prune || true
+# Deliberately NOT pruned: this image exists to run `scripts/fleet-start.ts`
+# through `tsx`, which is a devDependency. That is the whole reason the fleet
+# has its own image — the api image is pruned, and sharing one would have
+# meant shipping the build toolchain into the process that settles claims.
 
-EXPOSE 4000
 # Drop privileges. The image only reads from /app and writes nothing at
 # runtime, so there is no reason for the process to be root.
 #
@@ -43,4 +47,4 @@ EXPOSE 4000
 # `chown -R 1000:1000 docker/keys` — chown only; the 0600 stays.
 USER node
 
-CMD ["pnpm", "--filter", "api", "start"]
+CMD ["pnpm", "--filter", "api", "exec", "tsx", "scripts/fleet-start.ts"]

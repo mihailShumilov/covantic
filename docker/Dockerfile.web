@@ -1,6 +1,10 @@
-FROM node:22-alpine AS builder
+# Pinned by digest: `node:22-alpine` is a moving tag, so two builds months
+# apart are two different base images and a rebuild is not reproducible.
+# Bump deliberately — `docker manifest inspect node:22-alpine` for the current
+# one — rather than inheriting whatever the tag points at that day.
+FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS builder
 RUN apk add --no-cache python3 make g++ linux-headers eudev-dev && \
-    corepack enable && corepack prepare pnpm@9 --activate
+    corepack enable && corepack prepare pnpm@9.15.0 --activate
 WORKDIR /app
 
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml tsconfig.base.json ./
@@ -22,12 +26,16 @@ ARG NEXT_PUBLIC_SOLANA_NETWORK=devnet
 RUN pnpm --filter shared build && pnpm --filter web build
 
 # --- Production ---
-FROM node:22-alpine
+FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
 WORKDIR /app
 
 COPY --from=builder /app/packages/web/.next/standalone ./
 COPY --from=builder /app/packages/web/.next/static ./packages/web/.next/static
 COPY --from=builder /app/packages/web/public ./packages/web/public
+
+# Non-root, matching Dockerfile.api and Dockerfile.monitor. The standalone
+# output is static at this point; nothing in the runtime image needs to write.
+USER node
 
 EXPOSE 3000
 ENV PORT=3000
