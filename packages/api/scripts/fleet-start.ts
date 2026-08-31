@@ -197,9 +197,12 @@ async function main() {
   // secret key that is simultaneously the config admin, the oracle authority
   // and the covered mint's authority, in order to call `.publicKey` on it.
   // `FLEET_SINK_ADDRESS` lets the compose stack drop the key mount entirely.
+  // `??` is not enough: compose passes `${FLEET_SINK_ADDRESS:-}`, so an unset
+  // variable arrives as an empty string, which is not nullish and which
+  // `new PublicKey('')` rejects outright.
+  const configuredSink = process.env.FLEET_SINK_ADDRESS?.trim();
   const sink = new PublicKey(
-    process.env.FLEET_SINK_ADDRESS ??
-      loadKeypair(requireEnv('ORACLE_KEYPAIR_PATH')).publicKey.toBase58(),
+    configuredSink || loadKeypair(requireEnv('ORACLE_KEYPAIR_PATH')).publicKey.toBase58(),
   );
 
   const stopSignal = { stopped: false };
