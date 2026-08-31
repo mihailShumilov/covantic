@@ -18,6 +18,7 @@ import {
   policyIdToBytes,
   type VerificationData,
   isPermanentlyParked,
+  isTransientlyParked,
 } from '@covantic/shared';
 
 // Anchor's ESM export of BN tripping up on named imports; pull from default.
@@ -1176,7 +1177,25 @@ async function supersedeParkedClaim(
   // above — and the reasons in `UNRESOLVABLE_PARK_REASONS` are per-policy
   // conditions, so repeats on them are the norm, not the exception.
   const parkedForever = isPermanentlyParked(existing.reviewReason);
-  if (incoming === current) return null;
+
+  // The tie rule has one exception, and it is narrow on purpose.
+  //
+  // `trigger_tx_not_found` is the only park reason that describes the
+  // transaction rather than the policy, and it is usually infrastructure. A
+  // later alert of the same trigger naming a *different* signature is new
+  // information — a second, real movement — not the stream of identical
+  // alerts the tie rule exists to refuse. Refusing it meant one outage
+  // deafened a policy for that trigger permanently: every claim parked here
+  // while a vendor's quota was exhausted, and none could be replaced once it
+  // recovered.
+  //
+  // The same signature repeating is still refused. `MAX_SUPERSEDES` bounds the
+  // rest.
+  const newTransactionOnADeadEnd =
+    isTransientlyParked(existing.reviewReason) &&
+    existing.triggerTxSignature !== triggerTxSignature;
+
+  if (incoming === current && !newTransactionOnADeadEnd) return null;
   if (incoming < current && !parkedForever) return null;
 
   // A claim three triggers have failed to explain is what a reviewer is for.

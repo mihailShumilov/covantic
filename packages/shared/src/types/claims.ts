@@ -98,6 +98,32 @@ export const UNRESOLVABLE_PARK_REASONS: readonly string[] = [
   'trigger_tx_not_found',
 ] as const;
 
+/**
+ * Park reasons that describe *this transaction*, not this policy.
+ *
+ * The distinction decides whether an equally specific repeat may take the
+ * slot. Every other reason in `UNRESOLVABLE_PARK_REASONS` is a standing fact
+ * about the policy — no mandate declared, a baseline not matured — so a second
+ * alert of the same trigger says nothing new and the tie rule correctly
+ * refuses it, or a stream of identical alerts would reset the claim forever.
+ *
+ * `trigger_tx_not_found` is not that. It is per-transaction and it is usually
+ * infrastructure: an indexer that lagged, an endpoint that would not answer. A
+ * later alert naming a *different* signature is genuinely new information, and
+ * refusing it let one outage deafen a policy for that trigger permanently —
+ * which is what happened when a vendor's quota ran out and every claim of
+ * every type parked here.
+ */
+export const TRANSIENT_PARK_REASONS: readonly string[] = ['trigger_tx_not_found'] as const;
+
+/** True when the parked claim's dead end was about its transaction rather
+ *  than about the policy, so a different transaction deserves another look. */
+export function isTransientlyParked(reviewReason: string | null | undefined): boolean {
+  return reviewReason !== null && reviewReason !== undefined
+    ? TRANSIENT_PARK_REASONS.includes(reviewReason)
+    : false;
+}
+
 /** True when a parked claim is waiting on a declaration that cannot arrive in
  *  time for it, and should therefore yield the policy's slot to any claim
  *  that can actually be adjudicated. */
