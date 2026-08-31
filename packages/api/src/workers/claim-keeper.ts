@@ -560,8 +560,10 @@ const EXPLOIT_REASONS_MEANING_AGENT_ERROR = new Set([
 /**
  * Re-file an exploit claim as an agent-error one, when that is what it is.
  *
- * Returns true when the claim was re-attributed and re-queued, so the caller
- * stops processing this pass.
+ * Returns `'reattributed'` when the claim was re-filed and re-queued, so the
+ * caller stops processing this pass; `'unreadable'` when the declaration could
+ * not be read at all, which must not be allowed to finalise a rejection; and
+ * `'no'` when the mandate was read and does not support an agent-error claim.
  *
  * Two constraints keep this from being a loophole rather than a repair:
  *
@@ -584,15 +586,15 @@ async function reattributeToAgentError(
   result: VerificationResult,
   deps: ProcessDeps,
   hasEvidence: boolean,
-): Promise<boolean> {
-  if (claim.triggerType !== TriggerType.Exploit) return false;
+): Promise<'reattributed' | 'unreadable' | 'no'> {
+  if (claim.triggerType !== TriggerType.Exploit) return 'no';
   const reason = typeof result.details.reason === 'string' ? result.details.reason : '';
-  if (!EXPLOIT_REASONS_MEANING_AGENT_ERROR.has(reason)) return false;
+  if (!EXPLOIT_REASONS_MEANING_AGENT_ERROR.has(reason)) return 'no';
 
   const data = (claim.verificationData ?? {}) as VerificationData & {
     reattributedFrom?: number;
   };
-  if (data.reattributedFrom !== undefined) return false;
+  if (data.reattributedFrom !== undefined) return 'no';
 
   // Only worth moving if there is something to measure the movement against.
   // With no matured mandate the agent-error path resolves to review, which is
@@ -609,11 +611,18 @@ async function reattributeToAgentError(
   } catch (err) {
     logger.warn(
       { err, claimId: claim.id },
-      'claim-keeper: mandate unreadable during re-attribution; leaving the exploit verdict',
+      'claim-keeper: mandate unreadable during re-attribution',
     );
-    return false;
+    // Unreadable is not absent, and the difference decides whether a claim
+    // closes. A mandate that was *read* and is missing or immature means the
+    // agent-error path has nothing to measure against, so the exploit
+    // rejection is the more informative answer. A mandate nobody could read
+    // means we do not know that — and letting the rejection stand would close
+    // a claim on evidence we failed to fetch, which is the one thing the
+    // three-valued discipline exists to prevent.
+    return 'unreadable';
   }
-  if (!mandate?.maturedBeforeClaim) return false;
+  if (!mandate?.maturedBeforeClaim) return 'no';
 
   await deps.db
     .update(claims)
@@ -640,7 +649,7 @@ async function reattributeToAgentError(
     { claimId: claim.id, reason },
     'claim-keeper: exploit verdict re-filed as agent error against a matured mandate',
   );
-  return true;
+  return 'reattributed';
 }
 
 async function processClaim(claimId: string, deps: ProcessDeps): Promise<void> {
@@ -718,7 +727,39 @@ async function processClaim(claimId: string, deps: ProcessDeps): Promise<void> {
   // An exploit verdict that turns on "the agent authorised this" is not a dead
   // end — it is the other trigger's opening statement. See
   // {@link reattributeToAgentError}.
-  if (await reattributeToAgentError(claim, policy, result, deps, evidenceHash !== null)) {
+  const reattribution = await reattributeToAgentError(
+    claim,
+    policy,
+    result,
+    deps,
+    evidenceHash !== null,
+  );
+  if (reattribution === 'reattributed') return;
+  if (reattribution === 'unreadable') {
+    // Retry rather than close. The exploit verdict may well be right, but it
+    // can only be *final* once we know whether the other trigger had a
+    // declaration to settle against.
+    await handleIndeterminate(
+      claim,
+      attempt,
+      {
+        ...result,
+        outcome: 'indeterminate',
+        details: {
+          ...result.details,
+          reason: 'mandate_unreadable_during_reattribution',
+          note:
+            'The exploit path found the agent authorised this movement, which is the ' +
+            'agent-error path’s opening statement — and the holder’s declaration could not ' +
+            'be read to check it. Closing here would rest a rejection on evidence we failed ' +
+            'to fetch.',
+        },
+        retryAfterSec: 60,
+      },
+      db,
+      redis,
+      processQueue,
+    );
     return;
   }
 
