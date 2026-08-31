@@ -40,6 +40,7 @@ import {
   type ActionResult,
 } from '../src/services/fleet/actions.js';
 import { logger } from '../src/utils/logger.js';
+import { rpcEndpointName } from '../src/config/rpc-pool.js';
 
 const REPO_ROOT = resolve(import.meta.dirname, '../../..');
 
@@ -187,10 +188,19 @@ async function main() {
   const connection = new Connection(rpcUrl, 'confirmed');
   const redis = new Redis(redisUrl, { maxRetriesPerRequest: null, enableReadyCheck: false });
 
-  // Sink = oracle keypair's pubkey. It has an ATA by construction (it's
-  // the mint authority) so transfers always settle without a pre-init.
-  const oracleAuthority = loadKeypair(requireEnv('ORACLE_KEYPAIR_PATH'));
-  const sink = oracleAuthority.publicKey;
+  // Sink = the oracle authority's address. It has an ATA by construction (it
+  // is the mint authority) so transfers always settle without a pre-init.
+  //
+  // A public key, read from the environment — not the keypair. This runner is
+  // the least-trusted process in the stack: it drives throwaway agents and
+  // deliberately lands malformed transactions, and it was being handed the
+  // secret key that is simultaneously the config admin, the oracle authority
+  // and the covered mint's authority, in order to call `.publicKey` on it.
+  // `FLEET_SINK_ADDRESS` lets the compose stack drop the key mount entirely.
+  const sink = new PublicKey(
+    process.env.FLEET_SINK_ADDRESS ??
+      loadKeypair(requireEnv('ORACLE_KEYPAIR_PATH')).publicKey.toBase58(),
+  );
 
   const stopSignal = { stopped: false };
   const shutdown = () => {
@@ -222,7 +232,7 @@ async function main() {
 
   console.log(`\n=== fleet:start ===`);
   console.log(`  agents: ${manifest.agents.length}`);
-  console.log(`  rpc:    ${rpcUrl}`);
+  console.log(`  rpc:    ${rpcEndpointName(rpcUrl)}`);
   console.log(`  sink:   ${sink.toBase58()}\n`);
 
   const loops = manifest.agents.map((agent) => {

@@ -39,7 +39,13 @@ async function main() {
   }
 
   const connection = new Connection(requireEnv('SOLANA_RPC_URL'), 'confirmed');
-  const authority = loadKeypair(requireEnv('ORACLE_KEYPAIR_PATH'));
+  // The mint authority is deliberately NOT the oracle key any more. The oracle
+  // is a hot key living in three containers; the mint authority can mint the
+  // covered asset, so it belongs with the cold admin key. Falls back to
+  // ORACLE_KEYPAIR_PATH so a deployment that has not split them still works.
+  const authority = loadKeypair(
+    process.env.MINT_AUTHORITY_KEYPAIR_PATH ?? requireEnv('ORACLE_KEYPAIR_PATH'),
+  );
   const mint = new PublicKey(requireEnv('USDC_MINT'));
 
   logger.info(`Mint:       ${mint.toBase58()}`);

@@ -16,6 +16,7 @@
  * the version means.
  */
 import { desc, eq, gte } from 'drizzle-orm';
+import { registerCoveredMint } from '@covantic/shared';
 import { loadConfig } from '../src/config/env.js';
 import { createDbConnection } from '../src/config/database.js';
 import { claimEvidence } from '../src/db/schema.js';
@@ -108,6 +109,11 @@ async function main(): Promise<void> {
   }
 
   const config = loadConfig();
+  // The oracle adjudicator reads the covered-mint registry through
+  // `lookupMint`, so without this a replay runs against a different registry
+  // than the process that produced the verdict — and reports a mismatch that
+  // is its own doing.
+  registerCoveredMint(config.USDC_MINT);
   const db = createDbConnection(config.DATABASE_URL);
 
   try {
@@ -197,9 +203,16 @@ function replayOne(row: typeof claimEvidence.$inferSelect): ReplayOutcome {
   const versionMatches = row.adjudicatorVersion === engine.version;
   const outcomeMatches = replayed.outcome === storedVerdict.outcome;
   const lossMatches = replayed.lossAmount === storedVerdict.lossAmount;
+  // The stored hash is the thing that survives a database edit intact. Outcome
+  // and loss agreeing while the hash does not means the *rest* of the verdict
+  // moved — a hidden input to the adjudicator, or a field nobody compared.
+  const hashMatches = row.verdictHash ? replayedVerdictHash === row.verdictHash : true;
 
   let status: ReplayOutcome['status'];
-  if (outcomeMatches && lossMatches) status = 'match';
+  if (outcomeMatches && lossMatches && hashMatches) status = 'match';
+  // `version_drift` is the benign bucket and sets no exit code, so it must not
+  // be reachable while the version is current — otherwise anyone able to write
+  // one column can downgrade a genuine mismatch into a passing CI run.
   else if (!versionMatches) status = 'version_drift';
   else status = 'mismatch';
 

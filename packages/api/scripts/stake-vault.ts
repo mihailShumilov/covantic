@@ -38,6 +38,7 @@ import {
   mintTo,
 } from '@solana/spl-token';
 import { PDA_SEEDS } from '@covantic/shared';
+import { rpcEndpointName } from '../src/config/rpc-pool.js';
 
 const { BN } = anchorPkg;
 
@@ -152,7 +153,7 @@ async function main() {
   console.log('\n=== stake:vault ===');
   console.log(`  amount:     ${amountUi} USDC`);
   console.log(`  staker:     ${stakerPath}`);
-  console.log(`  rpc:        ${rpcUrl}`);
+  console.log(`  rpc:        ${rpcEndpointName(rpcUrl)}`);
   console.log(`  usdc mint:  ${usdcMint.toBase58()}`);
 
   const staker = ensureKeypair(stakerPath);

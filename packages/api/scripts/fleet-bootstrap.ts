@@ -48,6 +48,7 @@ import { PDA_SEEDS, policyIdToBytes } from '@covantic/shared';
 
 import { loadManifest, saveManifest, appendAgent } from '../src/services/fleet/manifest.js';
 import type { FleetAgent, FleetManifest } from '../src/services/fleet/types.js';
+import { rpcEndpointName } from '../src/config/rpc-pool.js';
 
 const { BN } = anchorPkg;
 
@@ -301,14 +302,20 @@ async function main() {
   const rpcUrl = requireEnv('SOLANA_RPC_URL');
   const usdcMint = new PublicKey(requireEnv('USDC_MINT'));
   const connection = new Connection(rpcUrl, 'confirmed');
-  const mintAuthority = loadKeypair(requireEnv('ORACLE_KEYPAIR_PATH'));
+  // The mint authority is deliberately NOT the oracle key any more. The oracle
+  // is a hot key living in three containers; the mint authority can mint the
+  // covered asset, so it belongs with the cold admin key. Falls back to
+  // ORACLE_KEYPAIR_PATH so a deployment that has not split them still works.
+  const mintAuthority = loadKeypair(
+    process.env.MINT_AUTHORITY_KEYPAIR_PATH ?? requireEnv('ORACLE_KEYPAIR_PATH'),
+  );
 
   console.log('\n=== fleet:bootstrap ===');
   console.log(`  target count:     ${targetCount}`);
   console.log(`  coverage/agent:   ${coverageUi} USDC`);
   console.log(`  duration/agent:   ${Math.round(durationSeconds / 3600)} h`);
   console.log(`  api:              ${apiUrl}`);
-  console.log(`  rpc:              ${rpcUrl}`);
+  console.log(`  rpc:              ${rpcEndpointName(rpcUrl)}`);
   console.log(`  usdc mint:        ${usdcMint.toBase58()}`);
 
   // 1. Holder
