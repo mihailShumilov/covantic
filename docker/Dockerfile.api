@@ -1,5 +1,9 @@
-FROM node:22-alpine AS base
-RUN corepack enable && corepack prepare pnpm@9 --activate
+# Pinned by digest: `node:22-alpine` is a moving tag, so two builds months
+# apart are two different base images and a rebuild is not reproducible.
+# Bump deliberately — `docker manifest inspect node:22-alpine` for the current
+# one — rather than inheriting whatever the tag points at that day.
+FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS base
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 WORKDIR /app
 
 # Copy workspace files
@@ -21,6 +25,13 @@ COPY packages/anchor/target/idl/ ./packages/anchor/target/idl/
 
 # Build
 RUN pnpm --filter shared build && pnpm --filter api build
+
+# Drop the build toolchain from the runtime image. `start` is
+# `node dist/index.js`, so nothing here needs tsx, vitest, esbuild or the
+# TypeScript compiler once the build has run. The fleet runner, which does
+# need them, has its own image (docker/Dockerfile.fleet) rather than sharing
+# this one — a settlement process should not ship a script runner.
+RUN pnpm prune --prod && pnpm store prune || true
 
 EXPOSE 4000
 # Drop privileges. The image only reads from /app and writes nothing at

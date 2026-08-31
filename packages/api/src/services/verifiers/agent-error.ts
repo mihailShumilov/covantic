@@ -1,5 +1,4 @@
 import { LOCK_PERIODS, canonicalMint } from '@covantic/shared';
-import type { Connection } from '@solana/web3.js';
 import type { EnhancedTransaction } from '../../utils/helius.js';
 import { DEFAULT_MAX_SKEW_SEC } from '../../utils/pyth.js';
 import type { VerificationResult } from '../claim-oracle.js';
@@ -19,6 +18,7 @@ import { resolveTxTime } from '../oracle/tx-time.js';
 import { isSourceUnavailable, type PriceOracle } from '../oracle/types.js';
 import { classifyPrograms } from './common.js';
 import { verdictConfirmed, verdictIndeterminate, verdictRejected } from './common.js';
+import type { SolanaReader } from '../../utils/solana-reader.js';
 
 /**
  * Verifier for `TriggerType.AgentError`.
@@ -51,7 +51,7 @@ export interface AgentErrorVerifierOptions {
    *  decisive question — did the agent's *own* authority move the money —
    *  needs signer flags and token-account owners, and neither is in the
    *  indexer payload. */
-  connection?: Connection | null;
+  reader?: SolanaReader | null;
   holderAddress?: string;
   /** Mint the mandate's amounts are denominated in. */
   coveredMint?: string;
@@ -83,7 +83,7 @@ export async function verifyAgentError(
   options: AgentErrorVerifierOptions = {},
 ): Promise<VerificationResult> {
   const lockPeriod = LOCK_PERIODS.AGENT_ERROR;
-  const connection = options.connection ?? null;
+  const reader = options.reader ?? null;
   const programs = classifyPrograms(tx);
 
   const bundle: AgentErrorEvidenceBundle = {
@@ -107,7 +107,7 @@ export async function verifyAgentError(
   };
 
   // --- the chain's own record ---------------------------------------------
-  const view = connection ? await fetchRawTxView(connection, tx.signature) : null;
+  const view = reader ? await fetchRawTxView(reader, tx.signature) : null;
   bundle.hasRawTx = view !== null;
 
   // The indexer's shape is still recorded when the chain record is missing:
@@ -123,7 +123,7 @@ export async function verifyAgentError(
         note:
           'Transaction not resolvable from RPC. Whether the agent’s own authority moved the ' +
           'money cannot be read from the indexer payload, and this verdict rests on it.',
-        hasConnection: connection !== null,
+        hasConnection: reader !== null,
       },
       lockPeriod,
       120,
@@ -139,7 +139,7 @@ export async function verifyAgentError(
   });
 
   // --- when did it happen --------------------------------------------------
-  const txTime = await resolveTxTime(tx, connection);
+  const txTime = await resolveTxTime(tx, reader);
   bundle.slot = txTime.slot ?? view.slot;
   bundle.blockTime = txTime.blockTime ?? view.blockTime;
   if (txTime.disagreementSec !== undefined) {

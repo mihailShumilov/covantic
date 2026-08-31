@@ -5,6 +5,8 @@ import { PDA_SEEDS } from '@covantic/shared';
 import { logger } from '../../utils/logger.js';
 import type { CovanticProgram } from '../../utils/program.js';
 import type { MandateReader } from './mandate.js';
+import { fetchAnchorAccount } from '../../utils/anchor-reader.js';
+import type { SolanaReader } from '../../utils/solana-reader.js';
 
 // Anchor's ESM export of BN trips up on named imports; pull from default.
 const { BN } = anchorPkg;
@@ -41,6 +43,7 @@ export interface ProvenAgentErrorPayoutRequest {
 export class AgentErrorProofPoster {
   constructor(
     private readonly ctx: CovanticProgram,
+    private readonly reader: SolanaReader,
     private readonly mandates: MandateReader,
   ) {}
 
@@ -52,11 +55,18 @@ export class AgentErrorProofPoster {
     const config = this.mandates.deriveConfigPda();
     const policy = this.mandates.derivePolicyPda(holder, request.policyId);
 
-    const accounts = this.ctx.program.account as unknown as Record<
-      string,
-      { fetch: (address: PublicKey) => Promise<unknown> }
-    >;
-    const cfg = (await accounts.protocolConfig!.fetch(config)) as { usdcMint: PublicKey };
+    // Protocol config over the endpoint pool: it names the covered mint and is
+    // effectively immutable, so no endpoint's lag can change the answer, while
+    // the payout below still goes out on the provider's own connection. Left
+    // on that connection, a quota outage stalled settlement on every proven
+    // path — the exact failure the pool exists to remove.
+    const cfg = await fetchAnchorAccount<{ usdcMint: PublicKey }>(
+      this.ctx,
+      this.reader,
+      'protocolConfig',
+      config.toBase58(),
+    );
+    if (!cfg) throw new Error('proof-poster: protocol config account not found');
 
     const [vault] = PublicKey.findProgramAddressSync(
       [Buffer.from(PDA_SEEDS.VAULT)],

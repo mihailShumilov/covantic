@@ -11,6 +11,7 @@ import { publishAlert } from '../services/alert-bus.js';
 import { buildPriceOracle } from '../services/oracle/factory.js';
 import { screenForOracleDeviation } from '../services/oracle/prefilter.js';
 import type { ConsensusPricer } from '../services/oracle/consensus.js';
+import { MonitoringEventType } from '@covantic/shared';
 
 const QUEUE_NAME = 'oracle-watcher';
 
@@ -28,7 +29,7 @@ const QUEUE_NAME = 'oracle-watcher';
  * seconds on devnet. The cost is real but small — each sweep re-reads every
  * active policy's balances, and each priced leg costs an exchange lookup.
  */
-const SWEEP_INTERVAL_MS = Number(process.env.ORACLE_SWEEP_INTERVAL_MS ?? 120_000);
+
 
 /** How far back each sweep looks. Comfortably wider than the interval so a
  *  slow tick or a restart does not open a hole. */
@@ -57,6 +58,7 @@ const MAX_AGENTS_PER_SWEEP = 50;
  * a second one here.
  */
 export function startOracleWatcher(db: Database, redis: Redis, config: AppConfig) {
+  const sweepIntervalMs = config.ORACLE_SWEEP_INTERVAL_MS;
   if (!config.HELIUS_API_KEY) {
     logger.warn('Oracle watcher disabled: HELIUS_API_KEY not configured');
     return null;
@@ -68,7 +70,7 @@ export function startOracleWatcher(db: Database, redis: Redis, config: AppConfig
 
   queue.upsertJobScheduler(
     'sweep-insured-agents',
-    { every: SWEEP_INTERVAL_MS },
+    { every: sweepIntervalMs },
     {
       name: 'sweep',
       opts: { removeOnComplete: { count: 100 }, removeOnFail: { count: 100 } },
@@ -85,7 +87,7 @@ export function startOracleWatcher(db: Database, redis: Redis, config: AppConfig
 
   worker.on('failed', (job, err) => logger.error({ job: job?.id, err }, 'oracle watcher failed'));
 
-  logger.info({ intervalMs: SWEEP_INTERVAL_MS }, 'Oracle watcher started');
+  logger.info({ intervalMs: sweepIntervalMs }, 'Oracle watcher started');
   return { queue, worker };
 }
 
@@ -140,7 +142,7 @@ async function sweep(
 
       await db.insert(monitoringEvents).values({
         agentAddress,
-        eventType: 'oracle_deviation',
+        eventType: MonitoringEventType.OracleDeviation,
         severity: screen.severity,
         txSignature: tx.signature,
         details: { screenReason: screen.reason, source: 'oracle-watcher', ...screen.detail },
@@ -148,10 +150,10 @@ async function sweep(
 
       await publishAlert(redis, config.ALERT_HMAC_SECRET, {
         channel: 'monitoring:alerts',
-        event: 'oracle_deviation',
+        event: MonitoringEventType.OracleDeviation,
         data: {
           agentAddress,
-          type: 'oracle_deviation',
+          type: MonitoringEventType.OracleDeviation,
           txSignature: tx.signature,
           severity: screen.severity,
           screenReason: screen.reason,

@@ -1,5 +1,4 @@
 import { LOCK_PERIODS } from '@covantic/shared';
-import type { Connection } from '@solana/web3.js';
 import type { EnhancedTransaction } from '../../utils/helius.js';
 import { DEFAULT_MAX_SKEW_SEC } from '../../utils/pyth.js';
 import type { VerificationResult } from '../claim-oracle.js';
@@ -20,6 +19,7 @@ import { resolveTxTime } from '../oracle/tx-time.js';
 import { isSourceUnavailable, type PriceOracle } from '../oracle/types.js';
 import { classifyPrograms } from './common.js';
 import { verdictConfirmed, verdictIndeterminate, verdictRejected } from './common.js';
+import type { SolanaReader } from '../../utils/solana-reader.js';
 
 /**
  * Verifier for `TriggerType.GovernanceAttack`.
@@ -48,7 +48,7 @@ import { verdictConfirmed, verdictIndeterminate, verdictRejected } from './commo
  */
 export interface GovernanceVerifierOptions {
   /** Chain access. Without it the verdict cannot be established at all. */
-  connection?: Connection | null;
+  reader?: SolanaReader | null;
   holderAddress?: string;
   /**
    * Reads the holder's declared authority set from chain.
@@ -88,7 +88,7 @@ export async function verifyGovernanceAttack(
   options: GovernanceVerifierOptions = {},
 ): Promise<VerificationResult> {
   const lockPeriod = LOCK_PERIODS.GOVERNANCE_ATTACK;
-  const connection = options.connection ?? null;
+  const reader = options.reader ?? null;
   const programs = classifyPrograms(tx);
 
   const bundle: GovernanceEvidenceBundle = {
@@ -111,7 +111,7 @@ export async function verifyGovernanceAttack(
   };
 
   // --- the chain's own record ---------------------------------------------
-  const view = connection ? await fetchRawTxView(connection, tx.signature) : null;
+  const view = reader ? await fetchRawTxView(reader, tx.signature) : null;
   bundle.hasRawTx = view !== null;
 
   if (!view) {
@@ -121,7 +121,7 @@ export async function verifyGovernanceAttack(
         note:
           'Transaction not resolvable from RPC. Signer flags and per-side token account ' +
           'owners live only there, and this verdict rests on both.',
-        hasConnection: connection !== null,
+        hasConnection: reader !== null,
       },
       lockPeriod,
       120,
@@ -136,7 +136,7 @@ export async function verifyGovernanceAttack(
   });
 
   // --- when did it happen --------------------------------------------------
-  const txTime = await resolveTxTime(tx, connection);
+  const txTime = await resolveTxTime(tx, reader);
   bundle.slot = txTime.slot ?? view.slot;
   bundle.blockTime = txTime.blockTime ?? view.blockTime;
   if (txTime.disagreementSec !== undefined) {
@@ -234,7 +234,7 @@ export async function verifyGovernanceAttack(
     holderAddress: options.holderAddress,
     txSignature: tx.signature,
     blockTime: takeoverBlockTime,
-    connection,
+    reader,
     cohort: options.cohort,
   });
 

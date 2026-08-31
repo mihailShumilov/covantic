@@ -3,6 +3,8 @@ import { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from '@solana/spl-tok
 import { PDA_SEEDS, policyIdToBytes } from '@covantic/shared';
 import { logger } from '../../utils/logger.js';
 import type { CovanticProgram } from '../../utils/program.js';
+import { fetchAnchorAccount } from '../../utils/anchor-reader.js';
+import type { SolanaReader } from '../../utils/solana-reader.js';
 import type { GovernanceBaselineView } from './types.js';
 
 /**
@@ -21,7 +23,17 @@ import type { GovernanceBaselineView } from './types.js';
  * cannot point the reading anywhere else even if it wanted to.
  */
 export class AuthorityCheckpointWriter {
-  constructor(private readonly ctx: CovanticProgram) {}
+  /**
+   * @param reader reads the declaration over the endpoint pool. The write half
+   * of this class stays on the provider's own connection: a declaration is
+   * holder-signed and matured at least `GOVERNANCE_BASELINE_DELAY` ago, so no
+   * endpoint's lag can affect what it says, while an outage reading it costs a
+   * claim its verdict.
+   */
+  constructor(
+    private readonly ctx: CovanticProgram,
+    private readonly reader: SolanaReader,
+  ) {}
 
   derivePolicyPda(holder: PublicKey, policyId: bigint): PublicKey {
     return PublicKey.findProgramAddressSync(
@@ -76,9 +88,16 @@ export class AuthorityCheckpointWriter {
     const policy = this.derivePolicyPda(holder, policyId);
 
     try {
-      const cfg = (await this.accounts().protocolConfig!.fetch(config)) as {
-        usdcMint: PublicKey;
-      };
+      // Protocol config over the pool: it names the covered mint and is
+      // effectively immutable, so no endpoint's lag can change the answer,
+      // while the write below still goes out on the provider's connection.
+      const cfg = await fetchAnchorAccount<{ usdcMint: PublicKey }>(
+        this.ctx,
+        this.reader,
+        'protocolConfig',
+        config.toBase58(),
+      );
+      if (!cfg) throw new Error('authority checkpoint: protocol config account not found');
       const coveredTokenAccount = getAssociatedTokenAddressSync(
         cfg.usdcMint,
         new PublicKey(agentAddress),
@@ -128,9 +147,17 @@ export class AuthorityCheckpointWriter {
     claimSubmittedAt: number,
   ): Promise<GovernanceBaselineView | null> {
     const policy = this.derivePolicyPda(new PublicKey(holderAddress), policyId);
-    const raw = (await this.accounts().governanceBaseline!.fetchNullable(
-      this.deriveBaselinePda(policy),
-    )) as RawBaseline | null;
+    const raw = await fetchAnchorAccount<RawBaseline>(
+      this.ctx,
+      this.reader,
+      'governanceBaseline',
+      this.deriveBaselinePda(policy).toBase58(),
+      // Absence here is what sends the claim to review — and, since these
+      // reasons are in `UNRESOLVABLE_PARK_REASONS`, what lets any later alert
+      // take the policy's only claim slot. Too consequential to rest on one
+      // endpoint's word.
+      { corroborate: true },
+    );
     if (!raw) return null;
 
     const extraCount = Number(raw.extraAuthorityCount ?? 0);

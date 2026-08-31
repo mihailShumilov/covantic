@@ -25,8 +25,8 @@ import type {
   AnalyzedTokenBalance,
   AnalyzedAccountInfo,
 } from '../utils/solana-rpc-analyzer.js';
-import type { Connection } from '@solana/web3.js';
 import { logger } from '../utils/logger.js';
+import type { SolanaReader } from '../utils/solana-reader.js';
 
 // Re-export transaction types for compatibility
 type EnhancedTransaction = AnalyzedTransaction;
@@ -116,13 +116,13 @@ export interface AssessRiskOptions {
 
 export async function assessRisk(
   agentAddress: string,
-  solanaConnection: Connection,
+  solanaReader: SolanaReader,
   helius?: HeliusClient,
   options: AssessRiskOptions = {},
 ): Promise<RiskAssessment> {
   const now = options.now ?? new Date();
   const nowMs = now.getTime();
-  const rpcAnalyzer = new SolanaRpcAnalyzer(solanaConnection);
+  const rpcAnalyzer = new SolanaRpcAnalyzer(solanaReader);
 
   // Step 1: Fetch on-chain data — try Solana RPC first (works on all clusters)
   let transactions: AnalyzedTransaction[];

@@ -1,8 +1,9 @@
-import { PublicKey, type Connection } from '@solana/web3.js';
+import { PublicKey } from '@solana/web3.js';
 import { logger } from '../../utils/logger.js';
 import type { CohortHit, CohortLookup } from '../exploit/signatures.js';
 import type { AuthorityReport, Takeover } from './authority.js';
 import type { GovernanceExposure } from './conjunction.js';
+import type { SolanaReader } from '../../utils/solana-reader.js';
 
 /**
  * Structural evidence that control changing hands was an attack rather than
@@ -103,7 +104,7 @@ export interface GovernanceSignatureContext {
   holderAddress?: string;
   txSignature: string;
   blockTime: number;
-  connection?: Connection | null;
+  reader?: SolanaReader | null;
   cohort?: CohortLookup;
 }
 
@@ -235,12 +236,12 @@ export async function collectGovernanceSignatures(
   );
 
   // --- network checks ------------------------------------------------------
-  if (!ctx.connection) {
+  if (!ctx.reader) {
     add('new_authority_first_seen', null, {}, 'No RPC connection supplied.');
   } else if (newControllers.length === 0) {
     add('new_authority_first_seen', null, {}, 'No new controller address to look up.');
   } else {
-    const result = await checkFirstSeen(ctx.connection, newControllers, ctx.txSignature);
+    const result = await checkFirstSeen(ctx.reader, newControllers, ctx.txSignature);
     add('new_authority_first_seen', result.present, result.detail, result.reason);
   }
 
@@ -293,26 +294,36 @@ function controllersOf(auth: AuthorityReport): string[] {
 }
 
 /**
+ * Is this a well-formed account address?
+ *
+ * Authority lists come from parsed instruction fields, so a malformed entry is
+ * a parsing artefact rather than a controller worth asking an RPC about.
+ */
+function isAddress(value: string): boolean {
+  try {
+    new PublicKey(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Did the new controller exist before this transaction?
  *
  * An address created minutes before it takes over an account is a burner. One
  * with months of history is an operator.
  */
 async function checkFirstSeen(
-  connection: Connection,
+  reader: SolanaReader,
   addresses: string[],
   signature: string,
 ): Promise<{ present: boolean | null; detail: Record<string, unknown>; reason?: string }> {
   const results: Array<{ address: string; priorTxCount: number }> = [];
   for (const address of addresses) {
-    let key: PublicKey;
+    if (!isAddress(address)) continue;
     try {
-      key = new PublicKey(address);
-    } catch {
-      continue;
-    }
-    try {
-      const prior = await connection.getSignaturesForAddress(key, {
+      const prior = await reader.getSignaturesForAddress(address, {
         before: signature,
         limit: HISTORY_TX_LIMIT,
       });

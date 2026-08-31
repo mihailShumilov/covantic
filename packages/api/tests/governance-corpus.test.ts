@@ -12,7 +12,7 @@ import {
   NEGATIVES,
   POSITIVES,
   baselineFor,
-  mkConnection,
+  mkReader,
   mkHelius,
   mkHolders,
   type GovernanceCase,
@@ -46,7 +46,7 @@ async function judge(testCase: GovernanceCase) {
     mkHelius(enhanced),
     mkPricer(FEEDS),
     {
-      connection: mkConnection(testCase.tx, signature),
+      reader: mkReader(testCase.tx, signature),
       holderAddress: HOLDER,
       governance: {
         baseline: async () => baselineFor(testCase),

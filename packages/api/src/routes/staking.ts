@@ -28,8 +28,12 @@ const STAKER_LAYOUT = {
   depositedAt: 75,            // i64 (8)
   unstakeRequestedAt: 83,     // i64 (8)
   bump: 91,                   // u8 (1)
+  lossIndexSnapshot: 92,      // u128 (16)
 } as const;
+/** The layout before losses were socialised; still the minimum readable size. */
 const STAKER_LAYOUT_SIZE = 92;
+/** With `loss_index_snapshot`. Anything smaller predates `pnpm migrate:accounts`. */
+const STAKER_LAYOUT_SIZE_WITH_LOSS = 108;
 
 /**
  * Byte offsets of fields in the on-chain InsuranceVault account, measured
@@ -39,11 +43,43 @@ const STAKER_LAYOUT_SIZE = 92;
  */
 const VAULT_LAYOUT = {
   rewardPerStakeAcc: 79, // u128 (16)
+  lossIndex: 112,        // u128 (16) — trailing field, added by the migration
 } as const;
 const VAULT_MIN_LAYOUT_SIZE = VAULT_LAYOUT.rewardPerStakeAcc + 16;
+const VAULT_LAYOUT_SIZE_WITH_LOSS = VAULT_LAYOUT.lossIndex + 16;
 
 /** Must match REWARD_PER_STAKE_SCALE in insurance_vault.rs (1e12). */
 const REWARD_PER_STAKE_SCALE = 1_000_000_000_000n;
+
+/**
+ * Apply the vault's loss index to a stored principal.
+ *
+ * A position only revalues itself when it is next touched, so between a payout
+ * and the staker's next interaction the stored `amount_staked` overstates what
+ * the chain will pay. Nothing is extractable — `execute_unstake` runs
+ * `settle_losses` first — but the number a staker reads here and the number
+ * they receive would otherwise differ, which is the worst kind of correct.
+ *
+ * Returns the raw amount unchanged when either account predates the migration,
+ * because there is then no loss accounting to apply.
+ */
+function revalueForLosses(
+  amountStaked: bigint,
+  stakerData: Buffer,
+  stakerAccountLength: number,
+  vaultInfo: { data: Buffer } | null,
+): bigint {
+  if (stakerAccountLength < STAKER_LAYOUT_SIZE_WITH_LOSS) return amountStaked;
+  if (!vaultInfo || vaultInfo.data.length < 8 + VAULT_LAYOUT_SIZE_WITH_LOSS) return amountStaked;
+
+  const snapshot = readU128LE(stakerData, STAKER_LAYOUT.lossIndexSnapshot);
+  const lossIndex = readU128LE(vaultInfo.data.subarray(8), VAULT_LAYOUT.lossIndex);
+  // Zero snapshot is the on-chain sentinel for "adopt the current index", so
+  // there is nothing to write down. A zero index would be a division by zero.
+  if (snapshot === 0n || lossIndex === 0n || lossIndex >= snapshot) return amountStaked;
+
+  return (amountStaked * lossIndex) / snapshot;
+}
 
 /** Anchor account discriminator = sha256("account:StakerPosition")[0..8]. */
 const STAKER_DISCRIMINATOR = createHash('sha256')
@@ -107,9 +143,10 @@ export async function stakingRoutes(app: FastifyInstance) {
 
       // Fetch staker + vault together so the live accumulator delta is
       // computed against a consistent snapshot.
-      const [stakerInfo, vaultInfo] = await app.solanaConnection.getMultipleAccountsInfo(
-        [stakerPda, vaultPda],
-      );
+      const [stakerInfo, vaultInfo] = await app.solanaReader.getMultipleAccountsInfo([
+        stakerPda.toBase58(),
+        vaultPda.toBase58(),
+      ]);
 
       if (!stakerInfo) {
         return reply.send(emptyPosition(address));
@@ -136,7 +173,18 @@ export async function stakingRoutes(app: FastifyInstance) {
       const staker = new PublicKey(
         data.subarray(STAKER_LAYOUT.staker, STAKER_LAYOUT.staker + 32),
       ).toBase58();
-      const amountStakedBn = data.readBigUInt64LE(STAKER_LAYOUT.amountStaked);
+      const rawAmountStakedBn = data.readBigUInt64LE(STAKER_LAYOUT.amountStaked);
+      // Revalue for socialised losses, exactly as `settle_losses` does on
+      // chain: `amount_staked * vault.loss_index / loss_index_snapshot`. The
+      // stored number is the principal *before* any loss the position has not
+      // been touched since, so reporting it raw tells a staker they hold more
+      // than `execute_unstake` will pay them.
+      const amountStakedBn = revalueForLosses(
+        rawAmountStakedBn,
+        data,
+        stakerInfo.data.length,
+        vaultInfo ?? null,
+      );
       const amountStaked = toSafeNumber(amountStakedBn, 'amountStaked');
       const shareBps = data.readUInt16LE(STAKER_LAYOUT.shareBps);
       const rewardsClaimed = toSafeNumber(

@@ -59,18 +59,32 @@ fn grow_to<'info>(
 /// One-time migration for a vault written before losses were socialised.
 ///
 /// Idempotent: safe to call on an already-migrated vault, and safe to call
-/// twice. It never lowers `loss_index`, so it cannot undo a real loss.
+/// twice. It seeds `loss_index` only on an account it *just grew*, so it
+/// cannot undo a real loss.
+///
+/// The distinction matters because zero is otherwise overloaded. A freshly
+/// grown account reads zero because nothing has been written there; a vault
+/// whose stakers were wiped out to the last unit used to read zero because
+/// `absorb_loss` scaled the index to nothing. Seeding on `current == 0` could
+/// not tell those apart, and restoring full scale on the second erased the
+/// socialised loss from every position that had not been touched since —
+/// `settle_losses` sees a matching snapshot and returns without revaluing.
+/// `absorb_loss` now floors the index at 1, and this only writes when the
+/// account was not already the right size.
 pub fn migrate_vault_handler(ctx: Context<MigrateVault>) -> Result<()> {
     let vault = &ctx.accounts.vault;
     let needed = 8 + InsuranceVault::INIT_SPACE;
 
-    grow_to(
+    let already_sized = grow_to(
         vault,
         &ctx.accounts.payer.to_account_info(),
         ctx.accounts.system_program.key(),
         needed,
         InsuranceVault::DISCRIMINATOR,
     )?;
+    if already_sized {
+        return Ok(());
+    }
 
     // `loss_index` is the trailing 16 bytes. A freshly grown account reads
     // zero there, which is not a valid index — every position would revalue

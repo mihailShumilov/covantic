@@ -108,7 +108,7 @@ export async function riskRoutes(app: FastifyInstance) {
       }
     }
 
-    const assessment = await assessRisk(agentAddress, app.solanaConnection, helius);
+    const assessment = await assessRisk(agentAddress, app.solanaReader, helius);
     const assessmentId = await saveAssessment(app.db, agentAddress, assessment);
     const response = { ...assessment, agentAddress, assessmentId };
 
@@ -130,7 +130,7 @@ export async function riskRoutes(app: FastifyInstance) {
     }
     const { agentAddress } = parseResult.data;
 
-    const assessment = await assessRisk(agentAddress, app.solanaConnection, helius);
+    const assessment = await assessRisk(agentAddress, app.solanaReader, helius);
     const assessmentId = await saveAssessment(app.db, agentAddress, assessment);
     const response = { ...assessment, agentAddress, assessmentId };
 

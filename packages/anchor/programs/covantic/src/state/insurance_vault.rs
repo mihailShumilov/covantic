@@ -142,6 +142,15 @@ impl InsuranceVault {
                     .ok_or(CovanticError::MathOverflow)?
                     .checked_div(before as u128)
                     .ok_or(CovanticError::MathOverflow)?;
+                // Never zero. A total wipeout scales the index to exactly 0,
+                // which is indistinguishable from "this account predates the
+                // loss accounting" — and `migrate_vault` reseeds that to full
+                // scale, erasing the loss from every position not yet touched.
+                // One is the smallest index that still says "everything was
+                // lost" without colliding with the un-migrated sentinel.
+                if self.loss_index == 0 {
+                    self.loss_index = 1;
+                }
             }
             self.total_staked = after;
         }
@@ -190,3 +199,74 @@ impl InsuranceVault {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A vault with nothing in it but staker principal, so `absorb_loss`
+    /// reaches the third leg of the cascade directly.
+    fn vault(total_staked: u64) -> InsuranceVault {
+        InsuranceVault {
+            version: InsuranceVault::CURRENT_VERSION,
+            authority: Pubkey::default(),
+            total_staked,
+            total_coverage: 0,
+            total_premiums_collected: 0,
+            total_claims_paid: 0,
+            staker_count: 1,
+            solvency_ratio: 0,
+            total_staker_rewards: 0,
+            reward_per_stake_acc: 0,
+            reserve_fund: 0,
+            protocol_treasury: 0,
+            bump: 0,
+            loss_index: LOSS_INDEX_SCALE,
+        }
+    }
+
+    #[test]
+    fn scales_the_index_by_the_factor_the_pool_shrank_by() {
+        let mut v = vault(1_000);
+        v.absorb_loss(250).unwrap();
+
+        assert_eq!(v.total_staked, 750);
+        assert_eq!(v.loss_index, LOSS_INDEX_SCALE * 750 / 1_000);
+    }
+
+    /// The regression this floor exists for.
+    ///
+    /// A payout that consumes staker principal to the last unit scales the
+    /// index to exactly zero — which is byte-identical to the trailing zeros
+    /// of an account that predates the loss accounting. `migrate_vault` read
+    /// that zero as "never migrated" and restored full scale, after which
+    /// `settle_losses` sees a matching snapshot, returns without revaluing,
+    /// and every untouched position keeps a principal the vault no longer has.
+    #[test]
+    fn a_total_wipeout_never_produces_a_zero_index() {
+        let mut v = vault(1_000);
+        v.absorb_loss(1_000).unwrap();
+
+        assert_eq!(v.total_staked, 0);
+        assert_ne!(v.loss_index, 0, "zero is the un-migrated sentinel");
+        assert_eq!(v.loss_index, 1);
+    }
+
+    /// The floor must not rescue a position: 1/1e12 of the principal is still
+    /// a total loss, it is merely a *distinguishable* one.
+    #[test]
+    fn the_floored_index_still_values_a_position_at_nothing() {
+        let mut v = vault(1_000);
+        v.absorb_loss(1_000).unwrap();
+
+        let staked: u128 = 1_000;
+        let revalued = staked * v.loss_index / LOSS_INDEX_SCALE;
+        assert_eq!(revalued, 0);
+    }
+
+    #[test]
+    fn refuses_a_loss_larger_than_the_vault_can_absorb() {
+        let mut v = vault(1_000);
+        assert!(v.absorb_loss(1_001).is_err());
+    }
+}

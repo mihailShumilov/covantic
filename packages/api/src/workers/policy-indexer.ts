@@ -8,6 +8,8 @@ import type { AppConfig } from '../config/env.js';
 import { claims, policies } from '../db/schema.js';
 import { logger } from '../utils/logger.js';
 import { createCovanticProgram, type CovanticProgram } from '../utils/program.js';
+import { fetchAllAnchorAccounts } from '../utils/anchor-reader.js';
+import { getSolanaReader, type SolanaReader } from '../utils/solana-reader.js';
 
 const QUEUE_NAME = 'policy-indexer';
 const RECONCILE_EVERY_MS = 60_000;
@@ -45,6 +47,7 @@ export function startPolicyIndexer(db: Database, redis: Redis, config: AppConfig
     logger.error({ err }, 'Policy indexer disabled: failed to load program');
     return null;
   }
+  const reader = getSolanaReader(config);
 
   const queue = new Queue(QUEUE_NAME, { connection: redis });
 
@@ -62,7 +65,7 @@ export function startPolicyIndexer(db: Database, redis: Redis, config: AppConfig
   const worker = new Worker(
     QUEUE_NAME,
     async () => {
-      await reconcilePolicies(db, ctx);
+      await reconcilePolicies(db, ctx, reader);
     },
     { connection: redis },
   );
@@ -73,7 +76,7 @@ export function startPolicyIndexer(db: Database, redis: Redis, config: AppConfig
 
   // Kick off an immediate reconcile so freshly booted API catches up without
   // waiting the first 60s tick. Fire-and-forget; errors are logged inside.
-  reconcilePolicies(db, ctx).catch((err) =>
+  reconcilePolicies(db, ctx, reader).catch((err) =>
     logger.error({ err }, 'Initial policy reconcile failed'),
   );
 
@@ -81,19 +84,62 @@ export function startPolicyIndexer(db: Database, redis: Redis, config: AppConfig
   return worker;
 }
 
-async function reconcilePolicies(db: Database, ctx: CovanticProgram): Promise<void> {
-  const accounts = await (ctx.program.account as any).insurancePolicy.all();
+/**
+ * Highest listing slot applied, so a lagging endpoint cannot walk state back.
+ * See the note at its use — per-process by design.
+ */
+let lastIndexedSlot = 0;
+/** How many policies the last successful reconcile saw. */
+let lastIndexedCount = 0;
 
-  if (accounts.length === 0) {
-    logger.debug('Policy indexer: no on-chain policies found');
+async function reconcilePolicies(
+  db: Database,
+  ctx: CovanticProgram,
+  reader: SolanaReader,
+): Promise<void> {
+  // `getProgramAccounts` is the heaviest call this service makes — providers
+  // weight it far above an ordinary read — so it goes over the endpoint pool
+  // rather than spending the primary's quota alone.
+  const listing = await fetchAllAnchorAccounts(ctx, reader, 'insurancePolicy');
+  const accounts = listing.accounts;
+
+  // Reads now fan out, and this one *overwrites* state our own writes produce:
+  // `onConflictDoUpdate` copies `state` verbatim, so an endpoint a few slots
+  // behind reverts a policy the chain has already moved to `ClaimPending`. The
+  // documented carve-out covers "did our write land"; this is the neighbouring
+  // case, and the cheap guard is to refuse an answer older than the one
+  // already applied.
+  //
+  // Per-process, deliberately: a column on `policies` would survive a restart
+  // and coordinate the api and monitor containers, and is the right shape if
+  // this ever needs to be stronger. Within one process it closes the window
+  // the failover actually opens.
+  if (listing.slot > 0 && listing.slot < lastIndexedSlot) {
+    logger.warn(
+      { listingSlot: listing.slot, lastIndexedSlot },
+      'Policy indexer: skipping a view older than the one already applied',
+    );
     return;
   }
+  lastIndexedSlot = Math.max(lastIndexedSlot, listing.slot);
+
+  if (accounts.length === 0) {
+    // Not `debug`. An empty program is indistinguishable from an endpoint that
+    // answered without honouring the filter, and the difference is every
+    // policy in the mirror going stale with nothing in the log saying so.
+    logger[lastIndexedCount > 0 ? 'warn' : 'debug'](
+      { lastIndexedCount },
+      'Policy indexer: no on-chain policies found',
+    );
+    return;
+  }
+  lastIndexedCount = accounts.length;
 
   const claimPendingPolicyIds: number[] = [];
 
   for (const { account, publicKey } of accounts as Array<{
     account: any;
-    publicKey: PublicKey;
+    publicKey: string;
   }>) {
     const policyId = bnToNumber(account.policyId);
     const startTimeSec = bnToNumber(account.startTime);
@@ -114,7 +160,7 @@ async function reconcilePolicies(db: Database, ctx: CovanticProgram): Promise<vo
       triggerType: (account.triggerType as number) ?? 0,
       triggerTxSignature: triggerSigBytesToString(account.triggerTxSignature),
       payoutAmount: bnToNumber(account.payoutAmount),
-      pdaAddress: publicKey.toBase58(),
+      pdaAddress: publicKey,
       updatedAt: new Date(),
     };
 
@@ -172,7 +218,7 @@ async function reconcilePolicies(db: Database, ctx: CovanticProgram): Promise<vo
 
     const missing = claimPendingPolicyIds.filter((id) => !covered.has(id));
     for (const policyId of missing) {
-      const onChain = (accounts as Array<{ account: any; publicKey: PublicKey }>).find(
+      const onChain = (accounts as Array<{ account: any; publicKey: string }>).find(
         ({ account }) => bnToNumber(account.policyId) === policyId,
       );
       if (!onChain) continue;

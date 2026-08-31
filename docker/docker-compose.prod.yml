@@ -55,6 +55,15 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       ALERT_HMAC_SECRET: ${ALERT_HMAC_SECRET:?ALERT_HMAC_SECRET is required}
       SOLANA_RPC_URL: ${SOLANA_RPC_URL}
+      # Read-only fallbacks. Reads fail over across the primary plus these;
+      # writes stay on the primary. Listed here for the same reason as the
+      # proof flags: without an `env_file`, a variable absent from this block
+      # never reaches the process, so setting it in .env would look like it
+      # worked and change nothing.
+      SOLANA_RPC_FALLBACK_URLS: ${SOLANA_RPC_FALLBACK_URLS:-}
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+      HELIUS_WEBHOOK_BEARER: ${HELIUS_WEBHOOK_BEARER:-}
+      SOLANA_RPC_FRESHNESS_AWARE: ${SOLANA_RPC_FRESHNESS_AWARE:-false}
       HELIUS_API_KEY: ${HELIUS_API_KEY}
       HELIUS_WEBHOOK_SECRET: ${HELIUS_WEBHOOK_SECRET}
       PROGRAM_ID: ${PROGRAM_ID}
@@ -105,6 +114,15 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       ALERT_HMAC_SECRET: ${ALERT_HMAC_SECRET:?ALERT_HMAC_SECRET is required}
       SOLANA_RPC_URL: ${SOLANA_RPC_URL}
+      # Read-only fallbacks. Reads fail over across the primary plus these;
+      # writes stay on the primary. Listed here for the same reason as the
+      # proof flags: without an `env_file`, a variable absent from this block
+      # never reaches the process, so setting it in .env would look like it
+      # worked and change nothing.
+      SOLANA_RPC_FALLBACK_URLS: ${SOLANA_RPC_FALLBACK_URLS:-}
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+      HELIUS_WEBHOOK_BEARER: ${HELIUS_WEBHOOK_BEARER:-}
+      SOLANA_RPC_FRESHNESS_AWARE: ${SOLANA_RPC_FRESHNESS_AWARE:-false}
       HELIUS_API_KEY: ${HELIUS_API_KEY}
       HELIUS_WEBHOOK_SECRET: ${HELIUS_WEBHOOK_SECRET}
       PROGRAM_ID: ${PROGRAM_ID}
@@ -142,21 +160,36 @@ services:
     networks:
       - internal
 
-  # Autonomous agent fleet runner. Reuses the api image (same source tree
-  # is needed — scripts/fleet-start.ts + services/fleet/* + tsx) but
-  # overrides the command. Read-only mount on ./keys so the container can
-  # sign as the holder + per-agent keypairs. Guarded against mainnet-beta
-  # inside the script, not via NODE_ENV.
+  # Autonomous agent fleet runner. Its own image rather than the api one: it
+  # runs a TypeScript file through `tsx`, so it needs devDependencies the api
+  # image now prunes — and it is the least-trusted process in the stack, which
+  # is a poor thing to share an image with the claim keeper. Read-only mount on
+  # ./keys so the container can sign as the holder + per-agent keypairs.
+  # Guarded against mainnet-beta inside the script, not via NODE_ENV.
   fleet:
-    image: covantic-api:latest
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.fleet
+    image: covantic-fleet:latest
     container_name: covantic-fleet
-    command: ['pnpm', '--filter', 'api', 'exec', 'tsx', 'scripts/fleet-start.ts']
     environment:
       NODE_ENV: production
       SOLANA_NETWORK: ${SOLANA_NETWORK:-devnet}
       SOLANA_RPC_URL: ${SOLANA_RPC_URL}
+      # Read-only fallbacks. Reads fail over across the primary plus these;
+      # writes stay on the primary. Listed here for the same reason as the
+      # proof flags: without an `env_file`, a variable absent from this block
+      # never reaches the process, so setting it in .env would look like it
+      # worked and change nothing.
+      SOLANA_RPC_FALLBACK_URLS: ${SOLANA_RPC_FALLBACK_URLS:-}
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+      HELIUS_WEBHOOK_BEARER: ${HELIUS_WEBHOOK_BEARER:-}
+      SOLANA_RPC_FRESHNESS_AWARE: ${SOLANA_RPC_FRESHNESS_AWARE:-false}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       USDC_MINT: ${USDC_MINT}
+      # A public key, so this container needs no oracle secret. Set
+      # FLEET_SINK_ADDRESS and the ./keys mount below can drop to ./keys/fleet.
+      FLEET_SINK_ADDRESS: ${FLEET_SINK_ADDRESS:-}
       ORACLE_KEYPAIR_PATH: /app/keys/oracle-keypair.json
       PROGRAM_ID: ${PROGRAM_ID}
       LOG_LEVEL: info

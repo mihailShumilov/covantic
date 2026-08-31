@@ -1,5 +1,4 @@
 import { vi } from 'vitest';
-import type { Connection } from '@solana/web3.js';
 import type { HeliusClient } from '../../src/utils/helius.js';
 import type { BalanceReading } from '../../src/services/exploit/baseline.js';
 import type { GovernanceBaselineView } from '../../src/services/governance/types.js';
@@ -7,6 +6,7 @@ import { BPF_LOADER_UPGRADEABLE } from '../../src/services/governance/authority.
 import { BLOCK_TIME, mkParsedTx, type TokenBal, type TxSpec } from './exploit-corpus.js';
 import { AGENT, AGENT_USDC_ATA, ATTACKER, HOLDER, TOKEN_PROGRAM, USDC } from './exploit.js';
 import { SQUADS_V4 } from './governance.js';
+import type { SolanaReader } from '../../src/utils/solana-reader.js';
 
 /**
  * Labelled corpus for the governance pipeline.
@@ -128,14 +128,23 @@ export function mkHolders(testCase: GovernanceCase) {
 }
 
 /** A connection that serves the chain record and no corroboration. */
-export function mkConnection(spec: TxSpec, signature: string): Connection {
+export function mkReader(spec: TxSpec, signature: string): SolanaReader {
   const parsed = mkParsedTx(spec, signature);
   return {
-    getParsedTransaction: vi.fn(async () => parsed),
-    getTransaction: vi.fn(async () => ({ slot: 200_000, blockTime: BLOCK_TIME })),
-    getSignaturesForAddress: vi.fn(async () => []),
+    // Only the incident transaction is known. A corpus case is a statement
+    // about one transaction's authorization shape; anything else the pipeline
+    // reaches for is deliberately absent rather than silently the same tx.
+    getParsedTransaction: vi.fn(async (sig: string) => (sig === signature ? parsed : null)),
+    // Non-empty on purpose. An empty history is indistinguishable from an
+    // endpoint that does not know the account, and the delegate-provenance
+    // check treats that as unreadable — which is right in production and would
+    // make every corpus case indeterminate. One benign prior signature says
+    // "the history was read, and holds no approval".
+    getSignaturesForAddress: vi.fn(async () => [
+      { signature: 'PriorHistoryEntry', slot: 1, blockTime: 1, err: null, memo: null, confirmationStatus: 'finalized' },
+    ]),
     getAccountInfo: vi.fn(async () => null),
-  } as unknown as Connection;
+  } as unknown as SolanaReader;
 }
 
 export function mkHelius(tx: unknown): HeliusClient {

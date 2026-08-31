@@ -1,4 +1,4 @@
-import type { Connection } from '@solana/web3.js';
+import type { SolanaReader } from '../../utils/solana-reader.js';
 import type { HeliusClient, EnhancedTransaction } from '../../utils/helius.js';
 import { buildConsensusWindow } from '../oracle/consensus.js';
 import type { PriceOracle, PricePoint, PriceSourceId, PriceWindow } from '../oracle/types.js';
@@ -21,28 +21,26 @@ import type { Cassette, CassetteTx } from './types.js';
 // ---------------------------------------------------------------------------
 
 /**
- * A connection that serves one frozen transaction.
+ * A chain reader that serves one frozen transaction.
  *
  * The corroboration lookups return empty rather than throwing, which reports
  * those signatures as *evaluated and absent*. Making them unavailable instead
  * would let a case pass by being unknowable, and the point of a backtest is
  * the opposite.
  */
-export function cassetteConnection(cassette: Cassette): Connection {
+export function cassetteReader(cassette: Cassette): SolanaReader {
   const tx = cassette.tx;
   return {
     getParsedTransaction: async (signature: string) =>
       signature === cassette.signature ? tx : null,
-    getTransaction: async (signature: string) =>
-      signature === cassette.signature ? { slot: tx.slot, blockTime: tx.blockTime } : null,
     getSignaturesForAddress: async () => [],
     getAccountInfo: async () => null,
     // A cassette holds one transaction, not the block around it. Returning
     // null makes the same-block sandwich check report *unevaluated*, which is
     // true; synthesising a block containing only this transaction would say
     // "checked, nothing adjacent" about a block we never saw.
-    getBlock: async () => null,
-  } as unknown as Connection;
+    getBlockAccounts: async () => null,
+  } as unknown as SolanaReader;
 }
 
 export function cassetteHelius(cassette: Cassette): HeliusClient {

@@ -1,21 +1,34 @@
-import { Connection, PublicKey } from '@solana/web3.js';
-import type {
-  ParsedTransactionWithMeta,
-  ParsedInstruction,
-  PartiallyDecodedInstruction,
-  TokenBalance as SolanaTokenBalance,
-} from '@solana/web3.js';
+import { PublicKey } from '@solana/web3.js';
 import { logger } from './logger.js';
+import {
+  TOKEN_PROGRAM_ADDRESS,
+  type ParsedTokenBalanceEntry,
+  type ParsedTransactionView,
+  type SolanaReader,
+} from './solana-reader.js';
 
-/** Validate and parse a Base58 Solana address string into a PublicKey.
+/** A `jsonParsed` instruction, in either of the two shapes the RPC emits. */
+interface ParsedIxJson {
+  programId?: unknown;
+  accounts?: unknown[];
+  data?: unknown;
+  parsed?: unknown;
+}
+
+/** The message half of a parsed transaction, as the reader hands it over. */
+type ParsedMessage = NonNullable<ParsedTransactionView['transaction']>['message'];
+type ParsedMeta = ParsedTransactionView['meta'];
+
+/** Validate a Base58 Solana address, returning it unchanged.
  *  Throws a descriptive Error if the address is structurally invalid,
  *  preventing malformed input from propagating into RPC calls. */
-function parseAddress(address: string): PublicKey {
+function parseAddress(address: string): string {
   // Quick structural check before handing off to the crypto parser
   if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) {
     throw new Error(`Invalid Solana address format: ${address}`);
   }
-  return new PublicKey(address);
+  new PublicKey(address);
+  return address;
 }
 
 function delay(ms: number): Promise<void> {
@@ -162,10 +175,10 @@ const DEX_PROGRAMS = new Set([
  * Works with any Solana cluster (devnet, mainnet-beta, localnet).
  */
 export class SolanaRpcAnalyzer {
-  private connection: Connection;
+  private reader: SolanaReader;
 
-  constructor(connection: Connection) {
-    this.connection = connection;
+  constructor(reader: SolanaReader) {
+    this.reader = reader;
   }
 
   /** Fetch and analyze recent transactions for a wallet.
@@ -185,7 +198,7 @@ export class SolanaRpcAnalyzer {
     // transient failures; an empty array here means the wallet is legitimately
     // inactive and should NOT be conflated with an infrastructure error.
     const signatures = await withRpcRetry('getSignaturesForAddress', () =>
-      this.connection.getSignaturesForAddress(pubkey, { limit }),
+      this.reader.getSignaturesForAddress(pubkey, { limit }),
     );
 
     if (signatures.length === 0) return [];
@@ -199,7 +212,7 @@ export class SolanaRpcAnalyzer {
     // Step 3: Fetch parsed transactions sequentially with per-call retries.
     // Per-transaction errors degrade to null so a single bad sig doesn't abort
     // the whole assessment; hard RPC failures still bubble via withRpcRetry.
-    const parsedTxs = new Map<number, ParsedTransactionWithMeta | null>();
+    const parsedTxs = new Map<number, ParsedTransactionView | null>();
 
     for (let i = 0; i < sampleIndices.length; i++) {
       const idx = sampleIndices[i]!;
@@ -209,9 +222,7 @@ export class SolanaRpcAnalyzer {
 
       try {
         const tx = await withRpcRetry('getParsedTransaction', () =>
-          this.connection.getParsedTransaction(sig.signature, {
-            maxSupportedTransactionVersion: 0,
-          }),
+          this.reader.getParsedTransaction(sig.signature),
         );
         parsedTxs.set(idx, tx);
       } catch (err) {
@@ -246,23 +257,18 @@ export class SolanaRpcAnalyzer {
     const pubkey = parseAddress(address);
 
     const [balance, tokenAccounts] = await Promise.all([
-      withRpcRetry('getBalance', () => this.connection.getBalance(pubkey)),
+      withRpcRetry('getBalance', () => this.reader.getBalance(pubkey)),
       withRpcRetry('getParsedTokenAccountsByOwner', () =>
-        this.connection.getParsedTokenAccountsByOwner(pubkey, {
-          programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'),
-        }),
+        this.reader.getParsedTokenAccountsByOwner(pubkey, { programId: TOKEN_PROGRAM_ADDRESS }),
       ),
     ]);
 
-    const tokens: AnalyzedTokenBalance[] = tokenAccounts.value.map((account) => {
-      const parsed = account.account.data.parsed.info;
-      return {
-        mint: parsed.mint,
-        amount: Number(parsed.tokenAmount.amount),
-        decimals: parsed.tokenAmount.decimals,
-        tokenAccount: account.pubkey.toBase58(),
-      };
-    });
+    const tokens: AnalyzedTokenBalance[] = tokenAccounts.accounts.map((account) => ({
+      mint: account.mint,
+      amount: Number(account.amount),
+      decimals: account.decimals ?? 0,
+      tokenAccount: account.pubkey,
+    }));
 
     return { tokens, nativeBalance: balance };
   }
@@ -270,9 +276,7 @@ export class SolanaRpcAnalyzer {
   /** Get account info for a wallet */
   async getAccountInfo(address: string): Promise<AnalyzedAccountInfo | null> {
     const pubkey = parseAddress(address);
-    const info = await withRpcRetry('getAccountInfo', () =>
-      this.connection.getAccountInfo(pubkey),
-    );
+    const info = await withRpcRetry('getAccountInfo', () => this.reader.getAccountInfo(pubkey));
 
     if (!info) return null;
 
@@ -282,7 +286,7 @@ export class SolanaRpcAnalyzer {
     let createdAt: string | undefined;
     try {
       const sigs = await withRpcRetry('getSignaturesForAddress(age)', () =>
-        this.connection.getSignaturesForAddress(pubkey, { limit: 100 }),
+        this.reader.getSignaturesForAddress(pubkey, { limit: 100 }),
       );
       if (sigs.length > 0) {
         const oldest = sigs[sigs.length - 1];
@@ -297,7 +301,7 @@ export class SolanaRpcAnalyzer {
     return {
       createdAt,
       lamports: info.lamports,
-      owner: info.owner.toBase58(),
+      owner: info.owner,
       executable: info.executable,
     };
   }
@@ -307,12 +311,12 @@ export class SolanaRpcAnalyzer {
     walletAddress: string,
     signature: string,
     sigInfo: { blockTime?: number | null | undefined; err: unknown },
-    tx: ParsedTransactionWithMeta | null,
+    tx: ParsedTransactionView | null,
   ): AnalyzedTransaction {
     const timestamp = sigInfo.blockTime ?? 0;
     const hasError = sigInfo.err != null;
 
-    if (!tx) {
+    if (!tx?.transaction) {
       return {
         signature,
         timestamp,
@@ -331,16 +335,16 @@ export class SolanaRpcAnalyzer {
     const meta = tx.meta;
 
     // Extract instructions
-    const instructions = message.instructions.map((ix, ixIndex) => {
-      const programId = ix.programId.toBase58();
+    const instructions = message.instructions.map((raw, ixIndex) => {
+      const ix = raw as ParsedIxJson;
       const innerIxs = meta?.innerInstructions?.find((inner) => inner.index === ixIndex);
 
       return {
-        programId,
+        programId: String(ix.programId ?? ''),
         accounts: this.getInstructionAccounts(ix),
         data: this.getInstructionData(ix),
-        innerInstructions: innerIxs?.instructions.map((inner) => ({
-          programId: inner.programId.toBase58(),
+        innerInstructions: (innerIxs?.instructions as ParsedIxJson[] | undefined)?.map((inner) => ({
+          programId: String(inner.programId ?? ''),
           accounts: this.getInstructionAccounts(inner),
           data: this.getInstructionData(inner),
         })),
@@ -364,7 +368,7 @@ export class SolanaRpcAnalyzer {
       timestamp,
       type,
       fee: meta?.fee ?? 5000,
-      feePayer: message.accountKeys[0]?.pubkey.toBase58() ?? walletAddress,
+      feePayer: message.accountKeys[0]?.pubkey ?? walletAddress,
       transactionError: meta?.err ?? null,
       instructions,
       tokenTransfers,
@@ -373,27 +377,20 @@ export class SolanaRpcAnalyzer {
     };
   }
 
-  private getInstructionAccounts(
-    ix: ParsedInstruction | PartiallyDecodedInstruction,
-  ): string[] {
-    if ('accounts' in ix) {
-      return ix.accounts.map((a) => a.toBase58());
-    }
-    return [];
+  private getInstructionAccounts(ix: ParsedIxJson): string[] {
+    return Array.isArray(ix.accounts) ? ix.accounts.map((a) => String(a)) : [];
   }
 
-  private getInstructionData(
-    ix: ParsedInstruction | PartiallyDecodedInstruction,
-  ): string {
-    if ('data' in ix) return ix.data;
-    if ('parsed' in ix) return JSON.stringify(ix.parsed);
+  private getInstructionData(ix: ParsedIxJson): string {
+    if (typeof ix.data === 'string') return ix.data;
+    if (ix.parsed !== undefined) return JSON.stringify(ix.parsed);
     return '';
   }
 
   /** Classify transaction type based on program interactions */
   private classifyTransactionType(
     instructions: AnalyzedTransaction['instructions'],
-    meta: ParsedTransactionWithMeta['meta'],
+    meta: ParsedMeta,
     _walletAddress: string,
   ): string {
     const programIds = new Set(instructions.map((ix) => ix.programId));
@@ -434,8 +431,8 @@ export class SolanaRpcAnalyzer {
    *  largest sender with the largest receiver greedily. This avoids the
    *  incorrect assumption that all transfers involve the fee payer. */
   private extractNativeTransfers(
-    message: ParsedTransactionWithMeta['transaction']['message'],
-    meta: ParsedTransactionWithMeta['meta'],
+    message: ParsedMessage,
+    meta: ParsedMeta,
   ): AnalyzedTransaction['nativeTransfers'] {
     if (!meta) return [];
 
@@ -451,7 +448,7 @@ export class SolanaRpcAnalyzer {
 
       // Skip fee payer (index 0) fee deduction — only record if there is
       // a significant balance change beyond the tx fee
-      const address = accounts[i]!.pubkey.toBase58();
+      const address = accounts[i]!.pubkey;
       if (diff > 0) {
         receivers.push({ address, amount: diff });
       } else {
@@ -487,12 +484,12 @@ export class SolanaRpcAnalyzer {
 
   /** Extract token transfers from pre/post token balance changes */
   private extractTokenTransfers(
-    meta: ParsedTransactionWithMeta['meta'],
+    meta: ParsedMeta,
     walletAddress: string,
   ): AnalyzedTransaction['tokenTransfers'] {
     if (!meta) return [];
 
-    const preMap = new Map<string, SolanaTokenBalance>();
+    const preMap = new Map<string, ParsedTokenBalanceEntry>();
     for (const bal of meta.preTokenBalances ?? []) {
       const key = `${bal.owner ?? ''}-${bal.mint}`;
       preMap.set(key, bal);
@@ -504,8 +501,8 @@ export class SolanaRpcAnalyzer {
       const key = `${post.owner ?? ''}-${post.mint}`;
       const pre = preMap.get(key);
 
-      const preAmount = pre ? Number(pre.uiTokenAmount.amount) : 0;
-      const postAmount = Number(post.uiTokenAmount.amount);
+      const preAmount = pre ? Number(pre.uiTokenAmount?.amount ?? 0) : 0;
+      const postAmount = Number(post.uiTokenAmount?.amount ?? 0);
       const diff = postAmount - preAmount;
 
       if (diff !== 0 && post.owner) {
@@ -514,7 +511,7 @@ export class SolanaRpcAnalyzer {
           toUserAccount: diff > 0 ? post.owner : walletAddress,
           fromTokenAccount: '',
           toTokenAccount: '',
-          tokenAmount: Math.abs(diff) / (10 ** (post.uiTokenAmount.decimals ?? 0)),
+          tokenAmount: Math.abs(diff) / 10 ** (post.uiTokenAmount?.decimals ?? 0),
           mint: post.mint,
           tokenStandard: 'fungible',
         });
@@ -526,13 +523,13 @@ export class SolanaRpcAnalyzer {
 
   /** Extract account-level balance changes */
   private extractAccountData(
-    message: ParsedTransactionWithMeta['transaction']['message'],
-    meta: ParsedTransactionWithMeta['meta'],
+    message: ParsedMessage,
+    meta: ParsedMeta,
   ): AnalyzedTransaction['accountData'] {
     if (!meta) return [];
 
     return message.accountKeys.map((key, i) => ({
-      account: key.pubkey.toBase58(),
+      account: key.pubkey,
       nativeBalanceChange: (meta.postBalances[i] ?? 0) - (meta.preBalances[i] ?? 0),
       tokenBalanceChanges: [],
     }));

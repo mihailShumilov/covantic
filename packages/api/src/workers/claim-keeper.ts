@@ -26,6 +26,8 @@ import type { Connection } from '@solana/web3.js';
 import type { Database } from '../config/database.js';
 import type { AppConfig } from '../config/env.js';
 import { createSolanaConnection } from '../config/solana.js';
+import { getSolanaReader, type SolanaReader } from '../utils/solana-reader.js';
+import { fetchAnchorAccount } from '../utils/anchor-reader.js';
 import { claimEvidence, claims, policies } from '../db/schema.js';
 import { ADJUDICATOR_VERSION } from '../services/oracle/adjudicate.js';
 import { EXPLOIT_ADJUDICATOR_VERSION } from '../services/exploit/adjudicate.js';
@@ -127,15 +129,17 @@ export function startClaimKeeper(db: Database, redis: Redis, config: AppConfig) 
   // indexer. Every retrospective price lookup hangs off that timestamp, so
   // taking a single indexer's word for it is a single point of failure.
   const connection = createSolanaConnection(config.SOLANA_RPC_URL);
-  const proofPoster = new ProofPoster(connection, programCtx);
+  const reader = getSolanaReader(config);
+  const proofPoster = new ProofPoster(connection, programCtx, reader);
   const exploitProofPoster = new ExploitProofPoster(
     programCtx,
-    new CheckpointWriter(connection, programCtx),
+    reader,
+    new CheckpointWriter(connection, programCtx, reader),
   );
-  const authorityCheckpoints = new AuthorityCheckpointWriter(programCtx);
-  const governanceProofPoster = new GovernanceProofPoster(programCtx, authorityCheckpoints);
-  const mandates = new MandateReader(programCtx);
-  const agentErrorProofPoster = new AgentErrorProofPoster(programCtx, mandates);
+  const authorityCheckpoints = new AuthorityCheckpointWriter(programCtx, reader);
+  const governanceProofPoster = new GovernanceProofPoster(programCtx, reader, authorityCheckpoints);
+  const mandates = new MandateReader(programCtx, reader);
+  const agentErrorProofPoster = new AgentErrorProofPoster(programCtx, reader, mandates);
 
   const processQueue = new Queue<ClaimJobPayload>(PROCESS_QUEUE, {
     connection: redis,
@@ -156,6 +160,7 @@ export function startClaimKeeper(db: Database, redis: Redis, config: AppConfig) 
         helius,
         priceOracle,
         connection,
+        reader,
         processQueue,
         payoutQueue,
         config,
@@ -321,9 +326,23 @@ async function ingestAlert(
         );
         return;
       }
-      logger.info(
-        { policyId: active.policyId, agentAddress },
-        'claim-keeper: open claim already exists for policy (unique constraint)',
+      // The alert had nowhere to go. Worth a warning rather than an info line:
+      // for the approve-then-drain sequence both alerts land on the same sweep
+      // tick, the governance claim is still `pending` (so not supersedable),
+      // and the exploit alert — the only one of the two the protocol can
+      // actually prove — is dropped here. The monitoring event is already
+      // recorded, so the drain will not be raised again.
+      //
+      // Making it durable (re-evaluate when the claim next parks) is the real
+      // fix and is a queue change; this at least stops it being silent.
+      logger.warn(
+        {
+          policyId: active.policyId,
+          agentAddress,
+          trigger,
+          txSignature: effectiveTxSignature,
+        },
+        'claim-keeper: alert dropped — policy already holds an open claim that cannot be superseded',
       );
       return;
     }
@@ -378,7 +397,10 @@ interface ProcessDeps {
   programCtx: CovanticProgram;
   helius: HeliusClient;
   priceOracle: ConsensusPricer;
+  /** Signs and sends. Stays on the primary endpoint — see `rpc-pool.ts`. */
   connection: Connection;
+  /** Reads, across every configured endpoint. */
+  reader: SolanaReader;
   processQueue: Queue<ClaimJobPayload>;
   payoutQueue: Queue<PayoutJobPayload>;
   config: AppConfig;
@@ -423,7 +445,7 @@ function governanceLookups(
         GOVERNANCE_BASELINE_MAX_LEAD_SEC,
       ),
     holdingsNow: async () => {
-      const current = await readAgentBalances(deps.connection, claim.agentAddress);
+      const current = await readAgentBalances(deps.reader, claim.agentAddress);
       return {
         holdings: current.readings,
         frozen: current.frozen,
@@ -585,7 +607,7 @@ async function processClaim(claimId: string, deps: ProcessDeps): Promise<void> {
     programCtx,
     helius,
     priceOracle,
-    connection,
+    reader,
     processQueue,
     payoutQueue,
     config,
@@ -626,7 +648,7 @@ async function processClaim(claimId: string, deps: ProcessDeps): Promise<void> {
       priceOracle,
       {
         usdcMint: config.USDC_MINT,
-        connection,
+        reader,
         holderAddress: policy.holderAddress,
         governance: governanceLookups(claim, policy, deps),
         agentError: agentErrorLookups(claim, policy, deps),
@@ -753,6 +775,7 @@ async function executePayout(
   governanceProofPoster: GovernanceProofPoster,
   agentErrorProofPoster: AgentErrorProofPoster,
 ): Promise<void> {
+  const reader = getSolanaReader(config);
   const claim = await loadClaim(claimId, db);
   if (!claim) return;
   if (claim.status !== 'approved' && claim.status !== 'paying') {
@@ -876,6 +899,7 @@ async function executePayout(
       default:
         payoutSig = await verifyAndPayoutOnChain(
           programCtx,
+          reader,
           policy.holderAddress,
           BigInt(claim.policyId),
           BigInt(payoutAmount),
@@ -964,6 +988,11 @@ async function isPolicySettledOnChain(ctx: CovanticProgram, claim: ClaimRow): Pr
     new PublicKey(claim.holderAddress),
     BigInt(claim.policyId),
   );
+  // Deliberately NOT on the read pool. This asks whether *our own* payout
+  // landed, and a fallback endpoint a few slots behind the one we sent to
+  // would answer "not settled" about a policy that is — turning a completed
+  // payout into a retry. Reads that reconcile a write we just made belong on
+  // the endpoint we made it from.
   const onChain: any = await (ctx.program.account as any).insurancePolicy.fetchNullable(policy);
   return onChain !== null && Number(onChain.state) === PolicyState.ClaimPaid;
 }
@@ -1011,6 +1040,9 @@ async function supersedeParkedClaim(
       triggerType: claims.triggerType,
       status: claims.status,
       reviewReason: claims.reviewReason,
+      verifyAttempts: claims.verifyAttempts,
+      triggerTxSignature: claims.triggerTxSignature,
+      verificationData: claims.verificationData,
     })
     .from(claims)
     .where(
@@ -1042,8 +1074,31 @@ async function supersedeParkedClaim(
   // the claim it cannot prove while refusing the one it can. A claim parked on
   // a reason no retry can clear has no purchase on the slot, whatever its
   // trigger outranks.
+  //
+  // The tie rule survives both routes. `parkedForever` buys a *lower*
+  // specificity claim the slot; it does not license an equally specific repeat
+  // to take it, because that is exactly the stream-of-identical-alerts case
+  // above — and the reasons in `UNRESOLVABLE_PARK_REASONS` are per-policy
+  // conditions, so repeats on them are the norm, not the exception.
   const parkedForever = isPermanentlyParked(existing.reviewReason);
-  if (incoming <= current && !parkedForever) return null;
+  if (incoming === current) return null;
+  if (incoming < current && !parkedForever) return null;
+
+  // A claim three triggers have failed to explain is what a reviewer is for.
+  // Without a cap, an attacker alternating two trigger shapes churns the row
+  // between `pending` and `indeterminate` for the life of the policy.
+  const supersedeCount = supersedesSoFar(existing.verificationData) + 1;
+  if (supersedeCount > MAX_SUPERSEDES) {
+    logger.warn(
+      { claimId: existing.id, supersedeCount, trigger },
+      'claim-keeper: supersede cap reached; escalating to review instead of re-pointing',
+    );
+    await db
+      .update(claims)
+      .set({ status: 'review', reviewReason: 'supersede_cap_reached', updatedAt: new Date() })
+      .where(eq(claims.id, existing.id));
+    return null;
+  }
 
   // Conditional on the status still being parked, so a verifier that picked
   // the claim up between the select and here wins the race rather than having
@@ -1055,11 +1110,18 @@ async function supersedeParkedClaim(
       triggerTxSignature,
       status: 'pending',
       reviewReason: null,
-      verifyAttempts: 0,
+      // Carried, not reset. `handleIndeterminate` only escalates to review at
+      // MAX_VERIFY_ATTEMPTS, so zeroing this on every supersede meant a churned
+      // claim could never accumulate enough attempts to reach a human.
+      verifyAttempts: existing.verifyAttempts,
       verificationData: {
         ...verificationData,
         supersededTriggerType: existing.triggerType,
         supersededFromStatus: existing.status,
+        // Kept so the incident that opened the claim stays recoverable; the
+        // pointer used to be overwritten with nothing recording what it was.
+        supersededTxSignature: existing.triggerTxSignature,
+        supersedeCount,
         supersededReason: parkedForever
           ? `unresolvable:${existing.reviewReason ?? 'unknown'}`
           : 'higher_specificity',
@@ -1080,6 +1142,16 @@ async function supersedeParkedClaim(
     if (reloaded) await broadcastClaim(reloaded, redis);
   }
   return id;
+}
+
+/** Supersedes allowed before the claim goes to a human instead. */
+const MAX_SUPERSEDES = 2;
+
+/** How many times this claim has already been re-pointed at another trigger. */
+function supersedesSoFar(verificationData: unknown): number {
+  if (verificationData === null || typeof verificationData !== 'object') return 0;
+  const count = (verificationData as { supersedeCount?: unknown }).supersedeCount;
+  return typeof count === 'number' && Number.isFinite(count) ? count : 0;
 }
 
 async function submitClaimOnChain(
@@ -1111,7 +1183,10 @@ async function submitClaimOnChain(
     // stranded the claim at `verifying` forever: an OPEN status holding the
     // policy's only claim slot, which nothing else reconciles.
     //
-    // So ask the chain what actually happened before believing the error.
+    // So ask the chain what actually happened before believing the error —
+    // over the provider's own connection, not the read pool: this is the same
+    // "did our write land" question as `isPolicySettledOnChain`, and a lagging
+    // endpoint answering it would strand exactly the claim this rescues.
     const onChain: any = await (ctx.program.account as any).insurancePolicy
       .fetchNullable(policy)
       .catch(() => null);
@@ -1135,6 +1210,7 @@ const SUBMIT_SIGNATURE_UNKNOWN = 'unknown:reconciled-from-chain';
 
 async function verifyAndPayoutOnChain(
   ctx: CovanticProgram,
+  reader: SolanaReader,
   holderAddress: string,
   policyId: bigint,
   payoutAmount: bigint,
@@ -1142,8 +1218,16 @@ async function verifyAndPayoutOnChain(
   const holder = new PublicKey(holderAddress);
   const { config, vault, policy } = derivePdas(ctx.programId, holder, policyId);
 
-  const cfgAcc: any = await (ctx.program.account as any).protocolConfig.fetch(config);
-  const usdcMint = cfgAcc.usdcMint as PublicKey;
+  // Config names the covered mint and never changes, so unlike the two
+  // write-reconciliation reads above it is safe on the pool.
+  const cfgAcc = await fetchAnchorAccount<{ usdcMint: PublicKey }>(
+    ctx,
+    reader,
+    'protocolConfig',
+    config.toBase58(),
+  );
+  if (!cfgAcc) throw new Error('verifyAndPayout: protocol config account not found');
+  const usdcMint = cfgAcc.usdcMint;
   const vaultAta = getAssociatedTokenAddressSync(usdcMint, vault, true);
   const holderAta = getAssociatedTokenAddressSync(usdcMint, holder);
 

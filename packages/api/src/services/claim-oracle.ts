@@ -1,4 +1,3 @@
-import type { Connection } from '@solana/web3.js';
 import { LOCK_PERIODS, TriggerType } from '@covantic/shared';
 import { HeliusClient } from '../utils/helius.js';
 import { logger } from '../utils/logger.js';
@@ -17,6 +16,7 @@ import {
   type GovernanceVerifierOptions,
 } from './verifiers/governance-attack.js';
 import { verifyOracleManipulation } from './verifiers/oracle-manipulation.js';
+import type { SolanaReader } from '../utils/solana-reader.js';
 
 /**
  * Terminal state of a verification attempt.
@@ -58,11 +58,11 @@ export interface VerifyClaimOptions {
    *  outflow verifiers use authoritative balance deltas instead of
    *  summing tokenTransfers[]. */
   usdcMint?: string;
-  /** RPC connection used to cross-check the trigger transaction's block time
-   *  against the indexer, and — for exploits — to read the chain's own record
-   *  of who signed for what. Without it an exploit claim cannot be resolved
-   *  at all and returns `indeterminate`. */
-  connection?: Connection | null;
+  /** Multi-endpoint chain reader, used to cross-check the trigger
+   *  transaction's block time against the indexer and — for exploits — to
+   *  read the chain's own record of who signed for what. Without it an
+   *  exploit claim cannot be resolved at all and returns `indeterminate`. */
+  reader?: SolanaReader | null;
   /** Policy holder wallet. Value landing in an account the holder controls is
    *  the holder moving their own money, not a loss the vault owes. */
   holderAddress?: string;
@@ -77,7 +77,7 @@ export interface VerifyClaimOptions {
    * review — which is the correct behaviour before
    * `declare_governance_baseline` is deployed, and never a rejection.
    */
-  governance?: Omit<GovernanceVerifierOptions, 'connection' | 'holderAddress' | 'cohort'>;
+  governance?: Omit<GovernanceVerifierOptions, 'reader' | 'holderAddress' | 'cohort'>;
   /**
    * Lookups only the agent-error path needs: the holder's declared operating
    * envelope, and the agent's own outflow history.
@@ -90,7 +90,7 @@ export interface VerifyClaimOptions {
    */
   agentError?: Omit<
     AgentErrorVerifierOptions,
-    'connection' | 'holderAddress' | 'coveredMint'
+    'reader' | 'holderAddress' | 'coveredMint'
   >;
 }
 
@@ -143,25 +143,25 @@ export async function verifyClaim(
   switch (triggerType) {
     case TriggerType.Exploit:
       return verifyExploit(tx, agentAddress, coverageAmount, priceOracle, {
-        connection: options.connection ?? null,
+        reader: options.reader ?? null,
         holderAddress: options.holderAddress,
         cohort: options.cohort,
       });
     case TriggerType.OracleManipulation:
       return verifyOracleManipulation(tx, agentAddress, coverageAmount, priceOracle, {
-        connection: options.connection ?? null,
+        reader: options.reader ?? null,
       });
     case TriggerType.AgentError:
       return verifyAgentError(tx, agentAddress, coverageAmount, priceOracle, {
         ...(options.agentError ?? {}),
-        connection: options.connection ?? null,
+        reader: options.reader ?? null,
         holderAddress: options.holderAddress,
         coveredMint: options.usdcMint,
       });
     case TriggerType.GovernanceAttack:
       return verifyGovernanceAttack(tx, agentAddress, coverageAmount, priceOracle, {
         ...(options.governance ?? {}),
-        connection: options.connection ?? null,
+        reader: options.reader ?? null,
         holderAddress: options.holderAddress,
         cohort: options.cohort,
       });

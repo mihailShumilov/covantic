@@ -2,6 +2,7 @@ import { PublicKey } from '@solana/web3.js';
 import type { AppConfig } from '../config/env.js';
 import { createCovanticProgram, type CovanticProgram } from './program.js';
 import { logger } from './logger.js';
+import { getSolanaReader, type AccountInfoView } from './solana-reader.js';
 
 /**
  * Lazy, process-wide read-only handle to the Anchor program.
@@ -85,14 +86,14 @@ export async function fetchOnChainPolicy(
     return { policy: null, reason: null, detail: null };
   }
 
-  const pda = new PublicKey(pdaAddress);
-
   // Step 1: raw getAccountInfo so we can distinguish not-found /
   // owner-mismatch from a decode failure. Going through Anchor's
-  // fetchNullable alone collapses all three into one opaque throw.
-  let accountInfo: Awaited<ReturnType<typeof reader.connection.getAccountInfo>>;
+  // fetchNullable alone collapses all three into one opaque throw. The read
+  // goes through the endpoint pool, so `rpc-error` now means every configured
+  // endpoint failed rather than one provider having a bad minute.
+  let accountInfo: AccountInfoView | null;
   try {
-    accountInfo = await reader.connection.getAccountInfo(pda, 'confirmed');
+    accountInfo = await getSolanaReader(config).getAccountInfo(pdaAddress);
   } catch (err) {
     return {
       policy: null,
@@ -103,11 +104,12 @@ export async function fetchOnChainPolicy(
   if (!accountInfo) {
     return { policy: null, reason: 'not-found', detail: null };
   }
-  if (!accountInfo.owner.equals(reader.programId)) {
+  const programId = reader.programId.toBase58();
+  if (accountInfo.owner !== programId) {
     return {
       policy: null,
       reason: 'owner-mismatch',
-      detail: `Account owner ${accountInfo.owner.toBase58()} != program ${reader.programId.toBase58()} (likely orphan from an earlier program deployment)`,
+      detail: `Account owner ${accountInfo.owner} != program ${programId} (likely orphan from an earlier program deployment)`,
     };
   }
 

@@ -21,8 +21,16 @@
  * to the current layout.
  *
  * Both are permissionless and idempotent — they return early when the account
- * is already large enough — so re-running this is safe and doing so is the
- * cheapest way to be sure. The signer pays the rent top-up, nothing more.
+ * is already large enough — so re-running this is safe. The signer pays the
+ * rent top-up, nothing more.
+ *
+ * "Idempotent" is load-bearing and was, briefly, not quite true: the vault
+ * migration seeded `loss_index` whenever it read zero, and a vault whose
+ * stakers had been wiped out to the last unit also read zero — so a re-run
+ * restored full scale and erased a socialised loss. The program now floors the
+ * index at 1 and only seeds an account it actually grew. This script still
+ * skips a vault that is already the right size, so an unnecessary transaction
+ * is not sent at all.
  */
 
 import { readFileSync } from 'node:fs';
@@ -35,6 +43,7 @@ loadDotenv({ path: resolve(import.meta.dirname, '../../../.env') });
 import { AnchorProvider, Program, Wallet, type Idl } from '@coral-xyz/anchor';
 import { Connection, Keypair, PublicKey, SystemProgram } from '@solana/web3.js';
 import { PDA_SEEDS } from '@covantic/shared';
+import { rpcEndpointName } from '../src/config/rpc-pool.js';
 
 const REPO_ROOT = resolve(import.meta.dirname, '../../..');
 const IDL_PATH = resolve(REPO_ROOT, 'packages/anchor/target/idl/covantic.json');
@@ -52,6 +61,13 @@ function loadKeypair(path: string): Keypair {
   return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(abs, 'utf-8')) as number[]));
 }
 
+/**
+ * `8 + InsuranceVault::INIT_SPACE` — the size the vault migration grows to.
+ * Read from the account after a successful migration rather than recomputed
+ * from the IDL, because the IDL on disk can be older than the deployment.
+ */
+const VAULT_MIGRATED_SIZE = 136;
+
 async function main(): Promise<void> {
   const dryRun = process.argv.includes('--dry-run');
   const rpcUrl = process.env.SOLANA_RPC_URL ?? 'https://api.devnet.solana.com';
@@ -66,7 +82,7 @@ async function main(): Promise<void> {
   const program = new Program(idl, provider);
   const programId = program.programId;
 
-  console.log(`rpc     ${rpcUrl}`);
+  console.log(`rpc     ${rpcEndpointName(rpcUrl)}`);
   console.log(`program ${programId.toBase58()}`);
   console.log(`payer   ${payer.publicKey.toBase58()}`);
   if (dryRun) console.log('DRY RUN — nothing will be sent\n');
@@ -78,8 +94,13 @@ async function main(): Promise<void> {
     throw new Error(`vault ${vault.toBase58()} does not exist — is the protocol initialised?`);
   }
   console.log(`\nvault ${vault.toBase58()} — ${vaultInfo.data.length} bytes`);
+  // The program returns early on an already-sized account, so this only saves
+  // a transaction — but it also makes the log say what actually happened
+  // rather than reporting a migration that did nothing.
+  const vaultAlreadySized = vaultInfo.data.length >= VAULT_MIGRATED_SIZE;
+  if (vaultAlreadySized) console.log('  already migrated — skipping');
 
-  if (!dryRun) {
+  if (!dryRun && !vaultAlreadySized) {
     const signature = await program.methods
       .migrateVault()
       .accounts({ payer: payer.publicKey, vault, systemProgram: SystemProgram.programId })

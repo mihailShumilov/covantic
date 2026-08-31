@@ -1,0 +1,50 @@
+# The autonomous agent fleet runner.
+#
+# Separate from Dockerfile.api on purpose. The fleet is the least-trusted
+# process in the stack — it drives throwaway agents and deliberately lands
+# malformed transactions — and it runs a TypeScript file through `tsx`, so it
+# needs devDependencies the settlement process should not be shipping.
+#
+# Pinned by digest: `node:22-alpine` is a moving tag, so two builds months
+# apart are two different base images and a rebuild is not reproducible.
+# Bump deliberately — `docker manifest inspect node:22-alpine` for the current
+# one — rather than inheriting whatever the tag points at that day.
+FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS base
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+WORKDIR /app
+
+# Copy workspace files
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml tsconfig.base.json ./
+COPY packages/api/package.json ./packages/api/
+COPY packages/shared/package.json ./packages/shared/
+
+# Install dependencies
+RUN pnpm install --frozen-lockfile
+
+# Copy source code
+COPY packages/api/ ./packages/api/
+COPY packages/shared/ ./packages/shared/
+
+# Copy the anchor IDL (produced locally by `anchor build`). The API's
+# loadIdl() scans packages/anchor/target/idl/covantic.json — without it,
+# solvency-checker, policy-indexer, and claim-keeper all fail at boot.
+COPY packages/anchor/target/idl/ ./packages/anchor/target/idl/
+
+# Build
+RUN pnpm --filter shared build && pnpm --filter api build
+
+# Deliberately NOT pruned: this image exists to run `scripts/fleet-start.ts`
+# through `tsx`, which is a devDependency. That is the whole reason the fleet
+# has its own image — the api image is pruned, and sharing one would have
+# meant shipping the build toolchain into the process that settles claims.
+
+# Drop privileges. The image only reads from /app and writes nothing at
+# runtime, so there is no reason for the process to be root.
+#
+# One deployment consequence, learned the hard way: the mounted key material
+# in ./keys must be readable by uid 1000. It was root-owned 0600 and every
+# container using it failed with EACCES on the first deploy of this image.
+# `chown -R 1000:1000 docker/keys` — chown only; the 0600 stays.
+USER node
+
+CMD ["pnpm", "--filter", "api", "exec", "tsx", "scripts/fleet-start.ts"]

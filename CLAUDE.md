@@ -123,10 +123,59 @@ Filter to single package: `pnpm --filter api dev`, `pnpm --filter web dev`
   no I/O, no clock, no randomness. Bump `EXPLOIT_ADJUDICATOR_VERSION` rather
   than editing quietly. `claim-replay` dispatches on the bundle's own
   `triggerType`, so a bundle is self-contained evidence.
+- **Every chain READ goes through `SolanaReader`; every chain WRITE stays on the
+  v1 `Connection`.** Reads fan out across `SOLANA_RPC_URL` plus
+  `SOLANA_RPC_FALLBACK_URLS` with per-endpoint circuit breakers
+  (`packages/api/src/config/rpc-pool.ts`, built on `solana-resilience-kit`);
+  sends do not, because a transaction that lands twice is worse than one that
+  lands late. The reader hands back plain numbers, strings and Buffers — no
+  `bigint` and no web3.js types cross that boundary, or the canonical JSON
+  behind every evidence hash would change and `pnpm claim:replay` would stop
+  agreeing with stored verdicts. Do not thread a `Connection` into a verifier
+  again: one endpoint was a single point of failure for *settlement*, since a
+  quota outage stops the balance checkpoints the exploit and agent-error proof
+  paths are bounded by. `GET /api/health/rpc` reports per-endpoint state.
+  Anchor account reads go through `utils/anchor-reader.ts` for the same reason
+  — `program.account.X.all()` is a `getProgramAccounts` on one endpoint's
+  quota, every 60 s — with **exactly three exceptions**, each carrying a
+  comment saying so and enforced by `tests/read-pool-discipline.test.ts`: a
+  read that asks whether *our own* write landed (`isPolicySettledOnChain`, the
+  `ClaimPending` rescue in the keeper, `AttestationPublisher.fetchExisting`)
+  stays on the connection we wrote from, because an endpoint a few slots behind
+  would answer "no" about a transaction that succeeded. That list was once
+  written as three and was actually nine; the test exists so it cannot drift
+  again.
+- **Every endpoint's cluster is verified at boot** (`verifyReaderCluster`). A
+  wrong-chain endpoint answers `getAccountInfo` with an authoritative "does not
+  exist", which this codebase is contractually required to read as *absence* —
+  turning a holder's matured declaration into a record it was never made. A
+  mismatched fallback is ejected; a mismatched primary refuses the process.
+- **A JSON-RPC error body is a failure, not a success.** `-32005 node is
+  behind` and friends arrive as HTTP 200, kit's transport only throws on
+  `!response.ok`, and the pool only fails over on a throw — so
+  `withCircuitBreaker` converts them. Without that the one failure class most
+  likely to be answerable by another endpoint never fails over, and the health
+  surface reports `ok` throughout.
+- **A read that can close a claim is corroborated by a second endpoint.**
+  `fetchAnchorAccount(..., { corroborate: true })` reads a holder's governance
+  baseline and agent mandate from two endpoints and requires them to agree;
+  a disagreement throws, so the claim resolves to review. The asymmetry is the
+  reason: the four proof instructions re-derive a payout from state the program
+  reads itself, so no endpoint can cause an *overpayment* — but rejection is
+  computed entirely off chain, is terminal, and its whole basis was one
+  endpoint's answer. For an insurance protocol, wrongful denial is the loss the
+  product exists to prevent.
+- **A drain through a delegate the agent itself approved is not an exploit.**
+  Only an account's owner can sign `Approve`, so the consent is real and sits
+  one transaction earlier. `services/exploit/delegate-provenance.ts` resolves
+  it and `adjudicateExploit` routes `granted_by_agent` to
+  `agent_delegated_movement` (rejected) and an unreadable history to
+  `indeterminate` — never to a payout. Without this a holder could buy 100,000
+  USDC of cover for 0.57 USDC, drain to their own second wallet, and be paid.
 - **Authorization, not program membership, decides an exploit.** The verifier
   asks who signed for the movement — signer flags, transfer authority,
   delegates, `SetAuthority`/`CloseAccount`, destination control — all read from
-  `connection.getParsedTransaction`. The Helius payload cannot answer any of
+  `reader.getParsedTransaction`. The Helius payload cannot answer any of
   it, so an exploit claim without a chain record is `indeterminate`, never
   rejected. Do not reintroduce "unknown program ⇒ exploit" or "DEX present ⇒
   not an exploit"; both were false-positive/false-negative engines.

@@ -1,4 +1,4 @@
-import type { Connection } from '@solana/web3.js';
+import type { SolanaReader } from '../../utils/solana-reader.js';
 import type { EnhancedTransaction } from '../../utils/helius.js';
 import { logger } from '../../utils/logger.js';
 
@@ -27,7 +27,7 @@ export interface TxTime {
  * Everything downstream hangs off this: the price window, the slot-indexed
  * pool state, the reversion test. Getting it from a single indexer would
  * make the whole evidence chain depend on that indexer being right, so when
- * an RPC connection is available the Helius value is cross-checked against
+ * a chain reader is available the Helius value is cross-checked against
  * `getTransaction().blockTime` and any disagreement is recorded.
  *
  * Returns `blockTime: null` when no plausible time can be established. The
@@ -37,22 +37,19 @@ export interface TxTime {
  */
 export async function resolveTxTime(
   tx: EnhancedTransaction,
-  connection?: Connection | null,
+  reader?: SolanaReader | null,
 ): Promise<TxTime> {
   const heliusTime = plausible(tx.timestamp) ? tx.timestamp : null;
   const heliusSlot = typeof tx.slot === 'number' && tx.slot > 0 ? tx.slot : null;
 
-  if (!connection) {
+  if (!reader) {
     return { slot: heliusSlot, blockTime: heliusTime };
   }
 
   let rpcTime: number | null = null;
   let rpcSlot: number | null = null;
   try {
-    const parsed = await connection.getTransaction(tx.signature, {
-      maxSupportedTransactionVersion: 0,
-      commitment: 'confirmed',
-    });
+    const parsed = await reader.getParsedTransaction(tx.signature);
     if (parsed) {
       rpcTime = plausible(parsed.blockTime ?? null) ? (parsed.blockTime as number) : null;
       rpcSlot = parsed.slot ?? null;

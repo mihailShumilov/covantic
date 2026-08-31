@@ -1,6 +1,8 @@
 import { PublicKey } from '@solana/web3.js';
 import { PDA_SEEDS, policyIdToBytes } from '@covantic/shared';
 import type { CovanticProgram } from '../../utils/program.js';
+import { fetchAnchorAccount } from '../../utils/anchor-reader.js';
+import type { SolanaReader } from '../../utils/solana-reader.js';
 import type { MandateView } from './types.js';
 
 /**
@@ -12,7 +14,16 @@ import type { MandateView } from './types.js';
  * client is `scripts/declare-agent-mandate.ts`; this process only looks.
  */
 export class MandateReader {
-  constructor(private readonly ctx: CovanticProgram) {}
+  /**
+   * @param reader reads the declaration over the endpoint pool — see the note
+   * on `GovernanceCheckpointWriter`: a matured, holder-signed declaration
+   * cannot be affected by an endpoint's lag, but an outage reading it sends a
+   * claim to review.
+   */
+  constructor(
+    private readonly ctx: CovanticProgram,
+    private readonly reader: SolanaReader,
+  ) {}
 
   derivePolicyPda(holder: PublicKey, policyId: bigint): PublicKey {
     return PublicKey.findProgramAddressSync(
@@ -75,9 +86,17 @@ export class MandateReader {
     claimSubmittedAt: number,
   ): Promise<MandateView | null> {
     const policy = this.derivePolicyPda(new PublicKey(holderAddress), policyId);
-    const raw = (await this.accounts().policyAgentMandate!.fetchNullable(
-      this.deriveMandatePda(policy),
-    )) as RawMandate | null;
+    const raw = await fetchAnchorAccount<RawMandate>(
+      this.ctx,
+      this.reader,
+      'policyAgentMandate',
+      this.deriveMandatePda(policy).toBase58(),
+      // Absence here is what sends the claim to review — and, since these
+      // reasons are in `UNRESOLVABLE_PARK_REASONS`, what lets any later alert
+      // take the policy's only claim slot. Too consequential to rest on one
+      // endpoint's word.
+      { corroborate: true },
+    );
     if (!raw) return null;
 
     const effectiveAt = num(raw.effectiveAt);
