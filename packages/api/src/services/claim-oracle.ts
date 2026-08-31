@@ -17,6 +17,8 @@ import {
 } from './verifiers/governance-attack.js';
 import { verifyOracleManipulation } from './verifiers/oracle-manipulation.js';
 import type { SolanaReader } from '../utils/solana-reader.js';
+import type { EnhancedTransaction } from '../utils/helius.js';
+import { enhancedFromRawTx, fetchRawTxView } from './exploit/raw-tx.js';
 
 /**
  * Terminal state of a verification attempt.
@@ -124,13 +126,32 @@ export async function verifyClaim(
 ): Promise<VerificationResult> {
   logger.info({ triggerType, triggerTxSignature, agentAddress }, 'verifyClaim: dispatching');
 
-  const tx = await helius.getParsedTransaction(triggerTxSignature).catch((err) => {
-    logger.warn(
-      { err: err instanceof Error ? err.message : err, triggerTxSignature },
-      'verifyClaim: getParsedTransaction failed',
-    );
-    return null;
-  });
+  // The chain first, the indexer second.
+  //
+  // This used to be `helius.getParsedTransaction` alone, which made every
+  // verdict on every trigger conditional on one vendor answering. When that
+  // vendor's quota ran out, each claim resolved `trigger_tx_not_found` —
+  // `indeterminate`, then review — and the recorded note said "indexer lag or
+  // wrong cluster", both transient, neither true. Settlement stopped and
+  // nothing said so.
+  //
+  // The enrichment the indexer adds decides nothing here: `type` and `source`
+  // are its guess at what a transaction *was*, and reading those was the
+  // retired verifiers' central mistake. What the verifiers use is balance
+  // changes, and the chain has those.
+  let tx: EnhancedTransaction | null = null;
+  const view = options.reader ? await fetchRawTxView(options.reader, triggerTxSignature) : null;
+  if (view) {
+    tx = enhancedFromRawTx(view);
+  } else {
+    tx = await helius.getParsedTransaction(triggerTxSignature).catch((err) => {
+      logger.warn(
+        { err: err instanceof Error ? err.message : err, triggerTxSignature },
+        'verifyClaim: getParsedTransaction failed',
+      );
+      return null;
+    });
+  }
 
   if (!tx) {
     // Indexers lag. A signature that is not resolvable yet is not evidence
@@ -143,7 +164,10 @@ export async function verifyClaim(
       details: {
         reason: 'trigger_tx_not_found',
         triggerTxSignature,
-        note: 'Transaction not resolvable yet — indexer lag or wrong cluster.',
+        note: options.reader
+          ? 'Neither the endpoint pool nor the indexer could resolve this signature.'
+          : 'Transaction not resolvable yet — indexer lag or wrong cluster.',
+        resolvedVia: 'none',
       },
       lockPeriod: lockPeriodFor(triggerType),
       retryAfterSec: 30,
