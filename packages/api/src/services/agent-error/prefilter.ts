@@ -1,6 +1,7 @@
 import { canonicalMint, lookupMint } from '@covantic/shared';
 import type { EnhancedTransaction } from '../../utils/helius.js';
-import { positionFromEnhanced } from '../exploit/position.js';
+import { positionFromEnhanced, positionFromRawTx } from '../exploit/position.js';
+import type { RawTxView } from '../exploit/raw-tx.js';
 import type { MandateView, OutflowBaselineView } from './types.js';
 
 /**
@@ -101,8 +102,47 @@ export function screenForMandateBreach(
   // exists to prevent recurring.
   if (tx.transactionError) return NOT_FLAGGED;
 
+  return decideMandateBreach(outflowsByMint(tx, agentAddress), options);
+}
+
+/**
+ * The same screen, over the chain's own record of the transaction.
+ *
+ * Detection for this trigger used to exist on the webhook path alone: nothing
+ * but `POST /api/monitoring/webhook` ever reached `screenForMandateBreach`. So
+ * the trigger the protocol's autonomy rests on — the one a holder can
+ * legitimately stage, because it is measured against their own declaration —
+ * was the one trigger that stopped being detected the moment a third party's
+ * delivery stopped. Exploit and governance already had `screenRawTx*` twins
+ * running on the sweep; this is the missing third.
+ *
+ * `RawTxView` is the stronger shape, not a fallback: it carries each token
+ * account's owner on both sides of the transaction, so the retention floor is
+ * compared against a balance actually read rather than reported as
+ * unevaluated.
+ */
+export function screenRawTxForMandateBreach(
+  view: RawTxView,
+  agentAddress: string,
+  options: AgentErrorScreenOptions = {},
+): AgentErrorScreenResult {
+  if (view.err) return NOT_FLAGGED;
+
+  return decideMandateBreach(outflowsFromRawTx(view, agentAddress), options);
+}
+
+/**
+ * The verdict, given what left the agent.
+ *
+ * Shared so the two entry points cannot drift: a screen that fires on the
+ * webhook path and stays silent on the sweep would make detection depend on
+ * which one happened to see the transaction first.
+ */
+function decideMandateBreach(
+  outgoing: MintOutflow[],
+  options: AgentErrorScreenOptions,
+): AgentErrorScreenResult {
   const coveredMint = options.coveredMint ? canonicalMint(options.coveredMint) : null;
-  const outgoing = outflowsByMint(tx, agentAddress);
   if (outgoing.length === 0) return NOT_FLAGGED;
 
   const coveredLeg = coveredMint
@@ -254,6 +294,19 @@ interface MintOutflow {
  * the verifier from it — which is the right direction: the verifier reads the
  * chain's own record and rejects it as `within_mandate` or `no_net_loss`.
  */
+/**
+ * What left the agent, from the chain's own record.
+ *
+ * No `tokenTransfers` fallback, because there is nothing to fall back *to*:
+ * `RawTxView` always carries pre and post balances, and a leg it cannot see
+ * is a leg that did not move.
+ */
+function outflowsFromRawTx(view: RawTxView, agentAddress: string): MintOutflow[] {
+  return positionFromRawTx(view, agentAddress)
+    .legs.filter((leg) => leg.deltaRaw < 0)
+    .map((leg) => describe(leg.mint, Math.abs(leg.deltaRaw), leg.decimals, leg.afterRaw));
+}
+
 function outflowsByMint(tx: EnhancedTransaction, agentAddress: string): MintOutflow[] {
   const position = positionFromEnhanced(tx, agentAddress);
   const fromDeltas = position.legs
