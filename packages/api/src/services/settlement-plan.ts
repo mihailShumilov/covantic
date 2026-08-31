@@ -32,7 +32,27 @@ export type SettlementPlan =
   | { kind: 'legacy' }
   | { kind: 'unprovable'; reason: string };
 
-export function planProvenSettlement(claim: ClaimRow, config: AppConfig): SettlementPlan {
+/**
+ * @param freshBundleHash the hash `recordEvidence` produced on *this* pass.
+ *
+ * Required, and the reason is the whole defect this parameter closes. The
+ * keeper computes the hash, then decides the lane, then persists the hash — so
+ * reading it back off `claim.verificationData` reads the row as it was loaded
+ * *before* this pass, where the hash for this verdict does not exist yet.
+ * Every proof path therefore planned `no_bundle_hash` on its first pass, and a
+ * confirmed verdict has no second pass: it goes to review.
+ *
+ * The consequence is larger than it looks. All four proven instructions were
+ * unreachable on real claims. What had been observed paying were simulated
+ * ones, which `syntheticVerification` scores at confidence 1.0 — above
+ * `AUTO_PAY_CONFIDENCE`, the one lane that settles without asking for chain
+ * proof at all.
+ */
+export function planProvenSettlement(
+  claim: ClaimRow,
+  config: AppConfig,
+  freshBundleHash?: string | null,
+): SettlementPlan {
   const data = (claim.verificationData ?? {}) as VerificationData & {
     proof?: ProofInputs;
     blockTime?: number;
@@ -45,6 +65,10 @@ export function planProvenSettlement(claim: ClaimRow, config: AppConfig): Settle
   // chain for either proof instruction to read.
   if (data.simulated === true) return { kind: 'legacy' };
 
+  // This pass's hash first; the persisted one only for a later pass over a
+  // claim whose evidence was recorded earlier.
+  const hash = freshBundleHash ?? data.bundleHash;
+
   if (claim.triggerType === TriggerType.OracleManipulation) {
     if (!config.ORACLE_PROOF_ENABLED) return { kind: 'legacy' };
     if (!data.proof?.signedUpdateHex) {
@@ -53,12 +77,12 @@ export function planProvenSettlement(claim: ClaimRow, config: AppConfig): Settle
     if (typeof data.blockTime !== 'number') {
       return { kind: 'unprovable', reason: 'no_trigger_block_time' };
     }
-    if (!data.bundleHash) return { kind: 'unprovable', reason: 'no_bundle_hash' };
+    if (!hash) return { kind: 'unprovable', reason: 'no_bundle_hash' };
     return {
       kind: 'proven_price',
       proof: data.proof,
       triggerBlockTime: data.blockTime,
-      bundleHash: data.bundleHash,
+      bundleHash: hash,
     };
   }
 
@@ -69,8 +93,8 @@ export function planProvenSettlement(claim: ClaimRow, config: AppConfig): Settle
     // checkpoint, so the only thing to carry across is the commitment to the
     // off-chain evidence — which is precisely the part the chain cannot
     // check and therefore the part that must be on the record.
-    if (!data.bundleHash) return { kind: 'unprovable', reason: 'no_bundle_hash' };
-    return { kind: 'proven_balance', bundleHash: data.bundleHash };
+    if (!hash) return { kind: 'unprovable', reason: 'no_bundle_hash' };
+    return { kind: 'proven_balance', bundleHash: hash };
   }
 
   if (claim.triggerType === TriggerType.GovernanceAttack) {
@@ -80,13 +104,13 @@ export function planProvenSettlement(claim: ClaimRow, config: AppConfig): Settle
     // decides whether control left the declared set. The only thing to carry
     // across is the commitment to the off-chain evidence — the part the chain
     // cannot check, and therefore the part that must be on the record.
-    if (!data.bundleHash) return { kind: 'unprovable', reason: 'no_bundle_hash' };
-    return { kind: 'proven_authority', bundleHash: data.bundleHash };
+    if (!hash) return { kind: 'unprovable', reason: 'no_bundle_hash' };
+    return { kind: 'proven_authority', bundleHash: hash };
   }
 
   if (claim.triggerType === TriggerType.AgentError) {
     if (!config.AGENT_ERROR_PROOF_ENABLED) return { kind: 'legacy' };
-    if (!data.bundleHash) return { kind: 'unprovable', reason: 'no_bundle_hash' };
+    if (!hash) return { kind: 'unprovable', reason: 'no_bundle_hash' };
     // The dimension check the other three paths do not need.
     //
     // A mandate has five dimensions and the program can re-derive two of them:
@@ -103,7 +127,7 @@ export function planProvenSettlement(claim: ClaimRow, config: AppConfig): Settle
     if (data.breachProvable !== true) {
       return { kind: 'unprovable', reason: 'breach_not_chain_checkable' };
     }
-    return { kind: 'proven_mandate', bundleHash: data.bundleHash };
+    return { kind: 'proven_mandate', bundleHash: hash };
   }
 
   return { kind: 'legacy' };

@@ -782,7 +782,11 @@ async function processClaim(claimId: string, deps: ProcessDeps): Promise<void> {
   // verifier computed a score and nothing compared it to anything, so a
   // verdict the code itself called 0.6 confident released the same funds as
   // one at 0.95.
-  const plan = planProvenSettlement(claim, config);
+  // The hash from *this* pass, not the row's.  produced it a
+  // few lines up and it is not persisted until after this decision, so reading
+  // it off the claim would find the value from a previous pass — which, for a
+  // verdict reached on the first pass, is nothing at all.
+  const plan = planProvenSettlement(claim, config, evidenceHash);
   const lane = decideLane({
     triggerType: claim.triggerType,
     confidence: result.confidence,
