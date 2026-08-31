@@ -189,6 +189,43 @@ describe('resolveDelegateProvenance', () => {
   });
 });
 
+describe('the same-transaction variant', () => {
+  it('reads an approval inside the incident transaction as the agent\u2019s consent', async () => {
+    // Otherwise the whole check is a one-line bypass: put the approve and the
+    // transfer in one transaction and the prior-history scan finds nothing.
+    // The agent signed *this* transaction, so its consent is not in doubt.
+    const atomic = drainTx();
+    atomic.transaction.message.instructions.unshift({
+      programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+      program: 'spl-token',
+      parsed: { type: 'approve', info: { source: AGENT_ATA, delegate: DELEGATE, owner: AGENT } },
+    } as never);
+    atomic.transaction.message.accountKeys.push({
+      pubkey: AGENT,
+      signer: true,
+      writable: true,
+    } as never);
+
+    const v = toRawTxView(atomic as never, DRAIN_SIG);
+    const rep = analyseAuthorization({ view: v, position: positionFromRawTx(v, AGENT), agentAddress: AGENT });
+    // No history is consulted at all — the transaction answers it.
+    const reader = mkReader({
+      getSignaturesForAddress: vi.fn(async () => {
+        throw new Error('history must not be needed');
+      }),
+    });
+
+    const provenance = await resolveDelegateProvenance(reader, v, rep, AGENT);
+
+    expect(provenance.allGrantedByAgent).toBe(true);
+    expect(provenance.authorities[0]).toMatchObject({
+      authority: DELEGATE,
+      origin: 'granted_by_agent',
+      grantedBy: DRAIN_SIG,
+    });
+  });
+});
+
 describe('adjudicateExploit — the delegate drain does not pay', () => {
   function bundleWith(provenance: unknown, signatureScore = 0.75) {
     const v = view();
