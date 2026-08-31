@@ -449,9 +449,14 @@ export class SolanaReader {
       // The memcmp filter's `bytes` is a branded base58 string in kit's types
       // and a plain string on the wire; the cast is at the call, not spread
       // through the shape.
+      // `withContext` is not optional here. Without it `getProgramAccounts`
+      // answers with a bare array and no context slot at all, so a consumer
+      // that refuses a listing older than the one it already applied has
+      // nothing to compare — the guard reads 0 every time and never fires.
       const options = {
         encoding: 'base64',
         commitment: 'confirmed',
+        withContext: true,
         filters: [{ memcmp: { offset: 0n, bytes: discriminatorBase58, encoding: 'base58' } }],
       };
       const res = await this.rpc
@@ -461,9 +466,13 @@ export class SolanaReader {
         )
         .send();
 
-      const context = (res as unknown as { context?: { slot?: bigint } }).context;
-      const accounts = (
-        res as unknown as Array<{ pubkey: string; account: Record<string, unknown> }>
+      const withContext = res as unknown as {
+        context?: { slot?: bigint };
+        value?: Array<{ pubkey: string; account: Record<string, unknown> }>;
+      };
+      const context = withContext.context;
+      const accounts = (withContext.value ??
+        (res as unknown as Array<{ pubkey: string; account: Record<string, unknown> }>)
       ).map(
         (entry) => {
           const [encoded] = entry.account.data as unknown as [string, string];
