@@ -26,8 +26,9 @@ import {
  */
 
 describe('INV-PARK-01 — a transient dead end is not a standing fact', () => {
-  it('classifies the transaction-level reason apart from the policy-level ones', () => {
+  it('classifies our own failures apart from facts about the policy', () => {
     expect(isTransientlyParked('trigger_tx_not_found')).toBe(true);
+    expect(isTransientlyParked('proof_path_unavailable')).toBe(true);
 
     for (const reason of ['no_mandate_declared', 'mandate_not_matured', 'no_governance_baseline']) {
       expect(isTransientlyParked(reason), reason).toBe(false);
@@ -52,8 +53,10 @@ describe('INV-PARK-01 — a transient dead end is not a standing fact', () => {
 
   it('stays narrow — a growing list would re-open the churn the tie rule closes', () => {
     // If this needs updating, the question to answer first is whether the new
-    // reason is about the transaction or about the policy. Only the former
-    // belongs here.
-    expect(TRANSIENT_PARK_REASONS).toEqual(['trigger_tx_not_found']);
+    // reason describes something *we* failed to do or a fact about the policy.
+    // Only the former belongs here: a policy-level condition repeats by
+    // nature, and letting repeats take the slot is the churn the tie rule
+    // exists to stop.
+    expect(TRANSIENT_PARK_REASONS).toEqual(['trigger_tx_not_found', 'proof_path_unavailable']);
   });
 });

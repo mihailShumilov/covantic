@@ -96,28 +96,43 @@ export const UNRESOLVABLE_PARK_REASONS: readonly string[] = [
   // and the keeper only settles on this after exhausting its retries. Holding
   // the slot on it keeps a policy deaf for no benefit.
   'trigger_tx_not_found',
+  // Same shape, ours rather than the indexer's: the plan could not reach the
+  // on-chain instruction, so nothing was weighed. See `TRANSIENT_PARK_REASONS`.
+  'proof_path_unavailable',
 ] as const;
 
 /**
- * Park reasons that describe *this transaction*, not this policy.
+ * Park reasons that describe *our own* inability to finish, not a fact about
+ * the policy or its evidence.
  *
  * The distinction decides whether an equally specific repeat may take the
  * slot. Every other reason in `UNRESOLVABLE_PARK_REASONS` is a standing fact
  * about the policy — no mandate declared, a baseline not matured — so a second
- * alert of the same trigger says nothing new and the tie rule correctly
+ * alert of the same trigger says nothing new, and the tie rule correctly
  * refuses it, or a stream of identical alerts would reset the claim forever.
  *
- * `trigger_tx_not_found` is not that. It is per-transaction and it is usually
- * infrastructure: an indexer that lagged, an endpoint that would not answer. A
- * later alert naming a *different* signature is genuinely new information, and
- * refusing it let one outage deafen a policy for that trigger permanently —
- * which is what happened when a vendor's quota ran out and every claim of
- * every type parked here.
+ * These two are different in kind:
+ *
+ * - `trigger_tx_not_found` — an indexer that lagged, an endpoint that would
+ *   not answer. A later alert naming a *different* signature is genuinely new
+ *   information. Refusing it let one vendor outage deafen a policy for that
+ *   trigger permanently.
+ * - `proof_path_unavailable` — the settlement plan could not route to the
+ *   on-chain instruction: a proof flag switched off, an evidence hash the plan
+ *   could not see. Every one of those is a fact about *this deployment* at
+ *   that moment, and none of them is the holder's doing.
+ *
+ * A policy holds one open claim. Spending it on a failure of ours means the
+ * holder cannot claim again for the life of the policy, on evidence nobody
+ * ever weighed. That is the harm, and it is the same harm in both cases.
  */
-export const TRANSIENT_PARK_REASONS: readonly string[] = ['trigger_tx_not_found'] as const;
+export const TRANSIENT_PARK_REASONS: readonly string[] = [
+  'trigger_tx_not_found',
+  'proof_path_unavailable',
+] as const;
 
-/** True when the parked claim's dead end was about its transaction rather
- *  than about the policy, so a different transaction deserves another look. */
+/** True when the parked claim died on something we failed to do rather than
+ *  on what the evidence said, so a later alert deserves another look. */
 export function isTransientlyParked(reviewReason: string | null | undefined): boolean {
   return reviewReason !== null && reviewReason !== undefined
     ? TRANSIENT_PARK_REASONS.includes(reviewReason)
