@@ -19,12 +19,34 @@ loadDotenv({ path: resolve(import.meta.dirname, '../../../../.env') });
  *
  * `USDC_MINT` learned the same lesson earlier. This is that fix, shared, so
  * the next optional variable added to compose inherits it.
+ *
+ * ## Put `.default()` *inside* the call, never after it
+ *
+ * `optionalEnv(schema).default(x)` reads naturally and is wrong. `.default()`
+ * wraps the preprocessor, and a `ZodDefault` substitutes only when its own
+ * input is `undefined` — `''` is not, so it hands `''` straight through to
+ * the preprocessor, which maps it to `undefined` *inside*, where the default
+ * can no longer reach it. `z.coerce.number()` then sees `undefined` and
+ * yields `NaN`.
+ *
+ * Write `optionalEnv(schema.default(x))`. That put the api and monitor into a
+ * restart loop on `AUTO_PAYOUT_HOURLY_LIMIT_RAW` — a variable added *by* the
+ * commit that was fixing this very class, with the guard test green, because
+ * the test checked that `optionalEnv` appeared rather than that an empty
+ * string survived it. `env-empty-values.test.ts` now parses instead.
  */
 function optionalEnv<T extends z.ZodTypeAny>(schema: T) {
   return z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), schema);
 }
 
-const envSchema = z.object({
+/**
+ * Exported for `env-empty-values.test.ts`, which parses it against the values
+ * `docker-compose.prod.yml` actually passes. Reading the file and looking for
+ * `optionalEnv` was not enough: it confirmed the fix was present, not that it
+ * worked, and a `.default()` written outside the call passed that check while
+ * turning an unset variable into `NaN`.
+ */
+export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().default(4099),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
@@ -86,8 +108,8 @@ const envSchema = z.object({
    * value, so a deployment that does nothing keeps the one-hour lock.
    */
   EXPLOIT_LOCK_SECONDS: optionalEnv(
-    z.coerce.number().int().min(5).max(LOCK_PERIODS.EXPLOIT),
-  ).default(LOCK_PERIODS.EXPLOIT),
+    z.coerce.number().int().min(5).max(LOCK_PERIODS.EXPLOIT).default(LOCK_PERIODS.EXPLOIT),
+  ),
   /**
    * The agent-error twin, and the reason the demo build exists.
    *
@@ -97,8 +119,8 @@ const envSchema = z.object({
    * the keeper defers on `LockPeriodNotElapsed` instead of recording `failed`.
    */
   AGENT_ERROR_LOCK_SECONDS: optionalEnv(
-    z.coerce.number().int().min(5).max(LOCK_PERIODS.AGENT_ERROR),
-  ).default(LOCK_PERIODS.AGENT_ERROR),
+    z.coerce.number().int().min(5).max(LOCK_PERIODS.AGENT_ERROR).default(LOCK_PERIODS.AGENT_ERROR),
+  ),
   /**
    * How often the exploit and oracle watchers sweep, in milliseconds.
    *
@@ -205,8 +227,8 @@ const envSchema = z.object({
    * same bad payout repeated before anyone looks. Claims over the cap queue
    * to review rather than closing.
    */
-  AUTO_PAYOUT_HOURLY_LIMIT_RAW: optionalEnv(z.coerce.number().int().nonnegative()).default(
-    100_000_000_000,
+  AUTO_PAYOUT_HOURLY_LIMIT_RAW: optionalEnv(
+    z.coerce.number().int().nonnegative().default(100_000_000_000),
   ),
   PROGRAM_ID: z.string().min(32),
   ORACLE_KEYPAIR_PATH: z.string(),
