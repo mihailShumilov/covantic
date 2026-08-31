@@ -1,7 +1,7 @@
 import { config as loadDotenv } from 'dotenv';
 import { resolve } from 'node:path';
 import { z } from 'zod';
-import { MAX_CHECKPOINT_AGE_SECONDS } from '@covantic/shared';
+import { LOCK_PERIODS, MAX_CHECKPOINT_AGE_SECONDS } from '@covantic/shared';
 import { logger } from '../utils/logger.js';
 
 // Load .env from monorepo root (src/config -> src -> api -> packages -> root)
@@ -71,6 +71,23 @@ const envSchema = z.object({
     .preprocess((v) => (typeof v === 'string' ? v.toLowerCase() === 'true' : v), z.boolean())
     .default(false),
   SOLANA_NETWORK: z.enum(['devnet', 'mainnet-beta', 'localnet']).default('devnet'),
+  /**
+   * Seconds the keeper waits before attempting an exploit payout.
+   *
+   * **Must not be shorter than the deployed program's `LOCK_EXPLOIT`.** The
+   * chain refuses a payout inside its own lock, the keeper records a reverted
+   * payout as `failed` — a closed status — and BullMQ's retry finds the same
+   * wall. Setting this below the program's value converts every exploit claim
+   * into a dead one.
+   *
+   * It exists because a devnet build can shorten `LOCK_EXPLOIT` (the
+   * `devnet-fast-lock` cargo feature) so a demo completes in under a minute,
+   * and the off-chain wait has to be lowered in step. Defaults to the mainnet
+   * value, so a deployment that does nothing keeps the one-hour lock.
+   */
+  EXPLOIT_LOCK_SECONDS: optionalEnv(
+    z.coerce.number().int().min(5).max(LOCK_PERIODS.EXPLOIT),
+  ).default(LOCK_PERIODS.EXPLOIT),
   /**
    * How often the exploit and oracle watchers sweep, in milliseconds.
    *
