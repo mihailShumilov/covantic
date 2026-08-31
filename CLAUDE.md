@@ -197,7 +197,25 @@ Filter to single package: `pnpm --filter api dev`, `pnpm --filter web dev`
   there is nothing to verify, so it goes to a human, not to a claim.
 - `anchor build --no-idl` is the cheap check `cargo check` cannot replace: it
   catches BPF stack-frame overflows in `try_accounts`. Box account structs when
-  it complains.
+  it complains. Pass `--ignore-keys`: the deploy keypair in `target/deploy`
+  differs from the `declare_id!`, and without the flag the build refuses with
+  a message recommending `anchor keys sync` — which must never be run, because
+  it rewrites `PROGRAM_ID` in the source and orphans every deployed PDA.
+- **Demo builds shorten locks, never maturity delays.** `devnet-fast-lock`
+  drops all four `LOCK_*` constants to 30 s so a full run fits in a minute. It
+  deliberately does not touch `MANDATE_DECLARATION_DELAY` or
+  `GOVERNANCE_BASELINE_DELAY`: a lock is a window for intervention and costs
+  only time to shorten, while a maturity delay is the evidence itself — it is
+  what makes a declaration a statement that predates the loss. A Rust unit
+  test asserts the feature leaves both at an hour.
+- **A lock that has not elapsed is a wait, not a verdict.** The off-chain wait
+  (`EXPLOIT_LOCK_SECONDS`, `AGENT_ERROR_LOCK_SECONDS`) and the on-chain
+  constant are two numbers nothing keeps in agreement, so the keeper defers on
+  `LockPeriodNotElapsed` along a schedule that outlasts the longest lock, and
+  escalates to review only past it. Recording `failed` there closed a claim the
+  chain was merely asking us to wait for. The error is matched by *name*:
+  Anchor numbers errors by enum position, so a hard-coded 6014 silently
+  migrates onto a different failure when a variant is inserted.
 - **A seizure is not an exploit, and the exploit path cannot settle one.**
   `associated_token::authority = policy.agent_address` compiles into an owner
   equality check, so once `SetAuthority(AccountOwner)` lands, both
@@ -271,6 +289,23 @@ Filter to single package: `pnpm --filter api dev`, `pnpm --filter web dev`
   `tests/monitoring-vocabulary.test.ts`. Producers must use enum members, not
   string literals — literals are how the two drifted apart and made every
   governance alert silently unroutable.
+- **Detection never depends on one vendor.** The exploit sweep discovers
+  transactions with `reader.getSignaturesForAddress` over the endpoint pool,
+  not through Helius — it only ever read `signature` and `timestamp` from the
+  enhanced payload, and everything it screens on comes from `fetchRawTxView`.
+  Routing discovery through Helius made the entire pull path fail closed on one
+  quota, and it did: the key returned `max usage reached`, six hours passed
+  with zero webhook deliveries, and every health check stayed green, because a
+  sweep that cannot list transactions reports nothing to examine. All three
+  raw screens — `screenRawTxForGovernance`, `screenRawTxForExploit`,
+  `screenRawTxForMandateBreach` — run there, in that order, which is
+  `ANOMALY_SPECIFICITY` descending. Do not reintroduce an enhanced-transaction
+  call on a detection path.
+- **Only `mandate_envelope_exceeded` opens an agent-error claim.**
+  `large_valued_outflow` and `unpriceable_outflow` name a size, not a covered
+  event; both route to `large_transfer`, which opens nothing. Routing either to
+  `AgentError` fills the policy's single open-claim slot with a claim that
+  resolves to review and blocks every genuine alert for that policy.
 - Fleet `fail` actions **must land on-chain** with a real signature + non-null `meta.err`.
   `executeFail` uses `sendRawTransaction({ skipPreflight: true })` + explicit
   `confirmTransaction`; strategies live in `packages/api/src/services/fleet/failures.ts`.
