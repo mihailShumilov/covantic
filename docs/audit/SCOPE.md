@@ -1,0 +1,250 @@
+# Audit Scope
+
+| | |
+|---|---|
+| Commit | `2a0c9a705aa3ffe1475b6a56be54f48957368d71` (WORKING TREE DIRTY — scope is not reproducible; commit or stash first) |
+| Frozen at | 2026-08-31T07:07:00Z |
+| Branch | main |
+
+## In-scope files
+
+| File | SHA-256 | LOC |
+|---|---|---|
+| `packages/anchor/programs/covantic/Cargo.toml` | `d2ae632f6cfd6543aed7f42c38947d21b9e90a33e2471f984d80ae2e9682884e` | 28 |
+| `packages/anchor/programs/covantic/src/constants.rs` | `7ebb0c9914d1088160b4d863f3dae01510e977a3ba2062394a0b69fce0052a69` | 300 |
+| `packages/anchor/programs/covantic/src/errors.rs` | `cce00bdb06cd29b57e148806d443f41be0aed8591d1f29cbf342f70731410d7c` | 207 |
+| `packages/anchor/programs/covantic/src/events.rs` | `7742a1b217778573e5a7657210a8a44ca695cd4bc7bea207079382e0fb6df293` | 261 |
+| `packages/anchor/programs/covantic/src/instructions/admin_transfer.rs` | `2c4b50a949cceeced54483160e225be7d5d06910add61cfc5d95508f03b5315b` | 178 |
+| `packages/anchor/programs/covantic/src/instructions/cancel_policy.rs` | `3a481e0f2585b26936e7a3595c09812c5129daf1b2833c9ac4793621de055551` | 168 |
+| `packages/anchor/programs/covantic/src/instructions/checkpoint_authority.rs` | `fef8eeb82ab315a2def8a401319eb9396bc34d4ea7aa129acafb4a486ee3c98a` | 143 |
+| `packages/anchor/programs/covantic/src/instructions/checkpoint_balance.rs` | `a6079fe7d3cff64f8157eec1260b459a47b0cb60c4175643d68423e6d8a5f4a2` | 156 |
+| `packages/anchor/programs/covantic/src/instructions/claim_rewards.rs` | `7aecfbc49cf96c958dc760286131ea6dc450c872ed7df89bf6d5ee1a5c7c934b` | 105 |
+| `packages/anchor/programs/covantic/src/instructions/create_policy.rs` | `44e4851460620e3e2a72f8c74fec9cac9a5c32060dfd0fc7345c725bceb82d37` | 257 |
+| `packages/anchor/programs/covantic/src/instructions/declare_agent_mandate.rs` | `d86ef1556cdf6e3f97e719a2fe9a2afcafa9b700dc3bd5b92a72b53439a4f1ed` | 243 |
+| `packages/anchor/programs/covantic/src/instructions/declare_governance_baseline.rs` | `d24491aaea765de6024632fe10e45deba9822fbb05176e0564f9479cf1205c2d` | 158 |
+| `packages/anchor/programs/covantic/src/instructions/expire_policy.rs` | `66bceefcd3d84a2f10cca211d9ec962ab549a0a01260a7253ef1cce8fcbffdc1` | 63 |
+| `packages/anchor/programs/covantic/src/instructions/initialize.rs` | `606955b5d3fea186d18dbc7b9e01b1f1fd45104175ee8e3dbd337a4b03b5c163` | 90 |
+| `packages/anchor/programs/covantic/src/instructions/migrate.rs` | `77c0117fc527916d39646e88ac5e8a444c3127809e1aaa170a7e734a9a5dbac2` | 138 |
+| `packages/anchor/programs/covantic/src/instructions/mod.rs` | `12a6b5d4a31bbf63f2d33e4040390d9990b5024550405efdadcfc2fa72c7922d` | 45 |
+| `packages/anchor/programs/covantic/src/instructions/oracle_submit_claim.rs` | `f12f245e4d9ad083fc8752fd31c8e348549eb13ef4d60132ee9ed83af90ad27b` | 86 |
+| `packages/anchor/programs/covantic/src/instructions/stake.rs` | `e332ee7d6d04762e6945920a38adaf910b9d4b11ff00295cd06b3c1d6ea078d2` | 220 |
+| `packages/anchor/programs/covantic/src/instructions/submit_claim.rs` | `a88828f47071fd003a1ec1fcd386efcca90e8d7ae2fff7abfe9385b5413828d3` | 70 |
+| `packages/anchor/programs/covantic/src/instructions/unstake.rs` | `03b30275183994d28b932b90eaad9aae40a71312b9e3e52b1554a4e5c638889c` | 249 |
+| `packages/anchor/programs/covantic/src/instructions/update_config.rs` | `b4a7a5ab73bb36a93ca4373344a05b4deb3b36d574d879785fdb71a937d2a938` | 61 |
+| `packages/anchor/programs/covantic/src/instructions/upsert_attestation.rs` | `1a776e04ef4120f84b6a68253c24a74b3a01403393997ec612d1a8f7d22fd364` | 81 |
+| `packages/anchor/programs/covantic/src/instructions/verify_and_payout_agent_error.rs` | `0b1ff7594a5e7b22f4b2c6b525b14ed7f8cf49666a75ea8c836b1c5317757226` | 418 |
+| `packages/anchor/programs/covantic/src/instructions/verify_and_payout_exploit.rs` | `69fd80f6e9b19b1721e2cb04b2cae3298aca4ebf66ea1ac785fe040201d73573` | 328 |
+| `packages/anchor/programs/covantic/src/instructions/verify_and_payout_governance.rs` | `ace83fe2a551507210eca62b6319efcf77ed76931275b0cb12cc5f3ca3c013e5` | 463 |
+| `packages/anchor/programs/covantic/src/instructions/verify_and_payout_v2.rs` | `10cf70827333a4ba2a2e4a4a2c5d2a80a6acae109796b9e779777fca1f6cd708` | 342 |
+| `packages/anchor/programs/covantic/src/instructions/verify_and_payout.rs` | `632272edb7e0827e4f615a1a8e678e6f2951e703d04c4c87694f3191f39dffae` | 167 |
+| `packages/anchor/programs/covantic/src/lib.rs` | `e99a0b62be0baf9572db2c7c776cfbabce34752da6931a80af8b6c6193cee729` | 261 |
+| `packages/anchor/programs/covantic/src/state/agent_mandate.rs` | `2c39f2736efea3762d343f897d66f9f164e8462fc8d1275db7a9138603bd3936` | 233 |
+| `packages/anchor/programs/covantic/src/state/authority_checkpoint.rs` | `cc1564ae63d3ce83cb381b8e34cb5d15837789ea5c63d0d9b0beed4a1c25404e` | 140 |
+| `packages/anchor/programs/covantic/src/state/balance_checkpoint.rs` | `8aba99f9c0f55ead9409bcddcfcbbf36b13fa740219e87357567f652b5be8aae` | 101 |
+| `packages/anchor/programs/covantic/src/state/claim_evidence.rs` | `f8fea44d5bf13c08351cdf5fa06a8fbba0dbe041643e185a83f32cb601f11e53` | 69 |
+| `packages/anchor/programs/covantic/src/state/governance_baseline.rs` | `bee29040fa6752195160ec90921459276ac6d9eaeb35a9feff3186097f0c8750` | 131 |
+| `packages/anchor/programs/covantic/src/state/insurance_policy.rs` | `dba086fcf58ba98a057af277a8e41f0b9eb082b60a7c498dd2f07b012547c025` | 66 |
+| `packages/anchor/programs/covantic/src/state/insurance_vault.rs` | `19a45a03f45b93c0f77db28a5e8c347f9916cca5fcdfd26f32761698dbe493d7` | 192 |
+| `packages/anchor/programs/covantic/src/state/mod.rs` | `33f5a598b17f6527b8a47be9ae3e8c3cf9780108b5f8e825a24ed37f439a3386` | 23 |
+| `packages/anchor/programs/covantic/src/state/pending_admin_transfer.rs` | `2008b38cd053ee5373ea20c12c3f90758837ef429d6cb8bb3c6351c40ae851c2` | 39 |
+| `packages/anchor/programs/covantic/src/state/protocol_config.rs` | `5f1be32f4da009505628892f6206d3eada5b7ac64dc4ee1932fbfaa1d6374283` | 29 |
+| `packages/anchor/programs/covantic/src/state/risk_attestation.rs` | `e3a1c2da6cb2650310ab504fd1674409065d8ec07bb9ee0c1362fd92a1207675` | 32 |
+| `packages/anchor/programs/covantic/src/state/staker_position.rs` | `9f2486e79fe44642063e88c89a273bc989e7f86955be9080f975c0c9ca598394` | 56 |
+| `packages/api/src/config/database.ts` | `511cf05d0eaad6b7f5c36b5ce5faaf7e6a4eb1f1c36016d2c86471b90e16c7e0` | 15 |
+| `packages/api/src/config/env.ts` | `2340148b16f24ecb43f4f2f429ad1cab65f1086bba0dfc54736a3836fa22ed5e` | 201 |
+| `packages/api/src/config/redis.ts` | `83fbeca9107570144fcf3083dd2d504ec97f376eb2ba1523a2887a757b1fdd00` | 8 |
+| `packages/api/src/config/solana.ts` | `e944fc54351a7cf7626ffde2dfc97a2c412dd9f89eb55561e309f1c8ef927db6` | 35 |
+| `packages/api/src/db/custom-constraints.ts` | `d91844bf4a8d4a6762ad41d49ff35383b26b95d3f710a4c3c1675ba4887b7f81` | 29 |
+| `packages/api/src/db/migrate.ts` | `c2aeb9ce06121c215643f3c099b9c14af40c2ae50afe9c497b50d5135094ef22` | 29 |
+| `packages/api/src/db/migrations/0000_baseline.sql` | `e53aea2a53f02b9827b0a25aeff7de7f680f138e0c9ec7bde9f1ad0f4648b91f` | 117 |
+| `packages/api/src/db/migrations/0001_oracle_evidence_spine.sql` | `7f58589305a1d58dcbcc146cfa033cf3a62d5e7ca0c28c2e7613451e5e5fc588` | 15 |
+| `packages/api/src/db/migrations/0002_exploit_balance_baseline.sql` | `9b438eebf8f64c3ba5ba16cf88bf8b36b1921988e021604dbece17682dd34a03` | 13 |
+| `packages/api/src/db/migrations/0003_agent_outflow_history.sql` | `00107109385a01a2ae536d073a7e0413005367987ff4438b2774768117dc3eba` | 14 |
+| `packages/api/src/db/migrations/meta/_journal.json` | `ccf51fc4fc72047df4c1fda3cb63735ff05f99e9fbaf22bed3664efc502f22da` | 33 |
+| `packages/api/src/db/migrations/meta/0000_snapshot.json` | `057fd6dadfc0295542ac44f3c09b002c5fa6c358b8d9e9c2bf4d00242b437ab2` | 874 |
+| `packages/api/src/db/migrations/meta/0001_snapshot.json` | `d4fd4c8e1d4eadf914bed8f01b119deb2692109bb2623396e45c91312c2b9732` | 988 |
+| `packages/api/src/db/migrations/meta/0002_snapshot.json` | `21ea5aec194db4fdc47d174b013d0903f559715cc2ee2f624d583f09b18ab67b` | 1100 |
+| `packages/api/src/db/migrations/meta/0003_snapshot.json` | `dd9ab4dbc0d99e198548164475ea9f6962236ce91609395ad86bb9647e424cde` | 1239 |
+| `packages/api/src/db/schema.ts` | `2a9c55a0531f60866f78ec41382cabdbc475bcd5e1b01a46d0f61efcc93660a2` | 303 |
+| `packages/api/src/db/seed.ts` | `ea3a5b778ee58543139c7c754be1c664574065db1a6c132e519b66ad263e1582` | 94 |
+| `packages/api/src/index.ts` | `06b3fef793954a93086238922f06f23bfad7173c54596f9c0db1c7d06ffeeec8` | 123 |
+| `packages/api/src/middleware/error-handler.ts` | `ff3848db2d0fa74c58b022986e10feb819fb2a486cd291eb5552bd94e7c551fc` | 32 |
+| `packages/api/src/middleware/rate-limit.ts` | `21da0dbc67c4d12904f774597732a4f5af009522f49f850536be26758d6fcb15` | 88 |
+| `packages/api/src/routes/claims.ts` | `b3109c4d4e7e18bf51e52242f297fb3f09158bf82b8a6a5ed5dcf7c212af6a92` | 53 |
+| `packages/api/src/routes/fleet.ts` | `f88ba234f6eb92a84b4c698e2044559a5eb11fe8974bf04b1db58b59884994ca` | 58 |
+| `packages/api/src/routes/health.ts` | `f0d5b124b321cd9646a68981c990c48b082e878d62f8375e4937ec70d3af7c95` | 54 |
+| `packages/api/src/routes/index.ts` | `ce703adbdfcd0273ead572b9f464ff9fe58e4c9626d09e4623066bff065ba0ae` | 20 |
+| `packages/api/src/routes/monitoring.ts` | `bd3c9f3c1a253c6fe51dfda978f3e2cc30e3cca76f1b111f588332f37a26b06b` | 288 |
+| `packages/api/src/routes/policies.ts` | `7f7764beca15b9366e4733d165b87376372946990857d42c2cfb6ac13c9e1ddc` | 510 |
+| `packages/api/src/routes/risk.ts` | `ae388aace723ab9c9ba467d40baaeb2eee1e79f1c9865015c8ebd726c33cdf18` | 218 |
+| `packages/api/src/routes/staking.ts` | `6e9c39f7235a1b44c22977e9dc4877a059c0b84d1505a0b93941a4653ca58dbb` | 234 |
+| `packages/api/src/routes/vault.ts` | `62e3d94c92e08acc314c3caeef55e063bc320415e7b037d6dc60efc562b1d171` | 74 |
+| `packages/api/src/services/agent-error/adjudicate.ts` | `aafcf1e9c44465b9d71bb144ac493beeae860459faf5d74f7ef4aaed50e90749` | 453 |
+| `packages/api/src/services/agent-error/baseline.ts` | `33b5e0fbe45c740357438bf5c04c02d3ae9ebc3854740beefb0c84d93694c485` | 158 |
+| `packages/api/src/services/agent-error/breach.ts` | `2cc82977642d559ab7dce1c2975cfedb5605e472d25e171336d0a0c73aef039c` | 235 |
+| `packages/api/src/services/agent-error/mandate.ts` | `7d7868b74f414aa6b1d3a239270bb02ba785f8818a8640f31e58c9a5292348d8` | 174 |
+| `packages/api/src/services/agent-error/prefilter.ts` | `2b89920b9aba42b4666cd131d954634b6a2da35c80e675004afc66fbb0ebde81` | 300 |
+| `packages/api/src/services/agent-error/proof-poster.ts` | `f212e6add13b65181b08650e89870580453267eca8567bf158bc71740003e14f` | 111 |
+| `packages/api/src/services/agent-error/types.ts` | `4ba6859f5364858b1c986e31c56ce564a589d246aaa05c1790e6806725b90f5a` | 155 |
+| `packages/api/src/services/alert-bus.ts` | `41a15ca1c6d6d26c73a4d7f7122a16c2da361ae796ebc76ddf71d06ea76660fb` | 88 |
+| `packages/api/src/services/attestation-publisher.ts` | `2a9c0e765a8f274774ac80b96303649eb7d1b7f274086274beb4e36e18d89220` | 142 |
+| `packages/api/src/services/backtest/replay.ts` | `eeefc1195d34ab54c5ac2be66e1ade57614f0ba4cdfa681f8738947f5f7fed09` | 248 |
+| `packages/api/src/services/backtest/types.ts` | `d277836c0285cacb32af9ed3265e475180ceaa89859528e8aa0195a4cdb84ba0` | 115 |
+| `packages/api/src/services/claim-oracle.ts` | `730e8c1aa4cf17e9754e3d144f1ac905dcc22fa0b9c43028ae03415c66c21f4d` | 193 |
+| `packages/api/src/services/confidence-lanes.ts` | `82df1907bfecfda271ab9b2aa3444c3d68185168be4b591e3fb5eee681074fd6` | 105 |
+| `packages/api/src/services/event-vocabulary.ts` | `9a59a118f532c6cc96b6494ba7633c72bdfc3ab2199a3715c97722b576a8700f` | 83 |
+| `packages/api/src/services/exploit/adjudicate.ts` | `22fe29984d5604991741c357a09721ee478893c5ef6b087d8cf27c3b375bbc18` | 317 |
+| `packages/api/src/services/exploit/authorization.ts` | `d9702dfa856f6b88cce23a7df2231dea0a3f02f35f025247bcc1da24f8deb072` | 384 |
+| `packages/api/src/services/exploit/baseline.ts` | `8052499b5abfe2a33428a942832e3165d6d613397d24d31d86c7c99460875f4d` | 265 |
+| `packages/api/src/services/exploit/checkpoint.ts` | `a74922d03c92eefa7ff68bd154d9718b4c4f9320bc0ad870d3d2d94b8849be5b` | 174 |
+| `packages/api/src/services/exploit/loss.ts` | `32252fb7d830c68c5e2686368d573cafa68f0994385064cf680699c6bec13d76` | 131 |
+| `packages/api/src/services/exploit/position.ts` | `b1464198daf63e9f125c64a6e5304e243719b3fc39f2491f6b74b3eb228b064e` | 351 |
+| `packages/api/src/services/exploit/prefilter.ts` | `71c94f5aba86c2d82618dec6be2b35c287c5260d730b57e3f25db753c2408adc` | 319 |
+| `packages/api/src/services/exploit/proof-poster.ts` | `bf83ce6528b35fc204a8ba0644c9b690bdaccc0db7bab75121be5fb0f86b82d0` | 112 |
+| `packages/api/src/services/exploit/raw-tx.ts` | `7406f60773ccf797a37dcd0c9c1578e12379b1a85a1e949946ebaeaa44c2ae7a` | 204 |
+| `packages/api/src/services/exploit/signatures.ts` | `08e63797947a65c5b8a7595723a37969dde5b5d245072f965adb26cb2233181f` | 474 |
+| `packages/api/src/services/exploit/types.ts` | `8798a5afc0c11c086b48b3c8b96aeb9eabbb40668a565a0e5abd6e037e464017` | 70 |
+| `packages/api/src/services/fleet/actions.ts` | `cda32fc1e5b74c9c59e21ddccafc0f806c3388f43ff0bfbcbdd2f15f0a30e544` | 258 |
+| `packages/api/src/services/fleet/failures.ts` | `40d9d6c69258c033ee4d75220b0619828b32557c333412a1b843086b25e03b83` | 139 |
+| `packages/api/src/services/fleet/manifest.ts` | `f4d2227c2ef86fd38b60adb3414c18ca1687a34d41c2aa4f98d9bbf97f8bc3cc` | 60 |
+| `packages/api/src/services/fleet/types.ts` | `dce144a31c532dfeb4ba17de62b4f3a94a1fc7853ac36c356ced8d5aa2fa0adb` | 90 |
+| `packages/api/src/services/governance/adjudicate.ts` | `6acc4493207ec15957c182a3dc11dd6f6ba5f037cba6450ab909b502ff097d5d` | 549 |
+| `packages/api/src/services/governance/authority.ts` | `3212243105b6d9db7d4c7f4ad6509854434daad9608d57e6a047ff1613dc2f3f` | 464 |
+| `packages/api/src/services/governance/checkpoint.ts` | `d50cec5673a7f67ab09d4f10bef023ee73f76357f5f9eff874841c5ceda29b41` | 220 |
+| `packages/api/src/services/governance/conjunction.ts` | `9f4fd235f4ba0a89e3fdd8a18d2fe84c1b25965456da73892bf1e82f9de835ec` | 275 |
+| `packages/api/src/services/governance/prefilter.ts` | `5b91d8fd5a44a81ed2160f9386d52e8fa6072081e3a42cd5e0ef198370686745` | 190 |
+| `packages/api/src/services/governance/proof-poster.ts` | `1a2482b54d0245e6587a4e701ed9a8c4b0c2decb1ff030ee738ba06d2376d583` | 113 |
+| `packages/api/src/services/governance/signatures.ts` | `1d48fe7c7c95f397b76709cde0f2d24b2ff13358618087186990365423a4e04b` | 348 |
+| `packages/api/src/services/governance/types.ts` | `91eae2b832b018fd779562f381f12379783325505bc66a48a6ab08628d0aec92` | 124 |
+| `packages/api/src/services/helius-webhook.ts` | `4998a9721268b5733747c5f5c7632d5b349c99705a14118bc59c9f85ce56b3e6` | 253 |
+| `packages/api/src/services/notification-service.ts` | `8f70259c3956b83e2dcc6c5869a1f6cb407ca476ab942d7afc34fb2dcd89369e` | 80 |
+| `packages/api/src/services/oracle/adjudicate.ts` | `cf80d0278ee73d2e314a2e9499ffd0eb56aeff2a88476ad9894c1ffa8019c612` | 479 |
+| `packages/api/src/services/oracle/consensus.ts` | `503220d97ddac1a14fe28297153f41c9f63c89da92bcf644a278f782f8a20adf` | 244 |
+| `packages/api/src/services/oracle/execution.ts` | `e30028d991aed5393970415025a2af8f25b5b07b93d89ae3fd731dbd1a0e2913` | 167 |
+| `packages/api/src/services/oracle/factory.ts` | `c392cabc5624bafd2da3487563c099e12f7931da6dda79ae1259778dbbf00bb4` | 33 |
+| `packages/api/src/services/oracle/hash.ts` | `29ca4ff956d2e303ea144e816b1bc0cd5803f6e39b8196cd1d3fd63b1b8f5a6a` | 56 |
+| `packages/api/src/services/oracle/prefilter.ts` | `4e11b188a7a50e5c9afc56debd32ac9881af3fd183001faa43a6eb338e63f447` | 166 |
+| `packages/api/src/services/oracle/price-sources/cex.ts` | `f7ac3e27065a5de7a5195b9b4153e07e41ff503d0a80bd23751d9b45affb2eaf` | 333 |
+| `packages/api/src/services/oracle/price-sources/pyth-hermes.ts` | `7169cb5997a24ab778383384b3d33ce861b359c018a757f68ae8d0b2701cd493` | 351 |
+| `packages/api/src/services/oracle/proof-poster.ts` | `f47d15ebb9d8fa7dc78cd9a48a258a5ee67acc1f069118859605b594439dff27` | 195 |
+| `packages/api/src/services/oracle/signatures.ts` | `bb74f5eb5a0063e3505a86a4c799ae35c15ce0f16958e20e287af664ef344034` | 495 |
+| `packages/api/src/services/oracle/tx-time.ts` | `0f1c97aaa42e9aad6a95770e9d7016912fdaf157381931d1c530f6a844f99409` | 89 |
+| `packages/api/src/services/oracle/types.ts` | `7710101028ff95de74d824ee455f1678651fa12e333485e130384fb6c167a2ef` | 209 |
+| `packages/api/src/services/oracle/valuation.ts` | `cea24431c30f9aab37d44d2870ba0044a6d74186a209b39d0475aa7b74e0a722` | 269 |
+| `packages/api/src/services/payout-breaker.ts` | `ce6629fa557c08d217554fee643cd820fb12bd07ec2992055c401b13eabd33d4` | 88 |
+| `packages/api/src/services/risk-scorer.ts` | `744390a41bd2bd266d703ec74ab507ea9ce3435c8ce3495946d32a6dd20f5065` | 1206 |
+| `packages/api/src/services/settlement-plan.ts` | `f858232a0293d16b5db5bc7505c7424228b43678e4144b27d2076d578c263b2f` | 110 |
+| `packages/api/src/services/synthetic-gate.ts` | `cadec8569382a6864a12c532a0007aad79646a14208e83394a770bc0aa09fc37` | 29 |
+| `packages/api/src/services/transaction-monitor.ts` | `644dec808ac7f48802809d22bdc3d2b00ea2d3769bbdd0096968f64295e9f6e0` | 465 |
+| `packages/api/src/services/verifiers/agent-error.ts` | `056d3a50ad541cbf7c6ec4b92d4b5b94aa81f8e763b18f20f0d70716bc42aada` | 290 |
+| `packages/api/src/services/verifiers/common.ts` | `5254fbc7e0887bbcf44ad198fc8eecd8a2b99ca97cc6daf4f9e632be0092b4fc` | 217 |
+| `packages/api/src/services/verifiers/exploit.ts` | `eea1290bf5d141ed7f3a86f18ba8471329a57829f9b7afff3c09b3093a6289c4` | 200 |
+| `packages/api/src/services/verifiers/governance-attack.ts` | `5f1f59935ab128b814a2d457a9da33b919d9de51bb40823a0b0c0f4f4e214753` | 293 |
+| `packages/api/src/services/verifiers/oracle-manipulation.ts` | `ec2db26b07d79711e52b61f5e7ddca5bffe9a45e223e49bed14950ea86666ad1` | 360 |
+| `packages/api/src/types/index.ts` | `b25f6fffc923de55591a37b76cda5653a152b6a40428d9aea564b9e49a10795d` | 20 |
+| `packages/api/src/utils/helius.ts` | `0455e7daf576f3e4943a94a5923a12a43d649c546a14fda0ed8ff53d8f88968f` | 300 |
+| `packages/api/src/utils/logger.ts` | `f1cb05dbafa71468d85b88ed4d2ca994d4e732de871b3b2c2415beba39849bd6` | 9 |
+| `packages/api/src/utils/monitor-metrics.ts` | `61c1c769294751efa877c8a4e328ed8ecb5e2a440995fbeb89a0fbeefd0e6b9b` | 63 |
+| `packages/api/src/utils/policy-reader.ts` | `d7f9c77d8924786938abaddbadf9a2cfccc66601cdfdee0c7d71ee190a75b8ed` | 162 |
+| `packages/api/src/utils/program.ts` | `5e1f0c658ad11cc4fcc03ecab9c599ab559c77c7b31e162f99565cb5b4474d17` | 92 |
+| `packages/api/src/utils/pyth.ts` | `0e97f89d45e6842a13de8938eff8eeccf95e418d017c1658aff049445d3a85c0` | 14 |
+| `packages/api/src/utils/solana-rpc-analyzer.ts` | `a8cfb1bf7bdaa6f779ef9a3c05cc90da023cc8f6a0c7e21f28f1ab3b3aeb1b6f` | 537 |
+| `packages/api/src/utils/solana.ts` | `5b812f33c791cf1e498ddf6393e26d50e39c19be30f1c3f09addaf63d0804383` | 44 |
+| `packages/api/src/workers/analytics-aggregator.ts` | `07271bf151627bcb270804ed8e5b991026ef059ab3e8fe8d010ea22418629b69` | 20 |
+| `packages/api/src/workers/claim-keeper.ts` | `bcf5c01c79cf19427d6422bc47abb2003c89610dcedbb7e38133cad7296f6ba4` | 1408 |
+| `packages/api/src/workers/expiry-crank.ts` | `0050e92ba3d85ff9953573b950f0786628c576bc7eadf71570e990f5bf00bedb` | 155 |
+| `packages/api/src/workers/exploit-watcher.ts` | `d03c13cf1dfce6269f7ccfbd6c2105279b822cd8ec5149caeba4ce89f3f917c6` | 539 |
+| `packages/api/src/workers/index.ts` | `a32a3eea071736f8c5c53cb6dbcd224d95a0a353d10bc51e9bffff8acb4bc094` | 25 |
+| `packages/api/src/workers/monitor-entry.ts` | `6a67850a40cb7e50e3e7f85a6d6eba751bdd3bbf6b93b580144dda95c268962f` | 31 |
+| `packages/api/src/workers/oracle-watcher.ts` | `c74ec1954c7ab9677504f61193ad00778e05c6286f8c6a4b2ac95ae6849919e0` | 187 |
+| `packages/api/src/workers/policy-indexer.ts` | `e39d8f0fcf3592cca3b0cf8d0a09e48a90412d056d7a0a2bd98051ae2be7d45b` | 211 |
+| `packages/api/src/workers/solvency-checker.ts` | `ccd7a450a84722d842bc25c28cfd3f32a0e8912f99bb17c798894302b34a09cf` | 135 |
+| `packages/shared/package.json` | `55b7086a8fd8474350fe4ed95bd483d153e101338f150c6c6952986e3f16cf00` | 22 |
+| `packages/shared/src/constants.ts` | `26391e170b8e0e427329f4ad8e7a809739b5036dbe58874911a97f4654d0aa9b` | 241 |
+| `packages/shared/src/index.ts` | `41f8a0c537449f562d6ee859f551dcb64dcc5e564d8700ba8abfd7ae906d35e7` | 107 |
+| `packages/shared/src/tokens.ts` | `aa6417172501314c15c348c0564c0555a8d464b466be157a9a29faf7d87a9cb8` | 158 |
+| `packages/shared/src/types/claims.ts` | `c022cc9896e28f12f2c81d73513893b51d424e7726e6bb22909065793e7a5fc4` | 196 |
+| `packages/shared/src/types/events.ts` | `8b00953f465be9426ca352df04f5c617ee96df2dd1e4216ebe81361d3f40a8eb` | 94 |
+| `packages/shared/src/types/policy.ts` | `2891a78832945d9cdcbffe1705debbb106cf8abe8eb35f2258fbf34640e50fa4` | 90 |
+| `packages/shared/src/types/risk.ts` | `d3a6620b1addc8d536a4106c79191c09e2a51b6c4b0bd135f1203c289e4a0de8` | 128 |
+| `packages/shared/src/types/staking.ts` | `9f378fb1ce8921506be41cde400060211faa1422eac2c88f3dde17a185aeff27` | 13 |
+| `packages/shared/src/types/vault.ts` | `f5fb4e8d6bb119da832831322a73b9859bce59e6a291e60bd4b168c15767b2ce` | 35 |
+| `packages/shared/src/utils.ts` | `93f16e5dc4006bc398df27a38046a736621072c425326a3239a3afd32cac8be4` | 106 |
+| `packages/shared/tsconfig.json` | `59494555664f988fcf2b1cdcc5fbdad8692019eac6f34b565f203977200246a7` | 8 |
+| `packages/web/src/app/assessment/[id]/page.tsx` | `1ae39aba8ce1642a67eab0d40a51dcf97c436c4becf207df6c29651fdacdb21a` | 521 |
+| `packages/web/src/app/claims/page.tsx` | `e7124e21d81b9023562f2bbdf1b03e3578d7673edd38e73adfe1d5e542bf4cbb` | 218 |
+| `packages/web/src/app/dashboard/page.tsx` | `6c2e359a50b28faf0e25e67e6effc6749be0845e836fd43c367befb753e2ab56` | 1387 |
+| `packages/web/src/app/demo/page.tsx` | `c8d170c30a6f643c6866d3c1709439d175c32f6b19d0020f0dc7451aa144ef6e` | 191 |
+| `packages/web/src/app/fleet/page.tsx` | `d76c4c4fc07f3ebfc9ec9cf82b96f27223320560d6248621e9cd9805ff861627` | 375 |
+| `packages/web/src/app/hire/page.tsx` | `2eee7ff4ca83601ec9c03b487f48b1dc9db4a58e4021fd6a0a7275737b4310a8` | 310 |
+| `packages/web/src/app/layout.tsx` | `104b548414ce00642dbdb2b499db8b080034688010434420f6e5e53cb0e85a87` | 69 |
+| `packages/web/src/app/page.tsx` | `71aee72461f7f80fe29ecce47d1bb344fd2c246bde8ba96da55c2f24f328a396` | 328 |
+| `packages/web/src/app/protocol/page.tsx` | `0a20c4066b9f3bad1ce5ca2df29e269159eb1650b9d9d54dce7af3ba4cff9646` | 126 |
+| `packages/web/src/app/staking/page.tsx` | `eda9ad09e32cdfea18c616578e9b230b69344881e5011f5f3e8dd80f8620c5b1` | 404 |
+| `packages/web/src/components/claims/ClaimVerificationPipeline.tsx` | `abfbc32b5478ba1d6d755bedbfa57b44c57d5ef0ede7b1ff3991a611951f588a` | 360 |
+| `packages/web/src/components/cov/home-sections.tsx` | `26a4f3818aaa1088095e1033d6f54432a0856cb02745edc427daf4f4cb5753e4` | 420 |
+| `packages/web/src/components/cov/visuals.tsx` | `8de1afa80ae9c770b0e3631e77d41fad0497f3fd25c89fdb66f888e981c95864` | 424 |
+| `packages/web/src/components/layout/Footer.tsx` | `5b59167a1f6e0dee97ebbd30ca216b6dd562e402b1eddd9ab35e4305fcb5e588` | 44 |
+| `packages/web/src/components/layout/Header.tsx` | `ac0195a04332f4951de9a7b5dff5f89e9721ce51dff395fae669be5c360b5cb3` | 107 |
+| `packages/web/src/components/risk/RiskAssessmentPipeline.tsx` | `af315430ff772d88062d87b7ba1e80fa6cc5e0f2b4f090bfaa5cbafdc01a22c0` | 1002 |
+| `packages/web/src/components/staking/UnstakeFlow.tsx` | `8679b2b87da11130056ffa30420863216231a290eccf66e3154094dcd86d5300` | 533 |
+| `packages/web/src/components/ui/Badge.tsx` | `3fd75a60c3eb39d2064266da5819149fbbcc9061e7c1ffee994d07666bcfa231` | 21 |
+| `packages/web/src/components/ui/Button.tsx` | `8481fe9941205793f670f9a186db7a344f610ee32f2f12afc9559163960d6724` | 75 |
+| `packages/web/src/components/ui/Card.tsx` | `acc219333446903750c61aa268f93e232e9422dd63cef4ef5b85951b9921615f` | 18 |
+| `packages/web/src/components/ui/Modal.tsx` | `74fbd65e39189c041818a32c5f49eb964f1a4ff7438692d626956931895121bb` | 80 |
+| `packages/web/src/components/ui/Spinner.tsx` | `872e28fae3cac9eb8b18c6a75e0d12abf625f0152d32c65cf7bca4407d75c830` | 14 |
+| `packages/web/src/components/wallet/WalletButton.tsx` | `f8f829283c5e16f6f166639a976b8560e9d4c97d8728f6fa3bf334da6f50875d` | 13 |
+| `packages/web/src/data/lossStats.ts` | `410cbae552b4259ef05f8a0543b0d904cfd031bd1a57d05ce62a7b3d239f96d5` | 228 |
+| `packages/web/src/hooks/useClaimsFeed.ts` | `bf9f482759c57e5132ee7653b9c75299fc388f930422ee0a9ece2ea7abef30a6` | 37 |
+| `packages/web/src/hooks/useCovanticProgram.ts` | `2b1f40bbfdd3b1d0278905e5950e5f212f8d973b9a765d18d042214016affa5d` | 92 |
+| `packages/web/src/hooks/useFadeIn.ts` | `2a3d46884641f1f1b35eab334f2a066094cc9419e6be058c779d28091a94555b` | 28 |
+| `packages/web/src/hooks/useWsChannel.ts` | `5456e77cd6d1c74a97af255ac3249e1c1de5aec3406f37a6856ef7423cc3bced` | 83 |
+| `packages/web/src/idl/covantic.ts` | `194ed54093c0e113f9af28b2aa8c17697ef00ad0828295c69273eba2c50f00cb` | 7553 |
+| `packages/web/src/lib/api-client.ts` | `d077db5f4e8501e996eb7a09dd729cf0655d05556d9894553d169db5dd893e09` | 49 |
+| `packages/web/src/lib/constants.ts` | `8a6970f2dae85e7648cbbcb56c83bfc27926ea479869afe1bf2cd7c1fab9b00a` | 6 |
+| `packages/web/src/lib/explorer.ts` | `5f366521b63ad5ce4ba178c3ea1f144350502ce40b8c990f940ba30431753176` | 45 |
+| `packages/web/src/lib/mock-data.ts` | `0367c9a58eb1570a25db880ea99890b56f70f8517c60b0d3e224733cbe6a7290` | 108 |
+| `packages/web/src/lib/risk-colors.ts` | `511401326eeb0808ca8dea790991e89be989cd2b236b7df33d92e123ae0d0fa7` | 21 |
+| `packages/web/src/lib/risk-labels.ts` | `880dbf4f8c3749f4d6709b8f3e6079b88d31b7e55e78e17698af4a1587a308a7` | 30 |
+| `packages/web/src/providers/CovanticProvider.tsx` | `c602ba22ade701568e4b078dd4b4af2724c8e32cf8fca1d744253600615623eb` | 57 |
+| `packages/web/src/providers/WalletProvider.tsx` | `0a607503cec9901a049944e8a55daf794b55e011e5040fcf1f32a8286567da2a` | 24 |
+| `packages/api/scripts/agent-wallet.ts` | `779bcd3dac63c3bf1ecad0cde9726d565b5d2fae6baf6d49acc46fbb00e1a323` | 511 |
+| `packages/api/scripts/backtest-fetch.ts` | `1986b730a0d6f44c81a179765f59462d396a33470a3017a8a51a0652d6eb4c06` | 522 |
+| `packages/api/scripts/claim-replay.ts` | `518f324b9966960e7bda554cb7229bd4c1f7caa7f86da5ac13a5aa96d669f4bc` | 252 |
+| `packages/api/scripts/declare-agent-mandate.ts` | `b4eceb79076918c2fa6dbf21e8fe5b3e2bb8f8453e1d1b1deff7262ccbcf06fa` | 218 |
+| `packages/api/scripts/declare-governance-baseline.ts` | `146945d1d2d0dfba9eff351e097bfedba3abe196cbbca217074aaf15037c6235` | 170 |
+| `packages/api/scripts/demo-common.ts` | `c0de1485e6e46442cf07aeef60f4b613ab46d55ad3ed9150ae422ae905dffaf3` | 91 |
+| `packages/api/scripts/fleet-bootstrap.ts` | `ea5eb342850a2f7e44f83e32a09d43b3900e819562694d8972fc18c95b7b159c` | 407 |
+| `packages/api/scripts/fleet-start.ts` | `b9c7cae55224eaecf2e9b8a6d2912bb451b3010303899df6138eeb29420acb1d` | 243 |
+| `packages/api/scripts/fleet-status.ts` | `b8fc28f9b2386d0f23c05e0ed3cb82f8dbeeff45f8639e950237f49467a44dee` | 115 |
+| `packages/api/scripts/init-protocol.ts` | `5f6cc535f4bcac1ddbc22c4e9fad8810e88ebed59fa8aa12d97f802faec44be4` | 177 |
+| `packages/api/scripts/migrate-accounts.ts` | `6020136c2972b4c933c17758a71dba2596c98b3fb5c43f2ad19070cf41d74310` | 142 |
+| `packages/api/scripts/mint-mock-usdc.ts` | `e8fc08a7ada3f8faa479de242b7062dbb99227c185e13a3bf1e13178352fe4f4` | 75 |
+| `packages/api/scripts/run-demo.ts` | `697514e7bbaa0f3b857548af8708a759de4dce16124b36e452dc0dbb2c5eaff9` | 56 |
+| `packages/api/scripts/seed-demo.ts` | `6e9da0816b60d001a5df64c8400070015b7fd2881e83fe807f2566d11ba2034d` | 98 |
+| `packages/api/scripts/simulate-exploit.ts` | `7ee6227ac7e4ed678515b1ef4d7226323d07c93dd5b327f8c83f9331345245f1` | 134 |
+| `packages/api/scripts/stake-vault.ts` | `02d0751ea400119b04b5b0077a948877402a97ebddf43f7cd9e52da81c438da2` | 239 |
+| `packages/api/scripts/sync-helius-webhook.ts` | `827fcb0cb45b6b47c88de4b4c39f4a3eec444067f206f2ed9a46dbc84b6e06bf` | 116 |
+| `scripts/deploy-devnet.sh` | `6da15f2cae5f29a3e6b48f5a91f0999342438a87e0c0871846902a4b1f5a6500` | 60 |
+| `scripts/deploy.sh` | `40e9803d482129539a6fbeb0137ee1a5436381d341419c2f60e74c92863985e8` | 38 |
+| `scripts/init-devnet.sh` | `bcb8c025e60d87e97b7c852b72edbf82d90f22639bfb6b7b453e8ee326c0fadf` | 94 |
+| `scripts/setup-local.sh` | `12bb2783ed5617b8a479649e458362ed88fc11125dfe7b7a5851576d9db1d3fc` | 92 |
+| `scripts/setup-server.sh` | `27b47d731410fc90e0dc9cad6329174d000975a7883951eefd24cd8fa4ad6226` | 124 |
+| `scripts/setup-ssl.sh` | `2486d3b88ecc88aabc06e8a662ca2de69e6f4804679a574c14340f86eea5efd0` | 34 |
+| `scripts/smoke-auto-claim.ts` | `2dde0c630f6614545b7eba65bc149133f8c799c0defd0bbc89d1d1c9a15d5b6d` | 126 |
+| `scripts/sync-idl.sh` | `cd833ae65cc3e74600ac7c92eda4335db5c27e409fef16b3d03b5bac58142f3b` | 43 |
+| `docker/docker-compose.prod.yml` | `b7801fb1b197452313c37449007a4aeba6b71251989b294e34eeda26b7edeba8` | 261 |
+| `docker/docker-compose.yml` | `03a2a02f6ba8478746fee04d3e606dd58a6c35d52a8319df3e1aee2cfc9e67e8` | 120 |
+
+**225 files, 53233 LOC in scope.**
+
+## Out of scope
+
+`node_modules/`, `dist/`, `target/`, generated IDL and types, lockfiles,
+the `covantic-solana-sdk` repository, and third-party programs
+(SPL Token, Associated Token Account, Pyth).
+
+## Assumed trusted
+
+The Solana runtime and validator set, the SPL Token program, the Pyth
+guardian set, and the Postgres/Redis instances at their network boundary.

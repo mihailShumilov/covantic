@@ -72,6 +72,10 @@ REDIS_PASSWORD=<generated-password>
 HELIUS_API_KEY=<your-key>
 HELIUS_WEBHOOK_SECRET=<generated-secret>     # accepted as Authorization: Bearer <secret> from Helius
 ALERT_HMAC_SECRET=<generated-secret>         # signs internal monitoring:alerts channel
+SOLANA_RPC_FALLBACK_URLS=<second https endpoint on the SAME cluster>   # comma-separated
+TRUST_PROXY=1                                # hop count, never `true` — see below
+HELIUS_WEBHOOK_BEARER=<generated-secret>     # separate from HELIUS_WEBHOOK_SECRET, and gates /api/health/rpc detail
+FLEET_SINK_ADDRESS=<oracle authority pubkey> # so the fleet container needs no oracle secret
 USDC_MINT=<your-devnet-usdc-mint>
 PROGRAM_ID=<devnet-program-id>
 ORACLE_KEYPAIR_PATH=/app/keys/oracle-keypair.json
@@ -185,8 +189,8 @@ bash scripts/deploy.sh
 cd ~/covantic
 git pull --ff-only
 COMPOSE="docker compose -f docker/docker-compose.prod.yml --env-file .env"
-$COMPOSE build api web monitor
-$COMPOSE up -d api web monitor
+$COMPOSE build api web monitor fleet
+$COMPOSE up -d api web monitor fleet
 docker image prune -f
 ```
 
@@ -201,6 +205,73 @@ docker compose -f docker/docker-compose.prod.yml --env-file .env restart api web
 ```bash
 docker compose -f docker/docker-compose.prod.yml --env-file .env restart api
 ```
+
+### Images
+
+Four are built from this repo: `api`, `monitor`, `web` and `fleet`. The fleet
+has its own Dockerfile rather than reusing the api image — it runs a
+TypeScript entrypoint through `tsx`, so it needs devDependencies the api image
+now prunes, and it is the least-trusted process in the stack (it drives
+throwaway agents and deliberately lands malformed transactions), which is a
+poor thing to share an image with the claim keeper. Base images are pinned by
+digest, so a rebuild months later is the same base; bump it deliberately with
+`docker manifest inspect node:22-alpine`.
+
+### RPC endpoints
+
+Chain **reads** fan out across `SOLANA_RPC_URL` plus every URL in
+`SOLANA_RPC_FALLBACK_URLS`, in that order. Chain **writes** — every
+transaction this service sends, including the two checkpoint instructions —
+stay on `SOLANA_RPC_URL` alone, so that endpoint must remain a working,
+funded provider even when the fallbacks are carrying the read load.
+
+Running with no fallback is the old single-endpoint behaviour, and it is worse
+than a latency problem: when the provider hits its quota the exploit watcher
+stops writing balance checkpoints, and an exploit or agent-error claim filed
+without a fresh checkpoint is settled **`failed`, not `review`**. Set at least
+one fallback.
+
+An endpoint that fails three times in a row leaves the rotation for 30 s — or
+5 minutes if it answered `429` — and is skipped with no network call until
+then, so a throttled provider gets a chance to recover instead of being
+hammered.
+
+```bash
+# Per-endpoint state: health, slot, latency, error rate, cooldown, 429 count
+curl -s https://covantic.org/api/health/rpc | jq
+```
+
+`status: "no-endpoint-available"` means every endpoint is either unhealthy or
+in cooldown. Endpoint slots are sampled on a 30-second timer, so `healthy`
+means "answering, and not more than 150 slots behind the freshest endpoint" —
+not merely "has not failed three times". The response never carries a URL,
+only the host name: provider API keys live in the query string.
+
+Per-endpoint detail requires the operator bearer token
+(`HELIUS_WEBHOOK_BEARER`, falling back to `HELIUS_WEBHOOK_SECRET`); an
+anonymous caller gets the aggregate verdict only. `rateLimited` and `tripped`
+are a live success signal for a quota-exhaustion attack, and
+`no-endpoint-available` announces the window in which nothing is being
+checkpointed:
+
+```bash
+curl -s -H "Authorization: Bearer $HELIUS_WEBHOOK_BEARER" \
+  https://covantic.org/api/health/rpc | jq
+```
+
+Reads that can **close** a claim — a holder's governance baseline or agent
+mandate — are read from two endpoints and must agree. The proof instructions
+bound what an endpoint can take, because each re-derives the payout from state
+the program reads itself; nothing bounds what one can *deny*, and a rejection
+is computed off chain and is terminal. A disagreement throws, which resolves
+the claim to review rather than to a wrong verdict. With a single endpoint
+configured there is nothing to compare against and the read proceeds alone —
+the trust assumption is then what it was before fallbacks existed.
+
+Every endpoint's cluster is checked once at boot. A fallback on the wrong
+cluster is ejected permanently and logged at `error`; a **primary** on the
+wrong cluster refuses the process, because that is also where every
+transaction is sent.
 
 ### Database
 

@@ -9,7 +9,9 @@ src/
     env.ts              — Zod-validated env vars, loadConfig()
     database.ts         — Drizzle + pg Pool
     redis.ts            — ioredis connection
-    solana.ts           — @solana/web3.js Connection, loadKeypair()
+    solana.ts           — @solana/web3.js Connection (writes), loadKeypair()
+    rpc-pool.ts         — Multi-endpoint read pool (solana-resilience-kit) +
+                          per-endpoint circuit breakers
   db/
     schema.ts           — agents, riskAssessments, policies, claims, claimEvidence,
                           monitoringEvents, agentBalanceSnapshots, agentOutflowEvents, vaultSnapshots
@@ -17,6 +19,8 @@ src/
     migrate.ts          — Drizzle migrator
     seed.ts             — Demo data
   services/
+    exploit/delegate-provenance.ts — Did the agent approve the authority that
+                            moved its money? Only an owner can sign `Approve`
     risk-scorer.ts        — 7-factor weighted risk model, Helius API integration
     claim-oracle.ts       — Dispatcher over per-trigger verifiers
     verifiers/            — exploit, oracle-manipulation, agent-error, governance-attack
@@ -31,7 +35,7 @@ src/
     notification-service.ts — WebSocket + Redis pub/sub
     fleet/                — manifest / actions / failures / types for the autonomous agent fleet
   routes/
-    health.ts       — /api/health
+    health.ts       — /api/health, /api/health/rpc (per-endpoint pool state)
     risk.ts         — /api/risk/:addr, /api/assessments[/:id]
     policies.ts     — /api/policies[/:id], /policies/quote, /policies/enrichment, /policies/:id/why-active
     claims.ts       — /api/claims[/:id]
@@ -52,6 +56,11 @@ src/
     pyth.ts               — Pyth benchmarks client
     program.ts            — createCovanticProgram (oracle or read-only)
     policy-reader.ts      — fetchOnChainPolicy (structured {policy, reason, detail})
+    anchor-reader.ts      — Anchor account reads over the pool: bytes from the
+                            reader, layout from the program's own coder
+    solana-reader.ts      — SolanaReader: every chain READ, over the endpoint pool.
+                            Returns plain numbers/strings/Buffers — no web3.js
+                            types and no bigints cross this boundary
     monitor-metrics.ts    — Redis counters for /api/monitoring/metrics
     logger.ts             — Pino logger
   middleware/
@@ -239,6 +248,32 @@ be added to `failures.ts` and then exposed via `BehaviorProfile.rogueMix`.
 - Pino logger (Fastify built-in)
 - `createCovanticProgram({ withOracle: true|false })` is the single entry point for any code
   that needs to read or write the Anchor program — avoid creating ad-hoc providers
+- **Reads go through `SolanaReader`, writes through the v1 `Connection`.** The
+  reader (`utils/solana-reader.ts`) fans out across `SOLANA_RPC_URL` plus
+  `SOLANA_RPC_FALLBACK_URLS`; `getSolanaReader(config)` returns the one
+  process-wide instance, and a second pool would defeat the shared circuit
+  breakers. Sending stays on the primary endpoint alone — a transaction that
+  lands twice is worse than one that lands late.
+- **Anchor account reads use `utils/anchor-reader.ts`**, not
+  `program.account.X.fetch()/.all()`: those go through the provider's single
+  connection. Bytes come from the pool, the layout still comes from the
+  program's own coder. `.all()` is a `getProgramAccounts` — the heaviest call
+  this service makes — and the policy indexer issues one every 60 s.
+- **Three exceptions, and they are deliberate: a read that reconciles a write we
+  just made stays on the connection we wrote from.** `isPolicySettledOnChain`,
+  the `ClaimPending` rescue in `submitClaimOnChain`, and
+  `AttestationPublisher.fetchExisting` all ask "did our own transaction land?",
+  and an endpoint a few slots behind would answer no about a write that
+  succeeded — turning a completed payout into a retry, or picking `init` for a
+  PDA that already exists. Every site carries a comment saying so; do not
+  "finish the migration" by moving them. `tests/read-pool-discipline.test.ts`
+  enforces the count in both directions — the documented list said three while
+  the tree held nine, and the four proof posters were among the six missing.
+- **The neighbouring case is different: a read that *overwrites* state our
+  writes produce belongs on the pool, with a freshness guard.** The policy
+  indexer's `getProgramAccounts` carries its context slot and refuses a listing
+  older than the one already applied, so a lagging endpoint cannot walk
+  `ClaimPending` back to `Active`.
 
 ## Webhook Auth
 
