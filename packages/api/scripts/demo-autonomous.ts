@@ -84,11 +84,16 @@ async function main(): Promise<void> {
     throw new Error('Usage: demo:autonomous --policy <id> --agent <name> [--amount 600]');
   }
 
-  // Claims that already exist. A policy holds one open claim, so anything
-  // standing here would take the slot and the demo would watch the wrong one.
-  const before = new Set((await claimsFor(policyId)).map((c) => c.id));
-  if (before.size > 0) {
-    say(`note: policy ${policyId} already has ${before.size} claim(s); watching for a new one`);
+  // A policy holds one open claim, so a standing one either blocks this run or
+  // gets re-pointed at the new transaction. Both are worth following, and
+  // watching only for a *new* row misses the second entirely: the keeper
+  // supersedes by editing the parked claim in place, so the id does not
+  // change. That is how a run that worked end to end reported "no claim
+  // reached a terminal state" while the claim it should have watched went to a
+  // verdict.
+  const before = await claimsFor(policyId);
+  if (before.length > 0) {
+    say(`note: policy ${policyId} already has ${before.length} claim(s); one may be superseded`);
   }
 
   say(`agent ${agent} moves ${amount} USDC against a declared cap`);
@@ -116,8 +121,12 @@ async function main(): Promise<void> {
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, POLL_MS));
 
-    const fresh = (await claimsFor(policyId)).filter((c) => !before.has(c.id));
-    const claim = fresh[0];
+    const all = await claimsFor(policyId);
+    // The claim this run is about is the one pointing at the transaction this
+    // run sent — whether it was created for it or re-pointed at it.
+    const claim =
+      all.find((c) => sig && c.triggerTxSignature === sig) ??
+      all.find((c) => !before.some((b) => b.id === c.id));
     if (!claim) continue;
 
     if (claim.status !== seen) {
