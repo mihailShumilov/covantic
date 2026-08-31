@@ -116,6 +116,10 @@ export class AttestationPublisher {
     ctx: CovanticProgram,
     pda: PublicKey,
   ): Promise<OnChainAttestation | null> {
+    // On the provider's connection rather than the read pool: the answer
+    // decides whether the next instruction initialises this PDA or updates it,
+    // and it is usually read moments after this same process wrote it. An
+    // endpoint a slot or two behind would pick the wrong instruction.
     const accountNamespace = (ctx.program.account as Record<string, any>).riskAttestation;
     if (!accountNamespace) {
       throw new Error('IDL is missing riskAttestation account — rebuild the anchor program');
