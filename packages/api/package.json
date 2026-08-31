@@ -29,7 +29,8 @@
     "mandate:declare": "tsx scripts/declare-agent-mandate.ts",
     "backtest:fetch": "tsx scripts/backtest-fetch.ts",
     "migrate:accounts": "tsx scripts/migrate-accounts.ts",
-    "monitor:dev": "tsx src/workers/monitor-entry.ts"
+    "monitor:dev": "tsx src/workers/monitor-entry.ts",
+    "demo:autonomous": "tsx scripts/demo-autonomous.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
