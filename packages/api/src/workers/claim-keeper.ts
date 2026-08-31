@@ -368,9 +368,13 @@ async function ingestAlert(
 /** Synthetic verification for simulated monitoring events. Demo tx
  *  signatures can't be resolved by Helius, so the production verifier
  *  returns verified:false; this keeps the demo UX working end-to-end. */
-function syntheticVerification(triggerType: number, coverageAmount: number): VerificationResult {
+function syntheticVerification(
+  triggerType: number,
+  coverageAmount: number,
+  exploitLockSeconds: number,
+): VerificationResult {
   const lockByTrigger: Record<number, number> = {
-    [TriggerType.Exploit]: LOCK_PERIODS.EXPLOIT,
+    [TriggerType.Exploit]: exploitLockSeconds,
     [TriggerType.OracleManipulation]: LOCK_PERIODS.ORACLE_MANIPULATION,
     [TriggerType.AgentError]: LOCK_PERIODS.AGENT_ERROR,
     [TriggerType.GovernanceAttack]: LOCK_PERIODS.GOVERNANCE_ATTACK,
@@ -637,7 +641,11 @@ async function processClaim(claimId: string, deps: ProcessDeps): Promise<void> {
 
   let result: VerificationResult;
   if (simulated) {
-    result = syntheticVerification(claim.triggerType, policy.coverageAmount);
+    result = syntheticVerification(
+      claim.triggerType,
+      policy.coverageAmount,
+      config.EXPLOIT_LOCK_SECONDS,
+    );
   } else {
     result = await verifyClaim(
       claim.triggerType as TriggerType,
@@ -649,6 +657,9 @@ async function processClaim(claimId: string, deps: ProcessDeps): Promise<void> {
       {
         usdcMint: config.USDC_MINT,
         reader,
+        // A devnet build may shorten the program's own LOCK_EXPLOIT so a demo
+        // completes in under a minute; the keeper's wait has to move with it.
+        exploitLockSeconds: config.EXPLOIT_LOCK_SECONDS,
         holderAddress: policy.holderAddress,
         governance: governanceLookups(claim, policy, deps),
         agentError: agentErrorLookups(claim, policy, deps),

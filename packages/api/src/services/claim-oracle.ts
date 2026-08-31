@@ -63,6 +63,14 @@ export interface VerifyClaimOptions {
    *  read the chain's own record of who signed for what. Without it an
    *  exploit claim cannot be resolved at all and returns `indeterminate`. */
   reader?: SolanaReader | null;
+  /**
+   * Seconds the payout stays locked after the claim is submitted.
+   *
+   * Mirrors the program's `LOCK_EXPLOIT`, which a devnet build can shorten.
+   * Never *below* the deployed program's value: the chain refuses a payout
+   * inside its own lock and the keeper records a revert as `failed`.
+   */
+  exploitLockSeconds?: number;
   /** Policy holder wallet. Value landing in an account the holder controls is
    *  the holder moving their own money, not a loss the vault owes. */
   holderAddress?: string;
@@ -144,6 +152,7 @@ export async function verifyClaim(
     case TriggerType.Exploit:
       return verifyExploit(tx, agentAddress, coverageAmount, priceOracle, {
         reader: options.reader ?? null,
+        exploitLockSeconds: options.exploitLockSeconds,
         holderAddress: options.holderAddress,
         cohort: options.cohort,
       });

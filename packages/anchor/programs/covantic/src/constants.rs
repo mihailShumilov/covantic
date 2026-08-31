@@ -78,6 +78,18 @@ pub const TRIGGER_GOVERNANCE_ATTACK: u8 = 4;
 /// pause the protocol if the oracle is compromised. MUST be > 0 for every
 /// trigger type or a compromised oracle keypair can drain the vault in a
 /// single slot with no chance of intervention.
+/// Devnet demo builds shorten this so a full run — drain, detect, adjudicate,
+/// pay — fits inside a minute. Never for mainnet: the lock is the window in
+/// which `paused` or the payout breaker can stop a wrong payout before the
+/// money moves, and thirty seconds is not a window, it is a formality.
+///
+/// A cargo feature rather than a config field because it cannot then be turned
+/// on by an environment variable or a mistyped `.env` — enabling it takes a
+/// deliberate build, and `anchor build` without `--features devnet-fast-lock`
+/// produces the one-hour lock.
+#[cfg(feature = "devnet-fast-lock")]
+pub const LOCK_EXPLOIT: i64 = 30;
+#[cfg(not(feature = "devnet-fast-lock"))]
 pub const LOCK_EXPLOIT: i64 = 3600;
 pub const LOCK_ORACLE_MANIPULATION: i64 = 3600;
 pub const LOCK_AGENT_ERROR: i64 = 21600;
