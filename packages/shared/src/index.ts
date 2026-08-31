@@ -25,6 +25,8 @@ export {
   PARKED_CLAIM_STATUSES,
   UNRESOLVABLE_PARK_REASONS,
   isPermanentlyParked,
+  TRANSIENT_PARK_REASONS,
+  isTransientlyParked,
   TRIGGER_SPECIFICITY,
 } from './types/claims.js';
 
