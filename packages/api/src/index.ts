@@ -12,6 +12,7 @@ import { registerWorkers } from './workers/index.js';
 import { registerErrorHandler } from './middleware/error-handler.js';
 import { registerRateLimit } from './middleware/rate-limit.js';
 import { createSolanaConnection } from './config/solana.js';
+import { getSolanaReader, verifyReaderCluster } from './utils/solana-reader.js';
 import { NotificationService } from './services/notification-service.js';
 import { AttestationPublisher } from './services/attestation-publisher.js';
 import { logger } from './utils/logger.js';
@@ -19,6 +20,22 @@ import './types/index.js';
 
 const ALLOWED_WS_CHANNELS = ['claims:feed', 'vault:stats', 'monitoring:alerts'];
 const AGENT_CHANNEL_PREFIX = 'agent:';
+
+/**
+ * Resolve `TRUST_PROXY` into something Fastify can be trusted with.
+ *
+ * Anything that is not an explicit `false`, a hop count, or a CIDR/IP list
+ * becomes the default single hop rather than blanket trust — the failure
+ * direction matters, because `true` hands `request.ip` to the caller.
+ */
+function parseTrustProxy(raw: string | undefined): boolean | number | string {
+  if (raw === undefined) return 1;
+  const value = raw.trim();
+  if (value === '' || value.toLowerCase() === 'true') return 1;
+  if (value.toLowerCase() === 'false') return false;
+  if (/^\d+$/.test(value)) return Number(value);
+  return value;
+}
 
 async function bootstrap() {
   // 1. Load and validate config
@@ -36,12 +53,24 @@ async function bootstrap() {
   // 3. Create connections
   const redis = createRedisConnection(config.REDIS_URL);
   const solanaConnection = createSolanaConnection(config.SOLANA_RPC_URL);
+  const solanaReader = getSolanaReader(config);
+  // Before any read depends on it. A wrong-cluster endpoint answers
+  // authoritatively that accounts do not exist, which this service is
+  // required to read as absence — so it must never be in rotation.
+  await verifyReaderCluster(config);
 
   // 4. Create Fastify instance. trustProxy lets us honour X-Forwarded-For
-  // from the nginx front-end so per-IP rate limits key on the real client
-  // IP, not the Docker gateway. Default to true behind a reverse proxy,
-  // opt out via TRUST_PROXY=false.
-  const trustProxy = config.TRUST_PROXY === 'false' ? false : (config.TRUST_PROXY ?? true);
+  // from the nginx front-end so per-IP rate limits key on the real client IP,
+  // not the Docker gateway.
+  //
+  // A *hop count*, never `true`. With `true`, Fastify walks the whole
+  // X-Forwarded-For chain and returns its leftmost entry — which nginx
+  // prepends verbatim from the client, so `request.ip` becomes an
+  // attacker-chosen string and every rate limit here keys on it. With `1` it
+  // walks exactly one hop and lands on nginx's own `$remote_addr`.
+  // `TRUST_PROXY=false` still disables it outright, and a CIDR string is
+  // honoured for a more complex front end.
+  const trustProxy = parseTrustProxy(config.TRUST_PROXY);
   const app = Fastify({
     trustProxy,
     logger: {
@@ -66,6 +95,7 @@ async function bootstrap() {
   app.decorate('redis', redis);
   app.decorate('config', config);
   app.decorate('solanaConnection', solanaConnection);
+  app.decorate('solanaReader', solanaReader);
   app.decorate('attestationPublisher', new AttestationPublisher(config));
 
   // 7. Error handling + rate limiting

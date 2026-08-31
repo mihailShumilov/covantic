@@ -1,6 +1,7 @@
 import { config as loadDotenv } from 'dotenv';
 import { resolve } from 'node:path';
 import { z } from 'zod';
+import { MAX_CHECKPOINT_AGE_SECONDS } from '@covantic/shared';
 import { logger } from '../utils/logger.js';
 
 // Load .env from monorepo root (src/config -> src -> api -> packages -> root)
@@ -15,7 +16,73 @@ const envSchema = z.object({
   REDIS_URL: z.string().url(),
 
   SOLANA_RPC_URL: z.string().url(),
+  /**
+   * Extra read-only endpoints, comma-separated, in preference order.
+   *
+   * Reads fail over across `SOLANA_RPC_URL` plus these; writes stay on
+   * `SOLANA_RPC_URL` alone. Empty is legal and means the previous behaviour —
+   * one endpoint, and every checkpoint and claim path down with it when that
+   * provider hits its quota.
+   */
+  SOLANA_RPC_FALLBACK_URLS: z
+    .string()
+    .optional()
+    .refine(
+      (raw) =>
+        !raw ||
+        raw
+          .split(',')
+          .map((u) => u.trim())
+          .filter((u) => u.length > 0)
+          .every((u) => URL.canParse(u) && new URL(u).protocol === 'https:'),
+      // `.url()` on the primary admits `http:` too, but this is the variable
+      // an operator adds endpoints to, and every read that reaches a hashed
+      // evidence bundle can travel over one of them. Plaintext there is a
+      // strictly easier position to reach than compromising a provider.
+      { message: 'every entry must be an https URL' },
+    ),
+  /**
+   * Rank endpoints by how fresh their slot is before each read.
+   *
+   * Off by default because the kit implements it by probing `getSlot` on every
+   * endpoint before every request, multiplying request volume by the endpoint
+   * count — the opposite of what a quota-exhausted deployment needs.
+   */
+  SOLANA_RPC_FRESHNESS_AWARE: z
+    .preprocess((v) => (typeof v === 'string' ? v.toLowerCase() === 'true' : v), z.boolean())
+    .default(false),
   SOLANA_NETWORK: z.enum(['devnet', 'mainnet-beta', 'localnet']).default('devnet'),
+  /**
+   * How often the exploit and oracle watchers sweep, in milliseconds.
+   *
+   * The ceiling is the load-bearing half. The exploit sweep is what writes the
+   * on-chain balance checkpoints every proven payout is bounded by, and
+   * `verify_and_payout_exploit` refuses a checkpoint older than
+   * `MAX_CHECKPOINT_AGE` (2 h). A cadence above that window does not slow
+   * detection — it makes every provable claim unprovable, and a payout that
+   * reverts is recorded `failed`, a closed status, not `review`. A quarter of
+   * the window leaves room for verification latency.
+   *
+   * Both were read straight from `process.env` with no floor, ceiling or NaN
+   * guard, which also meant a bare `EXPLOIT_SWEEP_INTERVAL_MS=` in a copied
+   * `.env` became `Number('') === 0` and BullMQ refused to schedule at all.
+   */
+  EXPLOIT_SWEEP_INTERVAL_MS: z
+    .preprocess(
+      (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+      z.coerce
+        .number()
+        .int()
+        .min(5_000)
+        .max((MAX_CHECKPOINT_AGE_SECONDS * 1000) / 4),
+    )
+    .default(120_000),
+  ORACLE_SWEEP_INTERVAL_MS: z
+    .preprocess(
+      (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+      z.coerce.number().int().min(5_000).max(1_800_000),
+    )
+    .default(120_000),
 
   /**
    * Settle oracle-manipulation payouts through `verify_and_payout_v2`, which

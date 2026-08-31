@@ -5,6 +5,7 @@ import { createDbConnection } from '../config/database.js';
 import { createRedisConnection } from '../config/redis.js';
 import { registerWorkers } from './index.js';
 import { logger } from '../utils/logger.js';
+import { verifyReaderCluster } from '../utils/solana-reader.js';
 
 async function main() {
   const config = loadConfig();
@@ -13,6 +14,11 @@ async function main() {
   registerCoveredMint(config.USDC_MINT);
   const db = createDbConnection(config.DATABASE_URL);
   const redis = createRedisConnection(config.REDIS_URL);
+
+  // The monitor is the process that writes the balance checkpoints every
+  // proven payout is bounded by, so a wrong-cluster endpoint here is worse
+  // than in the API: it would silently stop checkpointing.
+  await verifyReaderCluster(config);
 
   registerWorkers(db, redis, config);
 
