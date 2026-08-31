@@ -73,6 +73,9 @@ export interface AgentErrorVerifierOptions {
    */
   outflowBaseline?: (windowSeconds: number) => Promise<OutflowBaselineView | null>;
   maxSkewSec?: number;
+  /** Off-chain wait before the payout attempt. Mirrors the deployed
+   *  program's `LOCK_AGENT_ERROR`; see `EXPLOIT_LOCK_SECONDS` in `env.ts`. */
+  agentErrorLockSeconds?: number;
 }
 
 export async function verifyAgentError(
@@ -82,7 +85,7 @@ export async function verifyAgentError(
   priceOracle: PriceOracle,
   options: AgentErrorVerifierOptions = {},
 ): Promise<VerificationResult> {
-  const lockPeriod = LOCK_PERIODS.AGENT_ERROR;
+  const lockPeriod = options.agentErrorLockSeconds ?? LOCK_PERIODS.AGENT_ERROR;
   const reader = options.reader ?? null;
   const programs = classifyPrograms(tx);
 

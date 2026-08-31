@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { envSchema } from '../src/config/env.js';
 
 /**
  * INV-ENV-01 — every variable compose can pass empty is accepted empty.
@@ -44,40 +45,82 @@ function emptyDefaulted(): string[] {
   return [...found].sort();
 }
 
+/**
+ * A minimal environment that satisfies the schema, for the empty-value cases
+ * to vary one field at a time against.
+ *
+ * Hand-written rather than read from `.env.example`, because the example file
+ * carries placeholders — `PROGRAM_ID`, `WEBHOOK_PUBLIC_URL` — that the schema
+ * correctly rejects. `parses on its own` below is the coverage check: add a
+ * required variable to the schema without adding it here and it fails.
+ */
+const BASE: Record<string, string> = {
+  DATABASE_URL: 'postgresql://covantic:pw@localhost:5432/covantic',
+  REDIS_URL: 'redis://localhost:6379',
+  SOLANA_RPC_URL: 'https://api.devnet.solana.com',
+  PROGRAM_ID: 'HrLqdNdxUJq4pgsL4NsUqzfYrGxR7Hy9PHGEeHnj3skL',
+  ORACLE_KEYPAIR_PATH: '/app/keys/oracle-keypair.json',
+  HELIUS_API_KEY: 'helius-key',
+  HELIUS_WEBHOOK_SECRET: 'x'.repeat(64),
+  ALERT_HMAC_SECRET: 'y'.repeat(32),
+};
+
+function requiredValues(): Record<string, string> {
+  return { ...BASE };
+}
+
 describe('INV-ENV-01 — an unset compose variable arrives as an empty string', () => {
-  it('guards every empty-defaulted variable the schema validates', () => {
-    const schema = readFileSync(ENV_SCHEMA, 'utf8');
-    const unguarded: string[] = [];
+  it('parses on its own, so the fixture cannot fall behind the schema', () => {
+    const parsed = envSchema.safeParse(requiredValues());
+
+    expect(
+      parsed.success ? [] : [...new Set(parsed.error.issues.map((i) => String(i.path[0])))],
+      'add these to BASE',
+    ).toEqual([]);
+  });
+
+  it('accepts an empty string for every variable compose can pass empty', () => {
+    // Parsed, not pattern-matched. The previous version of this test read the
+    // schema source and looked for `optionalEnv(`, which confirmed the fix was
+    // *present* rather than that it *worked* — and
+    // `optionalEnv(schema).default(x)` is present, reads naturally, and is
+    // wrong: `.default()` outside the call wraps the preprocessor, substitutes
+    // only for `undefined`, and so passes `''` through to a coercion that
+    // yields `NaN`. That shipped, and the api and monitor crash-looped on it.
+    const base = requiredValues();
+    const failures: string[] = [];
 
     for (const name of emptyDefaulted()) {
-      // Variables the schema does not mention are read straight from
-      // `process.env` by whoever needs them; those are the caller's problem
-      // and are covered by their own guard (see `FLEET_SINK_ADDRESS` in
-      // `scripts/fleet-start.ts`).
-      const declared = new RegExp(`^\\s+${name}:`, 'm').exec(schema);
-      if (!declared) continue;
-
-      // The declaration runs from its name to the next top-level key.
-      const rest = schema.slice(declared.index + declared[0].length);
-      const end = /\n {2}[A-Z_][A-Z0-9_]*:/.exec(rest);
-      const body = rest.slice(0, end ? end.index : 400);
-
-      // Either it maps empty to undefined, or it imposes no constraint an
-      // empty string could fail.
-      const guarded = /optionalEnv\(|preprocess\(/.test(body);
-      // Two ways `''` goes wrong, and the quiet one matters more. A constraint
-      // rejects it, which crashes the container — loud, and fixed in minutes.
-      // A coercion *accepts* it: `Number('')` is `0`, so the process starts
-      // and runs on a value nobody chose.
-      const constrained = /\.min\(|\.url\(|\.uuid\(|\.regex\(|z\.enum\(/.test(body);
-      const coerces = /z\.coerce\./.test(body);
-      if (!guarded && (constrained || coerces)) unguarded.push(name);
+      if (!(name in envSchema.shape)) continue;
+      const parsed = envSchema.safeParse({ ...base, [name]: '' });
+      if (!parsed.success) {
+        const issue = parsed.error.issues.find((i) => i.path[0] === name);
+        if (issue) failures.push(`${name}: ${issue.message}`);
+      }
     }
 
     expect(
-      unguarded,
-      'wrap these in optionalEnv() — compose passes them as "" when unset',
+      failures,
+      'wrap these in optionalEnv(schema.default(x)) — compose passes them as "" when unset',
     ).toEqual([]);
+  });
+
+  it('falls back to the default rather than to NaN', () => {
+    // The specific shape of the bug. `''` must reach the *default*, not merely
+    // avoid an error: a limit that silently became 0 or NaN is worse than one
+    // that refuses to start, because the service comes up and misbehaves.
+    const parsed = envSchema.parse({ ...requiredValues(), AUTO_PAYOUT_HOURLY_LIMIT_RAW: '' });
+
+    expect(parsed.AUTO_PAYOUT_HOURLY_LIMIT_RAW).toBe(100_000_000_000);
+    expect(Number.isNaN(parsed.AUTO_PAYOUT_HOURLY_LIMIT_RAW)).toBe(false);
+  });
+
+  it('still reads a value an operator did set', () => {
+    // The guard must not swallow real input — a preprocessor that returned
+    // `undefined` unconditionally would pass every assertion above.
+    const parsed = envSchema.parse({ ...requiredValues(), EXPLOIT_LOCK_SECONDS: '30' });
+
+    expect(parsed.EXPLOIT_LOCK_SECONDS).toBe(30);
   });
 
   it('threads every documented variable the schema reads into both services', () => {
