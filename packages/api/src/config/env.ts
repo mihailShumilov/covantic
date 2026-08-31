@@ -194,7 +194,9 @@ const envSchema = z.object({
    * same bad payout repeated before anyone looks. Claims over the cap queue
    * to review rather than closing.
    */
-  AUTO_PAYOUT_HOURLY_LIMIT_RAW: z.coerce.number().int().nonnegative().default(100_000_000_000),
+  AUTO_PAYOUT_HOURLY_LIMIT_RAW: optionalEnv(z.coerce.number().int().nonnegative()).default(
+    100_000_000_000,
+  ),
   PROGRAM_ID: z.string().min(32),
   ORACLE_KEYPAIR_PATH: z.string(),
 
