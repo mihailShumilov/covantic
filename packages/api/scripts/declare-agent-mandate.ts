@@ -38,8 +38,15 @@ import { config as loadDotenv } from 'dotenv';
 
 loadDotenv({ path: resolve(import.meta.dirname, '../../../.env') });
 
-import { AnchorProvider, BN, Program, Wallet, type Idl } from '@coral-xyz/anchor';
+import anchorPkg, { AnchorProvider, Program, Wallet, type Idl } from '@coral-xyz/anchor';
+
+// Anchor 1.x ships CommonJS with no named `BN` export, so `import { BN }`
+// throws at module load — before any argument is parsed, which is why this
+// looked like a broken CLI rather than a dependency change. The rest of the
+// scripts already reach it through the default export.
+const { BN } = anchorPkg;
 import { Connection, Keypair, PublicKey, SystemProgram } from '@solana/web3.js';
+import { getAssociatedTokenAddressSync } from '@solana/spl-token';
 import {
   MANDATE_DECLARATION_DELAY_SECONDS,
   MAX_MANDATE_COUNTERPARTIES,
@@ -123,6 +130,26 @@ async function main(): Promise<void> {
     [Buffer.from(PDA_SEEDS.AGENT_MANDATE), policy.toBuffer()],
     program.programId,
   );
+  const [configPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from(PDA_SEEDS.CONFIG)],
+    program.programId,
+  );
+
+  // Anchor cannot resolve `covered_token_account` on its own: it is an ATA of
+  // the *policy's* agent, and reaching that means fetching the policy, then
+  // the config for the mint, then deriving — three hops past the resolver's
+  // depth limit, which it reports as `Reached maximum depth for account
+  // resolution` with no hint that the account was derivable all along.
+  const usdcMint = new PublicKey(requireEnv('USDC_MINT'));
+  const policyAccount = (await (
+    program.account as unknown as Record<
+      string,
+      { fetch: (a: PublicKey) => Promise<{ agentAddress: PublicKey }> }
+    >
+  ).insurancePolicy!.fetch(policy)) as { agentAddress: PublicKey };
+  // `allowOwnerOffCurve` is false deliberately: the covered account is the
+  // agent wallet's own ATA, and the program derives it the same way.
+  const coveredTokenAccount = getAssociatedTokenAddressSync(usdcMint, policyAccount.agentAddress);
 
   const maxSingleOutflow = usdc(maxSingle);
   // Defaults to the single cap: a window bound below one permitted movement
@@ -181,6 +208,9 @@ async function main(): Promise<void> {
       holder: holder.publicKey,
       policy,
       mandate: mandatePda,
+      config: configPda,
+      coveredTokenAccount,
+      usdcMint,
       systemProgram: SystemProgram.programId,
     })
     .rpc();
