@@ -67,7 +67,15 @@ services:
       HELIUS_API_KEY: ${HELIUS_API_KEY}
       HELIUS_WEBHOOK_SECRET: ${HELIUS_WEBHOOK_SECRET}
       PROGRAM_ID: ${PROGRAM_ID}
-      ORACLE_KEYPAIR_PATH: /app/keys/oracle-keypair.json
+      # Settable, not hardcoded. Rotating the oracle authority on chain means
+      # pointing the containers at the new key file, and a literal here made
+      # the `.env` edit a no-op — the containers kept signing with a key the
+      # program had already stopped accepting.
+      ORACLE_KEYPAIR_PATH: ${ORACLE_KEYPAIR_PATH:-/app/keys/oracle-keypair.json}
+      # The mint authority stays on the old, cold key. The oracle is hot: it
+      # lives in these containers, and whoever holds the mint authority can
+      # mint the covered asset outright.
+      MINT_AUTHORITY_KEYPAIR_PATH: ${MINT_AUTHORITY_KEYPAIR_PATH:-}
       USDC_MINT: ${USDC_MINT}
       # Proof paths. Off until the program carrying the four verify_and_payout
       # instructions is deployed — enabling one against an older program makes
@@ -126,7 +134,15 @@ services:
       HELIUS_API_KEY: ${HELIUS_API_KEY}
       HELIUS_WEBHOOK_SECRET: ${HELIUS_WEBHOOK_SECRET}
       PROGRAM_ID: ${PROGRAM_ID}
-      ORACLE_KEYPAIR_PATH: /app/keys/oracle-keypair.json
+      # Settable, not hardcoded. Rotating the oracle authority on chain means
+      # pointing the containers at the new key file, and a literal here made
+      # the `.env` edit a no-op — the containers kept signing with a key the
+      # program had already stopped accepting.
+      ORACLE_KEYPAIR_PATH: ${ORACLE_KEYPAIR_PATH:-/app/keys/oracle-keypair.json}
+      # The mint authority stays on the old, cold key. The oracle is hot: it
+      # lives in these containers, and whoever holds the mint authority can
+      # mint the covered asset outright.
+      MINT_AUTHORITY_KEYPAIR_PATH: ${MINT_AUTHORITY_KEYPAIR_PATH:-}
       USDC_MINT: ${USDC_MINT}
       # Proof paths. Off until the program carrying the four verify_and_payout
       # instructions is deployed — enabling one against an older program makes
@@ -190,7 +206,15 @@ services:
       # A public key, so this container needs no oracle secret. Set
       # FLEET_SINK_ADDRESS and the ./keys mount below can drop to ./keys/fleet.
       FLEET_SINK_ADDRESS: ${FLEET_SINK_ADDRESS:-}
-      ORACLE_KEYPAIR_PATH: /app/keys/oracle-keypair.json
+      # Settable, not hardcoded. Rotating the oracle authority on chain means
+      # pointing the containers at the new key file, and a literal here made
+      # the `.env` edit a no-op — the containers kept signing with a key the
+      # program had already stopped accepting.
+      ORACLE_KEYPAIR_PATH: ${ORACLE_KEYPAIR_PATH:-/app/keys/oracle-keypair.json}
+      # The mint authority stays on the old, cold key. The oracle is hot: it
+      # lives in these containers, and whoever holds the mint authority can
+      # mint the covered asset outright.
+      MINT_AUTHORITY_KEYPAIR_PATH: ${MINT_AUTHORITY_KEYPAIR_PATH:-}
       PROGRAM_ID: ${PROGRAM_ID}
       LOG_LEVEL: info
     volumes:
