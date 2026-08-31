@@ -6,7 +6,7 @@ import { verifyClaim, type VerificationResult } from '../src/services/claim-orac
 import { AUTO_PAY_CONFIDENCE, decideLane } from '../src/services/confidence-lanes.js';
 import { bundleHash, verdictHash } from '../src/services/oracle/hash.js';
 import {
-  cassetteConnection,
+  cassetteReader,
   cassetteHelius,
   cassettePricer,
 } from '../src/services/backtest/replay.js';
@@ -89,7 +89,7 @@ async function judge(
     cassetteHelius(cassette),
     cassettePricer(cassette),
     {
-      connection: cassetteConnection(cassette),
+      reader: cassetteReader(cassette),
       holderAddress: ABSENT_HOLDER,
       ...NO_DECLARATIONS,
     },

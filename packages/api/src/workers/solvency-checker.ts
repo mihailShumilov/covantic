@@ -8,6 +8,8 @@ import type { AppConfig } from '../config/env.js';
 import { vaultSnapshots, policies } from '../db/schema.js';
 import { logger } from '../utils/logger.js';
 import { createCovanticProgram, type CovanticProgram } from '../utils/program.js';
+import { fetchAnchorAccount } from '../utils/anchor-reader.js';
+import { getSolanaReader } from '../utils/solana-reader.js';
 
 const QUEUE_NAME = 'solvency-checker';
 
@@ -36,6 +38,7 @@ export function startSolvencyChecker(db: Database, redis: Redis, config: AppConf
     logger.error({ err }, 'Solvency checker disabled: failed to load program');
     return null;
   }
+  const reader = getSolanaReader(config);
 
   const [vaultPda] = PublicKey.findProgramAddressSync(
     [Buffer.from('covantic_vault')],
@@ -63,9 +66,18 @@ export function startSolvencyChecker(db: Database, redis: Redis, config: AppConf
       // On-chain vault is the source of truth for staking-side numbers.
       let vaultAccount: any;
       try {
-        vaultAccount = await (programCtx.program.account as any).insuranceVault.fetch(vaultPda);
+        vaultAccount = await fetchAnchorAccount(
+          programCtx,
+          reader,
+          'insuranceVault',
+          vaultPda.toBase58(),
+        );
       } catch (err) {
-        logger.warn({ err }, 'solvency-checker: vault account not yet initialized');
+        logger.warn({ err }, 'solvency-checker: vault unreadable');
+        return;
+      }
+      if (!vaultAccount) {
+        logger.warn('solvency-checker: vault account not yet initialized');
         return;
       }
 

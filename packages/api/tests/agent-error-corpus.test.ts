@@ -8,7 +8,7 @@ import { bundleHash, verdictHash } from '../src/services/oracle/hash.js';
 import { planProvenSettlement } from '../src/services/settlement-plan.js';
 import { AGENT, HOLDER, USDC } from './fixtures/exploit.js';
 import { mkPricer } from './fixtures/corpus.js';
-import { mkConnection, mkEnhanced, mkHelius } from './fixtures/exploit-corpus.js';
+import { mkReader, mkEnhanced, mkHelius } from './fixtures/exploit-corpus.js';
 import {
   ALL_CASES,
   COVERAGE_RAW,
@@ -52,7 +52,7 @@ async function judge(testCase: AgentErrorCase) {
     mkHelius(enhanced),
     mkPricer(FEEDS),
     {
-      connection: mkConnection(testCase.tx, signature),
+      reader: mkReader(testCase.tx, signature),
       holderAddress: HOLDER,
       usdcMint: USDC,
       agentError: { mandate, outflowBaseline: () => Promise.resolve(null) },

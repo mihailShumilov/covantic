@@ -1,4 +1,4 @@
-import type { Connection } from '@solana/web3.js';
+import type { SolanaReader } from '../../utils/solana-reader.js';
 import { fetchRawTxView } from '../exploit/raw-tx.js';
 import { logger } from '../../utils/logger.js';
 import type { EnhancedTransaction } from '../../utils/helius.js';
@@ -87,7 +87,7 @@ export interface SignatureContext {
   referenceDispersion: number;
   /** Reference confidence as a fraction of price at the block time. */
   referenceConfFraction: number;
-  connection?: Connection | null;
+  reader?: SolanaReader | null;
 }
 
 /** Offsets around the transaction at which the reference is re-sampled.
@@ -284,11 +284,11 @@ async function measureVenueDepthImpact(ctx: SignatureContext): Promise<{
   reason: string;
   detail: Record<string, unknown>;
 }> {
-  if (!ctx.connection) {
+  if (!ctx.reader) {
     return { present: null, reason: 'no_connection', detail: {} };
   }
 
-  const view = await fetchRawTxView(ctx.connection, ctx.tx.signature);
+  const view = await fetchRawTxView(ctx.reader, ctx.tx.signature);
   if (!view) return { present: null, reason: 'chain_record_unavailable', detail: {} };
 
   const before = new Map<string, { amountRaw: number; owner: string | null; mint: string }>();
@@ -426,23 +426,18 @@ async function detectSandwich(ctx: SignatureContext): Promise<{
   reason?: string;
   detail: Record<string, unknown>;
 }> {
-  if (!ctx.connection || ctx.slot === null) {
+  if (!ctx.reader || ctx.slot === null) {
     return { present: null, reason: 'no_connection_or_slot', detail: {} };
   }
 
   try {
-    const block = await ctx.connection.getBlock(ctx.slot, {
-      maxSupportedTransactionVersion: 0,
-      transactionDetails: 'accounts',
-      rewards: false,
-    });
+    const block = await ctx.reader.getBlockAccounts(ctx.slot);
     if (!block) return { present: null, reason: 'block_unavailable', detail: {} };
 
     // `transactionDetails: 'accounts'` returns account keys per transaction
     // instead of full instruction data — a fraction of the payload, and all
-    // this check needs. web3.js does not narrow its return type for that
-    // variant, hence the local shape.
-    const txs = (block.transactions ?? []) as unknown as AccountsOnlyTx[];
+    // this check needs.
+    const txs = block.transactions;
     const index = txs.findIndex((t) =>
       (t.transaction?.signatures ?? []).includes(ctx.tx.signature),
     );
@@ -487,14 +482,6 @@ async function detectSandwich(ctx: SignatureContext): Promise<{
       detail: {},
     };
   }
-}
-
-/** Shape returned by `getBlock` under `transactionDetails: 'accounts'`. */
-interface AccountsOnlyTx {
-  transaction?: {
-    signatures?: string[];
-    accountKeys?: Array<string | { pubkey?: unknown }>;
-  };
 }
 
 function medianOf(values: number[]): number {

@@ -1,6 +1,6 @@
-import type { Connection } from '@solana/web3.js';
 import { LOCK_PERIODS } from '@covantic/shared';
 import type { EnhancedTransaction } from '../../utils/helius.js';
+import type { SolanaReader } from '../../utils/solana-reader.js';
 import { DEFAULT_MAX_SKEW_SEC } from '../../utils/pyth.js';
 import type { VerificationResult } from '../claim-oracle.js';
 import {
@@ -28,8 +28,8 @@ import {
 export const BUNDLE_VERSION = '1.4.0';
 
 export interface OracleVerifierOptions {
-  /** RPC connection for the block-time cross-check. */
-  connection?: Connection | null;
+  /** Chain access for the block-time cross-check. */
+  reader?: SolanaReader | null;
   /** Override the price/block-time agreement tolerance, seconds. */
   maxSkewSec?: number;
 }
@@ -159,7 +159,7 @@ export async function verifyOracleManipulation(
   }
 
   // --- when did it happen --------------------------------------------------
-  const txTime = await resolveTxTime(tx, options.connection ?? null);
+  const txTime = await resolveTxTime(tx, options.reader ?? null);
   bundle.slot = txTime.slot;
   bundle.blockTime = txTime.blockTime;
   if (txTime.disagreementSec !== undefined) {
@@ -239,7 +239,7 @@ export async function verifyOracleManipulation(
       referencePrice: subject.leg.priceUsd,
       referenceDispersion: subject.leg.dispersion ?? 0,
       referenceConfFraction: subject.leg.confPerUnitUsd / subject.leg.priceUsd,
-      connection: options.connection ?? null,
+      reader: options.reader ?? null,
     });
   }
 

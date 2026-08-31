@@ -15,6 +15,7 @@ import { publishAlert } from '../services/alert-bus.js';
 import { readMonitorMetrics } from '../utils/monitor-metrics.js';
 import { MandateReader } from '../services/agent-error/mandate.js';
 import { createCovanticProgram } from '../utils/program.js';
+import { getSolanaReader } from '../utils/solana-reader.js';
 import { logger } from '../utils/logger.js';
 import { syntheticAllowed } from '../services/synthetic-gate.js';
 import { demoSimulationRateLimit } from '../middleware/rate-limit.js';
@@ -93,7 +94,7 @@ function staticTokenMatches(authHeader: string | undefined, secret: string): boo
  */
 function buildMandateReader(config: FastifyInstance['config']): MandateReader | undefined {
   try {
-    return new MandateReader(createCovanticProgram(config, { withOracle: false }));
+    return new MandateReader(createCovanticProgram(config, { withOracle: false }), getSolanaReader(config));
   } catch (err) {
     logger.warn({ err }, 'monitoring: mandate reader unavailable; screening will fail open');
     return undefined;
