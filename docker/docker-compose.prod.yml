@@ -99,6 +99,7 @@ services:
       # Must match the deployed program's LOCK_EXPLOIT. Shorter and the chain
       # refuses the payout, the keeper records the revert as `failed`.
       EXPLOIT_LOCK_SECONDS: ${EXPLOIT_LOCK_SECONDS:-}
+      AGENT_ERROR_LOCK_SECONDS: ${AGENT_ERROR_LOCK_SECONDS:-}
       AUTO_PAYOUT_HOURLY_LIMIT_RAW: ${AUTO_PAYOUT_HOURLY_LIMIT_RAW:-}
       ORACLE_SWEEP_INTERVAL_MS: ${ORACLE_SWEEP_INTERVAL_MS:-120000}
       PORT: 4000
@@ -170,6 +171,7 @@ services:
       # Must match the deployed program's LOCK_EXPLOIT. Shorter and the chain
       # refuses the payout, the keeper records the revert as `failed`.
       EXPLOIT_LOCK_SECONDS: ${EXPLOIT_LOCK_SECONDS:-}
+      AGENT_ERROR_LOCK_SECONDS: ${AGENT_ERROR_LOCK_SECONDS:-}
       AUTO_PAYOUT_HOURLY_LIMIT_RAW: ${AUTO_PAYOUT_HOURLY_LIMIT_RAW:-}
       ORACLE_SWEEP_INTERVAL_MS: ${ORACLE_SWEEP_INTERVAL_MS:-120000}
       LOG_LEVEL: info

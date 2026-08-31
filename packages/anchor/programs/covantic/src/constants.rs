@@ -87,12 +87,39 @@ pub const TRIGGER_GOVERNANCE_ATTACK: u8 = 4;
 /// on by an environment variable or a mistyped `.env` — enabling it takes a
 /// deliberate build, and `anchor build` without `--features devnet-fast-lock`
 /// produces the one-hour lock.
+///
+/// The feature shortens every lock, not only the exploit one. A demo that can
+/// only show the exploit trigger shows the one path a policy holder cannot
+/// stage — `verify_and_payout_exploit` pays on a movement the agent did *not*
+/// authorise, and only an account's owner can approve a delegate, so anyone
+/// holding the agent key produces `agent_delegated_movement` and a rejection.
+/// That is the intended security property. It also means the honest live
+/// demonstration is the agent-error path, whose six-hour lock is what put it
+/// out of reach.
+///
+/// The maturity delays are deliberately **not** shortened.
+/// `MANDATE_DECLARATION_DELAY` and `GOVERNANCE_BASELINE_DELAY` are the
+/// pre-commitment: they are what makes a declaration a statement made before
+/// the loss rather than after it. A lock is a window for intervention and
+/// costs only time to shorten; a maturity delay is the evidence itself.
 #[cfg(feature = "devnet-fast-lock")]
 pub const LOCK_EXPLOIT: i64 = 30;
 #[cfg(not(feature = "devnet-fast-lock"))]
 pub const LOCK_EXPLOIT: i64 = 3600;
+
+#[cfg(feature = "devnet-fast-lock")]
+pub const LOCK_ORACLE_MANIPULATION: i64 = 30;
+#[cfg(not(feature = "devnet-fast-lock"))]
 pub const LOCK_ORACLE_MANIPULATION: i64 = 3600;
+
+#[cfg(feature = "devnet-fast-lock")]
+pub const LOCK_AGENT_ERROR: i64 = 30;
+#[cfg(not(feature = "devnet-fast-lock"))]
 pub const LOCK_AGENT_ERROR: i64 = 21600;
+
+#[cfg(feature = "devnet-fast-lock")]
+pub const LOCK_GOVERNANCE_ATTACK: i64 = 30;
+#[cfg(not(feature = "devnet-fast-lock"))]
 pub const LOCK_GOVERNANCE_ATTACK: i64 = 7200;
 
 /// USDC decimals
@@ -310,3 +337,36 @@ pub const DEPARTURE_CLOSE_AUTHORITY: u8 = 4;
 /// "not implemented".
 pub const DEPARTURE_UPGRADE_AUTHORITY: u8 = 5;
 pub const DEPARTURE_CONTROLLER: u8 = 6;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The comment above `LOCK_EXPLOIT` states it as a MUST: a lock of zero
+    /// lets a compromised oracle keypair submit and settle in one slot, with
+    /// no block in which `paused` or the payout breaker could stop it. The
+    /// `devnet-fast-lock` feature exists to make these small, and "small"
+    /// is one keystroke away from "none".
+    #[test]
+    fn every_lock_leaves_a_window() {
+        for (name, lock) in [
+            ("exploit", LOCK_EXPLOIT),
+            ("oracle", LOCK_ORACLE_MANIPULATION),
+            ("agent_error", LOCK_AGENT_ERROR),
+            ("governance", LOCK_GOVERNANCE_ATTACK),
+        ] {
+            assert!(lock > 0, "{name} lock must leave a window, got {lock}");
+        }
+    }
+
+    /// A lock is time; a maturity delay is evidence. Shortening the delay
+    /// would let a holder declare a mandate *after* watching the agent lose
+    /// money and still settle against it, which is the one thing the
+    /// declaration mechanism exists to prevent. The demo feature must never
+    /// reach these, on any build.
+    #[test]
+    fn the_demo_feature_does_not_touch_the_maturity_delays() {
+        assert_eq!(MANDATE_DECLARATION_DELAY, 3600);
+        assert_eq!(GOVERNANCE_BASELINE_DELAY, 3600);
+    }
+}

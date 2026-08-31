@@ -71,6 +71,8 @@ export interface VerifyClaimOptions {
    * inside its own lock and the keeper records a revert as `failed`.
    */
   exploitLockSeconds?: number;
+  /** The agent-error twin of `exploitLockSeconds`. */
+  agentErrorLockSeconds?: number;
   /** Policy holder wallet. Value landing in an account the holder controls is
    *  the holder moving their own money, not a loss the vault owes. */
   holderAddress?: string;
@@ -163,6 +165,7 @@ export async function verifyClaim(
     case TriggerType.AgentError:
       return verifyAgentError(tx, agentAddress, coverageAmount, priceOracle, {
         ...(options.agentError ?? {}),
+        agentErrorLockSeconds: options.agentErrorLockSeconds,
         reader: options.reader ?? null,
         holderAddress: options.holderAddress,
         coveredMint: options.usdcMint,

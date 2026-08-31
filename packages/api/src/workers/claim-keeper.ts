@@ -82,6 +82,42 @@ const JOB_OPTS = {
   removeOnFail: { count: 100 },
 } as const;
 
+/**
+ * How long to wait after the chain says the lock has not elapsed.
+ *
+ * The off-chain wait and the on-chain lock are two numbers in two languages
+ * that have to agree, and nothing makes them. `EXPLOIT_LOCK_SECONDS` lets an
+ * operator set the off-chain half from `.env`; the on-chain half is a compiled
+ * constant that only a program upgrade changes. Set the first below the
+ * second — the ordinary mistake after a rollback, or a deploy that skipped the
+ * `devnet-fast-lock` build — and every payout attempt reverts.
+ *
+ * That was previously terminal. `JOB_OPTS` gives three attempts over about
+ * seventy seconds, so a claim whose real lock is an hour away exhausted them
+ * all and settled into `failed`: a closed status, on a claim the chain was
+ * merely asking us to wait for. The vault kept the money and the record said
+ * the payout had been tried and lost.
+ *
+ * The schedule runs past the longest lock the program defines
+ * (`LOCK_AGENT_ERROR`, six hours), so a correct claim survives any lock a
+ * misconfiguration can put in front of it, and is bounded so a genuinely
+ * stuck claim still reaches a human rather than requeueing forever.
+ */
+export const LOCK_DEFERRAL_MS = [60_000, 300_000, 1_800_000, 7_200_000, 21_600_000] as const;
+
+/**
+ * Is this the chain telling us the lock has not elapsed?
+ *
+ * Matched by name rather than by code: Anchor numbers errors by their position
+ * in the enum, so inserting a variant renumbers everything after it, and a
+ * hard-coded 6014 would then quietly match a different failure.
+ */
+export function isLockNotElapsed(err: unknown): boolean {
+  return /LockPeriodNotElapsed/.test(
+    err instanceof Error ? `${err.message}\n${String((err as { logs?: string[] }).logs ?? '')}` : String(err),
+  );
+}
+
 interface AlertPayload {
   agentAddress?: string;
   data?: { agentAddress?: string; type?: string; txSignature?: string; simulated?: boolean };
@@ -180,6 +216,7 @@ export function startClaimKeeper(db: Database, redis: Redis, config: AppConfig) 
         redis,
         programCtx,
         config,
+        payoutQueue,
         proofPoster,
         exploitProofPoster,
         governanceProofPoster,
@@ -372,11 +409,12 @@ function syntheticVerification(
   triggerType: number,
   coverageAmount: number,
   exploitLockSeconds: number,
+  agentErrorLockSeconds: number,
 ): VerificationResult {
   const lockByTrigger: Record<number, number> = {
     [TriggerType.Exploit]: exploitLockSeconds,
     [TriggerType.OracleManipulation]: LOCK_PERIODS.ORACLE_MANIPULATION,
-    [TriggerType.AgentError]: LOCK_PERIODS.AGENT_ERROR,
+    [TriggerType.AgentError]: agentErrorLockSeconds,
     [TriggerType.GovernanceAttack]: LOCK_PERIODS.GOVERNANCE_ATTACK,
   };
   const lockPeriod = lockByTrigger[triggerType] ?? LOCK_PERIODS.EXPLOIT;
@@ -645,6 +683,7 @@ async function processClaim(claimId: string, deps: ProcessDeps): Promise<void> {
       claim.triggerType,
       policy.coverageAmount,
       config.EXPLOIT_LOCK_SECONDS,
+      config.AGENT_ERROR_LOCK_SECONDS,
     );
   } else {
     result = await verifyClaim(
@@ -660,6 +699,7 @@ async function processClaim(claimId: string, deps: ProcessDeps): Promise<void> {
         // A devnet build may shorten the program's own LOCK_EXPLOIT so a demo
         // completes in under a minute; the keeper's wait has to move with it.
         exploitLockSeconds: config.EXPLOIT_LOCK_SECONDS,
+        agentErrorLockSeconds: config.AGENT_ERROR_LOCK_SECONDS,
         holderAddress: policy.holderAddress,
         governance: governanceLookups(claim, policy, deps),
         agentError: agentErrorLookups(claim, policy, deps),
@@ -781,6 +821,7 @@ async function executePayout(
   redis: Redis,
   programCtx: CovanticProgram,
   config: AppConfig,
+  payoutQueue: Queue<PayoutJobPayload>,
   proofPoster: ProofPoster,
   exploitProofPoster: ExploitProofPoster,
   governanceProofPoster: GovernanceProofPoster,
@@ -966,6 +1007,49 @@ async function executePayout(
         .where(eq(claims.id, claim.id));
       const reconciled = await loadClaim(claim.id, db);
       if (reconciled) await broadcastClaim(reconciled, redis);
+      return;
+    }
+
+    // A lock that has not elapsed is a timing answer, not a verdict. Waiting
+    // is the whole remedy, so recording `failed` would close a claim the chain
+    // was about to allow.
+    if (isLockNotElapsed(err)) {
+      const deferrals = Number(
+        (claim.verificationData as { lockDeferrals?: unknown } | null)?.lockDeferrals ?? 0,
+      );
+      const delay = LOCK_DEFERRAL_MS[deferrals];
+      if (delay !== undefined) {
+        await db
+          .update(claims)
+          .set({
+            verificationData: mergeVerificationData(claim.verificationData, {
+              lockDeferrals: deferrals + 1,
+              lastLockError: String(err),
+            }),
+            updatedAt: new Date(),
+          })
+          .where(eq(claims.id, claim.id));
+        await payoutQueue.add('payout', { claimId: claim.id }, { delay });
+        logger.warn(
+          { claimId: claim.id, deferrals: deferrals + 1, delay },
+          'claim-keeper: on-chain lock has not elapsed; payout deferred',
+        );
+        return;
+      }
+      // Past the longest lock the program defines. Something other than a
+      // misconfigured wait is wrong, and a human should see it.
+      await db
+        .update(claims)
+        .set({
+          verificationData: mergeVerificationData(claim.verificationData, {
+            lockDeferrals: deferrals,
+            lastLockError: String(err),
+          }),
+          updatedAt: new Date(),
+        })
+        .where(eq(claims.id, claim.id));
+      const stuck = (await loadClaim(claim.id, db)) ?? claim;
+      await escalateToReview(stuck, 'lock_never_elapsed', null, db, redis);
       return;
     }
 

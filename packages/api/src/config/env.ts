@@ -89,6 +89,17 @@ const envSchema = z.object({
     z.coerce.number().int().min(5).max(LOCK_PERIODS.EXPLOIT),
   ).default(LOCK_PERIODS.EXPLOIT),
   /**
+   * The agent-error twin, and the reason the demo build exists.
+   *
+   * `LOCK_AGENT_ERROR` is six hours, which put the one trigger a holder can
+   * legitimately stage out of reach of any live demonstration. Setting this
+   * below the deployed program's constant is safe now rather than terminal:
+   * the keeper defers on `LockPeriodNotElapsed` instead of recording `failed`.
+   */
+  AGENT_ERROR_LOCK_SECONDS: optionalEnv(
+    z.coerce.number().int().min(5).max(LOCK_PERIODS.AGENT_ERROR),
+  ).default(LOCK_PERIODS.AGENT_ERROR),
+  /**
    * How often the exploit and oracle watchers sweep, in milliseconds.
    *
    * The ceiling is the load-bearing half. The exploit sweep is what writes the
