@@ -190,7 +190,7 @@ describe('resolveDelegateProvenance', () => {
 });
 
 describe('adjudicateExploit — the delegate drain does not pay', () => {
-  function bundleWith(provenance: unknown) {
+  function bundleWith(provenance: unknown, signatureScore = 0.75) {
     const v = view();
     return {
       version: '1.0.0',
@@ -219,7 +219,7 @@ describe('adjudicateExploit — the delegate drain does not pay', () => {
       },
       signatures: {
         hasAuthorizationEvidence: true,
-        score: 0.75,
+        score: signatureScore,
         present: ['unauthorized_movement'],
         unevaluated: [],
         findings: [],
@@ -228,12 +228,32 @@ describe('adjudicateExploit — the delegate drain does not pay', () => {
     } as never;
   }
 
-  it('rejects when every authority is a delegate the agent approved', () => {
+  it('escalates an agent-granted delegate when the shape corroborates an attack', () => {
+    // A holder self-dealing and a victim phished into approving are the same
+    // transaction pair on chain. Neither is paid automatically; the one that
+    // looks like an attack goes to a human rather than being denied outright.
     const verdict = adjudicateExploit(
       bundleWith({
         authorities: [{ authority: DELEGATE, origin: 'granted_by_agent', grantedBy: APPROVE_SIG }],
         allGrantedByAgent: true,
       }),
+    );
+
+    expect(verdict.outcome).toBe('indeterminate');
+    expect(verdict.reason).toBe('delegated_but_anomalous');
+  });
+
+  it('rejects an agent-granted delegate when nothing structural contradicts consent', () => {
+    const verdict = adjudicateExploit(
+      bundleWith(
+        {
+          authorities: [
+            { authority: DELEGATE, origin: 'granted_by_agent', grantedBy: APPROVE_SIG },
+          ],
+          allGrantedByAgent: true,
+        },
+        0.1,
+      ),
     );
 
     expect(verdict.outcome).toBe('rejected');
