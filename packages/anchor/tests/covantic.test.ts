@@ -1528,7 +1528,15 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       expect(b.tokenOwner.toBase58()).toBe(agent.publicKey.toBase58());
       // The delay is the mechanism: a declaration usable the instant it is
       // written would be exactly what a stolen holder key writes first.
-      expect(b.effectiveAt.sub(b.declaredAt).toNumber()).toBe(3_600);
+      // The *property*, not the number. `devnet-fast-lock` compresses this to a
+      // minute so a policy bought in front of an audience can settle in front of
+      // them too, and this suite runs against whichever artifact was built. What
+      // must hold on every build is that the declaration matures strictly after
+      // it was made — zero would let a holder declare an envelope around a loss
+      // they had already watched happen. The production value is asserted in
+      // Rust, where the cfg is visible: see
+      // `a_production_build_keeps_the_full_maturity_delay`.
+      expect(b.effectiveAt.sub(b.declaredAt).toNumber()).toBeGreaterThan(0);
     });
 
     it('reads the owner the program sees, not one it is handed', async () => {
@@ -1938,7 +1946,9 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       // The delay is the mechanism: without it a holder could watch an
       // ordinary loss happen and then declare an envelope narrow enough to
       // have been breached by it.
-      expect(m.effectiveAt.sub(m.declaredAt).toNumber()).toBe(3_600);
+      // See the note on the governance baseline: the property survives every
+      // build, the exact delay does not.
+      expect(m.effectiveAt.sub(m.declaredAt).toNumber()).toBeGreaterThan(0);
     });
 
     it('lets only the holder declare what their agent may do', async () => {

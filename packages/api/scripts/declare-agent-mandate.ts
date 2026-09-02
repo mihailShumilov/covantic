@@ -215,7 +215,22 @@ async function main(): Promise<void> {
     })
     .rpc();
 
-  const effectiveAt = new Date(Date.now() + MANDATE_DECLARATION_DELAY_SECONDS * 1000);
+  // Read it back rather than computing it.
+  //
+  // `MANDATE_DECLARATION_DELAY_SECONDS` is the TypeScript copy of an on-chain
+  // constant, and a `devnet-fast-lock` build compresses the on-chain one to a
+  // minute. Computing the maturity locally would then print an hour for a
+  // declaration the program will accept in sixty seconds — telling a
+  // policyholder to wait for something that has already happened.
+  //
+  // The chain wrote `effective_at`; the chain is asked.
+  const onChain = (await (
+    program.account as unknown as Record<
+      string,
+      { fetch: (a: PublicKey) => Promise<{ effectiveAt: BN }> }
+    >
+  ).policyAgentMandate!.fetch(mandatePda)) as { effectiveAt: BN };
+  const effectiveAt = new Date(onChain.effectiveAt.toNumber() * 1000);
   const ui = (v: BN) => (Number(v.toString()) / 10 ** USDC_DECIMALS).toLocaleString();
 
   process.stdout.write(
