@@ -207,6 +207,10 @@ export interface RpcPoolStatus {
     ejected: boolean;
     /** Ejected for good: it answers for a different cluster. */
     wrongCluster: boolean;
+    /** Configured, probed, and has never answered — a spent quota, a bad
+     *  credential, a host that is not there. Distinct from `ejected`, which
+     *  is an endpoint that worked and then stopped. */
+    unverified: boolean;
   }>;
   /**
    * Requests that actually reached an endpoint.
@@ -232,6 +236,20 @@ export class CovanticRpcPool {
   private readonly events = new LifecycleEmitter();
   /** Raw transports, so the cluster probe cannot consume ejection budget. */
   private readonly rawTransports = new Map<string, RpcTransport>();
+  /**
+   * Endpoints that have demonstrably answered something.
+   *
+   * `HealthMonitor` has no record of an endpoint until traffic reaches it, and
+   * `status()` reads a missing record as healthy — the optimistic default that
+   * is right for a pool that has just started and wrong for an endpoint that
+   * has never worked. With the pool attempting endpoints in configuration
+   * order, a third endpoint is never tried while the first two answer, so a
+   * dead one reported healthy indefinitely.
+   */
+  private readonly answered = new Set<string>();
+  /** True once any probe round has run, so the rule above has something to
+   *  stand on. Before that, silence really is unknown rather than bad. */
+  private probed = false;
   /** Endpoints that answered for the wrong cluster. Never retried. */
   private readonly wrongCluster = new Set<string>();
   readonly endpoints: RpcEndpointSpec[];
@@ -323,29 +341,52 @@ export class CovanticRpcPool {
    */
   private startSlotProbe(): void {
     const probe = () => {
+      const round: Array<Promise<void>> = [];
       for (const spec of this.endpoints) {
         const transport = this.rawTransports.get(spec.name);
         if (!transport) continue;
         const start = Date.now();
-        void (async () => {
+        round.push((async () => {
           try {
             const response = (await transport({
               payload: { jsonrpc: '2.0', id: 1, method: 'getSlot', params: [] },
-            } as Parameters<RpcTransport>[0])) as { result?: unknown };
+            } as Parameters<RpcTransport>[0])) as { result?: unknown; error?: unknown };
             const slot = typeof response.result === 'bigint' ? response.result : undefined;
+            // A JSON-RPC error body arrives as HTTP 200, so the raw transport
+            // returns rather than throws — and this used to call
+            // `recordSuccess` on it. A quota-exhausted endpoint answering
+            // `{"error":{"code":-32429,"message":"max usage reached"}}` was
+            // therefore recorded healthy every thirty seconds, for as long as
+            // real traffic never reached it. `withCircuitBreaker` converts
+            // these for request traffic; the probe uses the raw transport and
+            // has to do it itself.
+            if (slot === undefined) return;
+            this.answered.add(spec.name);
             this.healthMonitor.recordSuccess(spec.name, Date.now() - start, slot);
           } catch {
             // A probe failure is not a request failure: the endpoint may be
             // serving traffic fine and merely rate-limiting this extra call.
             // Leave the health record to the real requests.
           }
-        })();
+        })());
       }
+      // Only once everyone has been asked and answered or not. Setting it when
+      // the requests go out would mark a healthy endpoint unverified for the
+      // width of one round trip, which is a false alarm on every start-up.
+      void Promise.allSettled(round).then(() => {
+        this.probed = true;
+      });
     };
     this.slotProbe = setInterval(probe, SLOT_PROBE_INTERVAL_MS);
     // Never hold the process open on account of a metrics probe.
     this.slotProbe.unref?.();
     probe();
+  }
+
+  /** Has this endpoint ever answered? Optimistic until the first probe round,
+   *  because before that nothing has been asked. */
+  private hasAnswered(name: string): boolean {
+    return !this.probed || this.answered.has(name);
   }
 
   /** Stop the slot probe. For tests and clean shutdown. */
@@ -382,7 +423,9 @@ export class CovanticRpcPool {
       })),
     );
 
+    this.probed = true;
     for (const [index, { spec, cluster }] of results.entries()) {
+      if (cluster !== null) this.answered.add(spec.name);
       if (cluster === null) {
         logger.warn(
           { endpoint: spec.name, expected },
@@ -450,7 +493,7 @@ export class CovanticRpcPool {
         const ejectedUntil = h?.ejectedUntil ?? null;
         return {
           name: spec.name,
-          healthy: !wrongCluster && (h?.healthy ?? true),
+          healthy: !wrongCluster && this.hasAnswered(spec.name) && (h?.healthy ?? true),
           slot: h?.slot === undefined || h?.slot === null ? null : Number(h.slot),
           latencyMs: Math.round(h?.latencyMs ?? 0),
           errorRate: Number((h?.errorRate ?? 0).toFixed(3)),
@@ -465,6 +508,7 @@ export class CovanticRpcPool {
                 : 0,
           ejected: wrongCluster || (h?.ejected ?? false),
           wrongCluster,
+          unverified: !this.hasAnswered(spec.name),
         };
       }),
       requests: this.metrics.requests,
