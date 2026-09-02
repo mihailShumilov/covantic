@@ -2014,6 +2014,80 @@
       ]
     },
     {
+      "name": "migrate_attestation",
+      "docs": [
+        "Grow a risk attestation to the current layout. Permissionless and",
+        "idempotent; required once per agent that was quoted before the envelope",
+        "was priced, or `upsert_attestation` cannot read the account it needs to",
+        "overwrite."
+      ],
+      "discriminator": [
+        244,
+        223,
+        18,
+        149,
+        166,
+        247,
+        185,
+        68
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "attestation",
+          "docs": [
+            "PDA seeds, and its discriminator is verified before it is resized."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  97,
+                  116,
+                  116,
+                  101,
+                  115,
+                  116,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "agent"
+              }
+            ]
+          }
+        },
+        {
+          "name": "agent"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "migrate_staker_position",
       "docs": [
         "Grow a staker position to the current layout. Permissionless and",

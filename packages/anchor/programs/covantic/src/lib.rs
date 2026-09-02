@@ -264,6 +264,14 @@ pub mod covantic {
         migrate_staker_position_handler(ctx)
     }
 
+    /// Grow a risk attestation to the current layout. Permissionless and
+    /// idempotent; required once per agent that was quoted before the envelope
+    /// was priced, or `upsert_attestation` cannot read the account it needs to
+    /// overwrite.
+    pub fn migrate_attestation(ctx: Context<MigrateAttestation>) -> Result<()> {
+        migrate_attestation_handler(ctx)
+    }
+
     /// Withdraw a pending admin transfer.
     pub fn cancel_admin_transfer(ctx: Context<CancelAdminTransfer>) -> Result<()> {
         cancel_admin_transfer_handler(ctx)

@@ -20,11 +20,28 @@ export interface AttestationInfo {
   signature?: string;
 }
 
+/**
+ * Is this the failure of reading an account written under the old layout?
+ *
+ * Matched on the Anchor error rather than on a size, because the size is not
+ * in the message and the caller has not read the account — this is the first
+ * time anything touched it.
+ */
+function isUndersizedAccount(err: unknown): boolean {
+  const text = err instanceof Error ? `${err.message}` : String(err);
+  return /AccountDidNotDeserialize|failed to deserialize|Account discriminator did not match|range end index/i.test(
+    text,
+  );
+}
+
 interface OnChainAttestation {
   agent: PublicKey;
   tier: number;
   issuedAt: bigint;
   expiresAt: bigint;
+  /** The envelope this attestation's premium was quoted for, hex. */
+  mandateHash: string;
+  envelopeSurchargeBps: number;
 }
 
 /**
@@ -88,9 +105,19 @@ export class AttestationPublisher {
     const nowSec = Math.floor(Date.now() / 1000);
 
     const existing = await this.fetchExisting(ctx, pda);
+    // Reused only when it prices *this* envelope.
+    //
+    // The tier used to be the whole identity of an attestation, and it no
+    // longer is: the same agent at the same tier can be quoted for two
+    // different deductibles, and `create_policy` compares the commitment. A
+    // stale attestation returned here would be one the purchase then rejects,
+    // with nothing on the screen explaining why.
+    const wantedHash = Buffer.from(mandateHash).toString('hex');
     if (
       existing &&
       existing.tier === tier &&
+      existing.mandateHash === wantedHash &&
+      existing.envelopeSurchargeBps === envelopeSurchargeBps &&
       Number(existing.expiresAt) > nowSec + REFRESH_THRESHOLD_SECONDS
     ) {
       return {
@@ -101,21 +128,51 @@ export class AttestationPublisher {
     }
 
     const validFor = DEFAULT_VALIDITY_SECONDS;
-    const signature = await (ctx.program.methods as any)
-      .upsertAttestation(
-        agent,
-        tier,
-        new BN(validFor),
-        Array.from(mandateHash),
-        envelopeSurchargeBps,
-      )
-      .accounts({
-        oracle: ctx.oracleKeypair!.publicKey,
-        // `config` + `attestation` are resolved automatically from IDL seeds;
-        // we only pass what Anchor cannot derive.
-        systemProgram: SystemProgram.programId,
-      })
-      .rpc();
+    const send = () =>
+      (ctx.program.methods as any)
+        .upsertAttestation(
+          agent,
+          tier,
+          new BN(validFor),
+          Array.from(mandateHash),
+          envelopeSurchargeBps,
+        )
+        .accounts({
+          oracle: ctx.oracleKeypair!.publicKey,
+          // `config` + `attestation` are resolved automatically from IDL seeds;
+          // we only pass what Anchor cannot derive.
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+
+    let signature: string;
+    try {
+      signature = await send();
+    } catch (err) {
+      // An attestation written before the envelope was priced is 34 bytes too
+      // short, and `init_if_needed` deserialises an existing account before any
+      // constraint could resize it. Every agent quoted under the old program
+      // has one, so without this the upgrade would break quoting for exactly
+      // the agents somebody already cared about — and the error would say
+      // "AccountDidNotDeserialize", which names the symptom and not the cause.
+      //
+      // Growing it is permissionless and leaves zeros, which `create_policy`
+      // refuses; the write that follows fills them in.
+      if (!isUndersizedAccount(err)) throw err;
+      logger.warn(
+        { agent: agentAddress, pda: pda.toBase58() },
+        'attestation predates envelope pricing — growing it before republishing',
+      );
+      await (ctx.program.methods as any)
+        .migrateAttestation()
+        .accounts({
+          payer: ctx.oracleKeypair!.publicKey,
+          agent,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+      signature = await send();
+    }
 
     logger.info(
       { agent: agentAddress, tier, pda: pda.toBase58(), signature },
@@ -149,6 +206,8 @@ export class AttestationPublisher {
         tier: Number(raw.tier),
         issuedAt: BigInt(raw.issuedAt.toString()),
         expiresAt: BigInt(raw.expiresAt.toString()),
+        mandateHash: Buffer.from(raw.mandateHash ?? []).toString('hex'),
+        envelopeSurchargeBps: Number(raw.envelopeSurchargeBps ?? 0),
       };
     } catch (err) {
       if (err instanceof Error && /Account does not exist/i.test(err.message)) {
