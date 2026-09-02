@@ -537,19 +537,6 @@ export async function policyRoutes(app: FastifyInstance) {
 
     const tier = latest.tier as RiskTier;
     const premiumBps = tierToPremiumBps(tier);
-    const premium = calculatePremium(body.coverageAmount, body.durationSeconds, tier);
-
-    if (premiumBps == null || premium == null) {
-      // Defense-in-depth: EXTREME was already rejected above, but guard anyway.
-      return reply.status(400).send({
-        error: 'Risk tier is not insurable',
-        code: 'AGENT_UNINSURABLE',
-        agentAddress: body.agentAddress,
-        riskTier: tier,
-        assessmentId: latest.id,
-      });
-    }
-
     // What the declared deductible costs, before anything is signed.
     //
     // The refusal below is the important half. An envelope whose cap sits
@@ -567,6 +554,28 @@ export async function policyRoutes(app: FastifyInstance) {
         reason: pricing.reason,
         headroom: pricing.headroom,
         agentAddress: body.agentAddress,
+      });
+    }
+
+    // Priced with the surcharge, because the chain charges with it. A quote
+    // computed off the tier alone would show the holder one number and take
+    // another.
+    const premium = calculatePremium(
+      body.coverageAmount,
+      body.durationSeconds,
+      tier,
+      10000,
+      pricing.surchargeBps,
+    );
+
+    if (premiumBps == null || premium == null) {
+      // Defense-in-depth: EXTREME was already rejected above, but guard anyway.
+      return reply.status(400).send({
+        error: 'Risk tier is not insurable',
+        code: 'AGENT_UNINSURABLE',
+        agentAddress: body.agentAddress,
+        riskTier: tier,
+        assessmentId: latest.id,
       });
     }
 
@@ -623,6 +632,8 @@ export async function policyRoutes(app: FastifyInstance) {
       validUntil: validUntil.toISOString(),
       attestationPda,
       attestationExpiresAt,
+      envelopeSurchargeBps: pricing.surchargeBps,
+      envelopeHeadroom: pricing.headroom,
       backing,
     });
   });
