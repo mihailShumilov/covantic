@@ -6,14 +6,22 @@ import { PREMIUM_BPS, RISK_SCORE_BOUNDARIES, SOLVENCY_THRESHOLDS, DURATION } fro
  * Calculate premium amount in USDC lamports. Returns `null` for uninsurable
  * (EXTREME) tiers — callers must check before using the value.
  */
+/**
+ * @param envelopeSurchargeBps what the declared deductible adds, on top of the
+ * tier. Added to the tier's basis points before anything else, exactly as
+ * `create_policy` does — the quote and the chain have to agree on the price or
+ * the holder is shown one number and charged another.
+ */
 export function calculatePremium(
   coverageAmount: number,
   durationSeconds: number,
   riskTier: RiskTier,
   premiumMultiplierBps: number = 10000,
+  envelopeSurchargeBps: number = 0,
 ): number | null {
-  const bps = tierToPremiumBps(riskTier);
-  if (bps == null) return null;
+  const tierBps = tierToPremiumBps(riskTier);
+  if (tierBps == null) return null;
+  const bps = tierBps + envelopeSurchargeBps;
 
   const annualPremium = (coverageAmount * bps) / 10000;
   const durationFraction = durationSeconds / (365 * 24 * 3600);

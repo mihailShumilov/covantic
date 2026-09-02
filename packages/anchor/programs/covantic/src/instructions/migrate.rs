@@ -3,7 +3,7 @@ use anchor_lang::system_program;
 
 use crate::constants::*;
 use crate::errors::CovanticError;
-use crate::state::{InsuranceVault, StakerPosition, LOSS_INDEX_SCALE};
+use crate::state::{InsuranceVault, RiskAttestation, StakerPosition, LOSS_INDEX_SCALE};
 
 /// Grow an account written by the previous layout, and return whether it was
 /// already large enough.
@@ -122,6 +122,33 @@ pub fn migrate_staker_position_handler(ctx: Context<MigrateStakerPosition>) -> R
     Ok(())
 }
 
+
+/// One-time migration for an attestation written before the envelope was
+/// priced.
+///
+/// `RiskAttestation` grew by `mandate_hash` and `envelope_surcharge_bps`, and
+/// `upsert_attestation` uses `init_if_needed` — which deserialises an existing
+/// account *before* any constraint could resize it. Without this, every agent
+/// that had ever been quoted would have an attestation the new program cannot
+/// read, and the failure would surface as a quote that stops working for
+/// exactly the agents someone already cared about.
+///
+/// Permissionless and value-free: it only grows the account, and the trailing
+/// zeros are the right values to leave. A zero `mandate_hash` is what
+/// `upsert_attestation` refuses and `create_policy` refuses, so a migrated
+/// attestation is unusable until the oracle republishes it — which is correct,
+/// because nobody priced an envelope for it.
+pub fn migrate_attestation_handler(ctx: Context<MigrateAttestation>) -> Result<()> {
+    grow_to(
+        &ctx.accounts.attestation,
+        &ctx.accounts.payer.to_account_info(),
+        ctx.accounts.system_program.key(),
+        8 + RiskAttestation::INIT_SPACE,
+        RiskAttestation::DISCRIMINATOR,
+    )?;
+    Ok(())
+}
+
 #[derive(Accounts)]
 pub struct MigrateVault<'info> {
     #[account(mut)]
@@ -147,6 +174,22 @@ pub struct MigrateStakerPosition<'info> {
 
     /// CHECK: only used to derive the position PDA above.
     pub staker: UncheckedAccount<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct MigrateAttestation<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+
+    /// CHECK: cannot be `Account<RiskAttestation>` — see `grow_to`. Pinned by
+    /// PDA seeds, and its discriminator is verified before it is resized.
+    #[account(mut, seeds = [ATTESTATION_SEED, agent.key().as_ref()], bump)]
+    pub attestation: UncheckedAccount<'info>,
+
+    /// CHECK: only used to derive the attestation PDA above.
+    pub agent: UncheckedAccount<'info>,
 
     pub system_program: Program<'info, System>,
 }

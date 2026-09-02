@@ -30,6 +30,9 @@ export {
   TRIGGER_SPECIFICITY,
 } from './types/claims.js';
 
+export { agentMandateCommitment } from './mandate-commitment.js';
+export type { MandateEnvelope } from './mandate-commitment.js';
+
 export type { StakerPositionResponse } from './types/staking.js';
 
 export type {
@@ -63,6 +66,7 @@ export {
   SOLVENCY_THRESHOLDS,
   UNSTAKE_COOLDOWN,
   LOCK_PERIODS,
+  MAX_ENVELOPE_SURCHARGE_BPS,
   MAX_POLICIES_PER_WALLET,
   RISK_SCORE_BOUNDARIES,
   SOLANA_ADDRESS_REGEX,

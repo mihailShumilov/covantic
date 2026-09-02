@@ -1,10 +1,15 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Token, TokenAccount, Transfer};
+use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
 
 use crate::constants::*;
 use crate::errors::CovanticError;
 use crate::events::PolicyCreated;
-use crate::state::{InsurancePolicy, InsuranceVault, ProtocolConfig, RiskAttestation};
+use crate::instructions::declare_agent_mandate::{
+    validate_mandate, write_mandate, AgentMandate,
+};
+use crate::state::{
+    InsurancePolicy, InsuranceVault, PolicyAgentMandate, ProtocolConfig, RiskAttestation,
+};
 
 /// Create a new insurance policy.
 ///
@@ -12,11 +17,25 @@ use crate::state::{InsurancePolicy, InsuranceVault, ProtocolConfig, RiskAttestat
 /// oracle-signed `RiskAttestation` PDA for the target agent. This closes the
 /// adverse-selection hole where buyers could pick LOW for a known-HIGH agent.
 /// The holder pays premium in USDC which is transferred to the vault.
+///
+/// **The deductible is declared here, for the same reason.** The tier stopped
+/// a buyer choosing a cheaper risk class than their agent deserved. It did not
+/// stop them buying at any tier and *then* authoring an operating envelope
+/// narrow enough that a breach was certain — a 100 USDC cap for an agent
+/// holding 5,000, a 600 USDC movement to an address the verifier has no way to
+/// know they control, and the 500 overshoot collected against a premium quoted
+/// before any of it was chosen.
+///
+/// So the envelope arrives with the purchase, the oracle commits to its hash
+/// in the attestation it signs, and this instruction refuses a mismatch. The
+/// premium is then quoted against the deductible it actually buys, which is
+/// what an underwriter does and what this was missing.
 pub fn create_policy_handler(
     ctx: Context<CreatePolicy>,
     coverage_amount: u64,
     duration_seconds: i64,
     agent_address: Pubkey,
+    mandate: AgentMandate,
 ) -> Result<()> {
     let config = &mut ctx.accounts.config;
     let vault = &mut ctx.accounts.vault;
@@ -73,6 +92,16 @@ pub fn create_policy_handler(
         return Err(CovanticError::SolvencyTooLow.into());
     }
 
+    // The envelope the oracle priced must be the envelope being declared.
+    //
+    // Without this the commitment is decoration: a client could quote a
+    // generous envelope, get a cheap attestation, and pass a narrow one here.
+    validate_mandate(&mandate, ctx.accounts.covered_token_account.amount)?;
+    require!(
+        attestation.mandate_hash == mandate.commitment(),
+        CovanticError::AttestationMandateMismatch
+    );
+
     // Calculate premium
     let premium_bps = match risk_tier {
         RISK_TIER_LOW => PREMIUM_BPS_LOW,
@@ -81,8 +110,19 @@ pub fn create_policy_handler(
         _ => return Err(CovanticError::InvalidRiskTier.into()),
     };
 
+    // The deductible's own price, on top of the tier's.
+    //
+    // A cap far above what the agent normally moves is a deductible the holder
+    // will rarely reach; one below it is a deductible they breach on ordinary
+    // business. Only the oracle can tell those apart — the agent's outflow
+    // history is off chain — so it signs for the surcharge and the chain
+    // applies it.
+    let priced_bps = (premium_bps as u128)
+        .checked_add(attestation.envelope_surcharge_bps as u128)
+        .ok_or(CovanticError::MathOverflow)?;
+
     let annual_premium = (coverage_amount as u128)
-        .checked_mul(premium_bps as u128)
+        .checked_mul(priced_bps)
         .ok_or(CovanticError::MathOverflow)?
         .checked_div(10000)
         .ok_or(CovanticError::MathOverflow)?;
@@ -180,6 +220,19 @@ pub fn create_policy_handler(
     policy.trigger_tx_signature = vec![];
     policy.payout_amount = 0;
     policy.bump = ctx.bumps.policy;
+    // Declared with the purchase, so its maturity clock starts here and the
+    // premium just paid is the price of this envelope and no other.
+    let mandate_bump = ctx.bumps.mandate;
+    let holder_key = ctx.accounts.holder.key();
+    write_mandate(
+        &mut ctx.accounts.mandate,
+        &mandate,
+        policy_id,
+        holder_key,
+        now,
+        mandate_bump,
+    )?;
+
 
     emit!(PolicyCreated {
         policy_id,
@@ -208,7 +261,7 @@ pub struct CreatePolicy<'info> {
         seeds = [CONFIG_SEED],
         bump = config.bump,
     )]
-    pub config: Account<'info, ProtocolConfig>,
+    pub config: Box<Account<'info, ProtocolConfig>>,
 
     /// Insurance vault
     #[account(
@@ -216,7 +269,7 @@ pub struct CreatePolicy<'info> {
         seeds = [VAULT_SEED],
         bump = vault.bump,
     )]
-    pub vault: Account<'info, InsuranceVault>,
+    pub vault: Box<Account<'info, InsuranceVault>>,
 
     /// Oracle-signed risk attestation — tier comes from this account, not
     /// from caller input. PDA seeds bind it to `agent_address`.
@@ -224,7 +277,7 @@ pub struct CreatePolicy<'info> {
         seeds = [ATTESTATION_SEED, agent_address.as_ref()],
         bump = attestation.bump,
     )]
-    pub attestation: Account<'info, RiskAttestation>,
+    pub attestation: Box<Account<'info, RiskAttestation>>,
 
     /// New policy PDA
     #[account(
@@ -234,7 +287,38 @@ pub struct CreatePolicy<'info> {
         seeds = [POLICY_SEED, holder.key().as_ref(), &config.policy_counter.to_le_bytes()],
         bump,
     )]
-    pub policy: Account<'info, InsurancePolicy>,
+    pub policy: Box<Account<'info, InsurancePolicy>>,
+
+    /// The envelope, created with the policy it was priced for.
+    ///
+    /// Boxed: `CreatePolicy` already carries the config, vault, attestation and
+    /// two token accounts, and `PolicyAgentMandate` holds sixteen pubkeys.
+    /// Unboxed it overflows the BPF stack frame in `try_accounts`, which
+    /// `anchor build --no-idl` catches and `cargo check` does not.
+    #[account(
+        init,
+        payer = holder,
+        space = PolicyAgentMandate::LEN,
+        seeds = [AGENT_MANDATE_SEED, policy.key().as_ref()],
+        bump,
+    )]
+    pub mandate: Box<Account<'info, PolicyAgentMandate>>,
+
+    /// The agent's covered account, read only to bound the retention floor.
+    ///
+    /// Derived by Anchor from `agent_address`, so a holder cannot point the
+    /// bound at some richer account of their choosing — the same constraint
+    /// `declare_agent_mandate` uses, for the same reason. An agent with no
+    /// covered account cannot be insured, and failing here says so at purchase
+    /// rather than at the first claim.
+    #[account(
+        associated_token::mint = usdc_mint,
+        associated_token::authority = agent_address,
+    )]
+    pub covered_token_account: Box<Account<'info, TokenAccount>>,
+
+    #[account(constraint = usdc_mint.key() == config.usdc_mint @ CovanticError::InvalidTokenAccount)]
+    pub usdc_mint: Box<Account<'info, Mint>>,
 
     /// Holder's USDC token account
     #[account(

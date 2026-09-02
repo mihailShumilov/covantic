@@ -43,6 +43,7 @@ import {
   deriveVaultPda,
   derivePolicyPda,
   deriveAttestationPda,
+  deriveAgentMandatePda,
 } from '@/hooks/useCovanticProgram';
 
 const SOLANA_ADDRESS_RE = SOLANA_ADDRESS_REGEX;
@@ -842,6 +843,34 @@ function BuyPolicyForm({
   const { program, provider } = useCovanticProgram();
   const [coverage, setCoverage] = useState('100');
   const [duration, setDuration] = useState('24');
+  // The operating envelope — the deductible the holder authors.
+  //
+  // Declared here rather than afterwards because the premium is quoted against
+  // it: until it was, a holder could buy cover and then choose a cap their
+  // agent was certain to cross. The defaults are deliberately loose; a tighter
+  // envelope costs more, and the quote says by how much.
+  const [maxSingle, setMaxSingle] = useState('1000');
+  const [maxWindow, setMaxWindow] = useState('5000');
+  const [windowHours, setWindowHours] = useState('1');
+  const [minRetained, setMinRetained] = useState('0');
+
+  /**
+   * The envelope, in the shape both the quote and the program want.
+   *
+   * Counterparties and programs are left undeclared. An empty allowlist
+   * means the holder said nothing about destinations — silence, not
+   * prohibition — and reading a blank field as "nothing is permitted" would
+   * make every ordinary transfer a covered event.
+   */
+  const envelopeForQuote = () => ({
+    maxSingleOutflowRaw: Math.round(Number(maxSingle) * 1_000_000),
+    maxWindowOutflowRaw: Math.round(Number(maxWindow) * 1_000_000),
+    windowSeconds: Math.round(Number(windowHours) * 3600),
+    minRetainedBalanceRaw: Math.round(Number(minRetained) * 1_000_000),
+    allowedCounterparties: [] as string[],
+    allowedPrograms: [] as string[],
+  });
+
   const [quote, setQuote] = useState<PremiumQuote | null>(null);
   const [txPhase, setTxPhase] = useState<TxPhase>('idle');
   const [txSig, setTxSig] = useState<string | null>(null);
@@ -880,6 +909,7 @@ function BuyPolicyForm({
           coverageAmount: Math.round(coverageNum * 1_000_000),
           durationSeconds: Math.round(durationNum * 3600),
           agentAddress: assessment.agentAddress,
+          mandate: envelopeForQuote(),
         });
         setQuote(q);
         setQuoteErrorCode(null);
@@ -955,14 +985,33 @@ function BuyPolicyForm({
       const holderAta = getAssociatedTokenAddressSync(usdcMint, publicKey);
       const vaultAta = getAssociatedTokenAddressSync(usdcMint, vaultPda, true);
 
+      const env = envelopeForQuote();
       const tx = await program.methods
-        .createPolicy(new BN(coverageNum), new BN(durationNum), agentPk)
+        .createPolicy(new BN(coverageNum), new BN(durationNum), agentPk, {
+          maxSingleOutflow: new BN(env.maxSingleOutflowRaw),
+          maxWindowOutflow: new BN(env.maxWindowOutflowRaw),
+          windowSeconds: new BN(env.windowSeconds),
+          minRetainedBalance: new BN(env.minRetainedBalanceRaw),
+          allowedCounterparties: [],
+          allowedPrograms: [],
+          // Commits to off-chain terms there are none of yet. The program does
+          // not read it and the oracle does not price it, which is why it is
+          // excluded from the commitment the two sides compare.
+          manifestHash: Array.from(new Uint8Array(32)),
+        } as any)
         .accounts({
           holder: publicKey,
           config: configPda,
           vault: vaultPda,
           attestation: attestationPda,
           policy: policyPda,
+          mandate: deriveAgentMandatePda(policyPda),
+          // The agent's covered account. `create_policy` reads it to check the
+          // retention floor is one the holder currently satisfies, so an agent
+          // with no USDC account cannot be insured — and the purchase fails
+          // here rather than at the first claim.
+          coveredTokenAccount: getAssociatedTokenAddressSync(usdcMint, agentPk),
+          usdcMint,
           holderTokenAccount: holderAta,
           vaultTokenAccount: vaultAta,
           tokenProgram: TOKEN_PROGRAM_ID,
@@ -1116,6 +1165,117 @@ function BuyPolicyForm({
           }}
         />
       </div>
+      <div style={{ gridColumn: '1 / -1', marginTop: '0.5rem' }}>
+        <div style={{ fontSize: '0.8125rem', fontWeight: 600, marginBottom: 2 }}>
+          Operating envelope
+        </div>
+        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+          What your agent is permitted to do. A loss inside it is not covered — this is the
+          deductible, and you author it. It is declared with the purchase and priced into the
+          premium, so a tighter envelope costs more; it can be widened later but never narrowed,
+          because narrowing is exposure the premium did not buy.
+        </div>
+      </div>
+      <div>
+        <label
+          style={{
+            fontSize: '0.8125rem',
+            color: 'var(--color-text-muted)',
+            display: 'block',
+            marginBottom: 4,
+          }}
+        >
+          Max single transfer (USDC)
+        </label>
+        <input
+          type="number"
+          value={maxSingle}
+          onChange={(e) => setMaxSingle(e.target.value)}
+          style={{
+            width: '100%',
+            padding: '0.5rem',
+            background: 'var(--color-bg)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-md)',
+            color: 'var(--color-text)',
+          }}
+        />
+      </div>
+      <div>
+        <label
+          style={{
+            fontSize: '0.8125rem',
+            color: 'var(--color-text-muted)',
+            display: 'block',
+            marginBottom: 4,
+          }}
+        >
+          Max per window (USDC)
+        </label>
+        <input
+          type="number"
+          value={maxWindow}
+          onChange={(e) => setMaxWindow(e.target.value)}
+          style={{
+            width: '100%',
+            padding: '0.5rem',
+            background: 'var(--color-bg)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-md)',
+            color: 'var(--color-text)',
+          }}
+        />
+      </div>
+      <div>
+        <label
+          style={{
+            fontSize: '0.8125rem',
+            color: 'var(--color-text-muted)',
+            display: 'block',
+            marginBottom: 4,
+          }}
+        >
+          Window (hours)
+        </label>
+        <input
+          type="number"
+          value={windowHours}
+          onChange={(e) => setWindowHours(e.target.value)}
+          style={{
+            width: '100%',
+            padding: '0.5rem',
+            background: 'var(--color-bg)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-md)',
+            color: 'var(--color-text)',
+          }}
+        />
+      </div>
+      <div>
+        <label
+          style={{
+            fontSize: '0.8125rem',
+            color: 'var(--color-text-muted)',
+            display: 'block',
+            marginBottom: 4,
+          }}
+        >
+          Must retain (USDC)
+        </label>
+        <input
+          type="number"
+          value={minRetained}
+          onChange={(e) => setMinRetained(e.target.value)}
+          style={{
+            width: '100%',
+            padding: '0.5rem',
+            background: 'var(--color-bg)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-md)',
+            color: 'var(--color-text)',
+          }}
+        />
+      </div>
 
       {quote && !quoteExpired && (
         <div
@@ -1138,6 +1298,23 @@ function BuyPolicyForm({
           >
             ${formatUsdc(quote.premiumAmount)} USDC
           </p>
+          {quote.envelopeSurchargeBps > 0 && (
+            <p
+              style={{
+                fontSize: '0.75rem',
+                color: 'var(--color-text-muted)',
+                marginTop: 4,
+                marginBottom: 0,
+                lineHeight: 1.5,
+              }}
+            >
+              Includes {(quote.envelopeSurchargeBps / 100).toFixed(1)}% for the envelope you
+              declared
+              {quote.envelopeHeadroom === null
+                ? ' — this agent has no movement history yet, so it is priced at the ceiling until it builds one.'
+                : `: your cap sits ${quote.envelopeHeadroom.toFixed(1)}× above what this agent normally moves. Widen it to pay less.`}
+            </p>
+          )}
           {countdown && (
             <p
               style={{

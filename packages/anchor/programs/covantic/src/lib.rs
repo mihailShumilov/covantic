@@ -31,8 +31,9 @@ pub mod covantic {
         coverage_amount: u64,
         duration_seconds: i64,
         agent_address: Pubkey,
+        mandate: AgentMandate,
     ) -> Result<()> {
-        create_policy_handler(ctx, coverage_amount, duration_seconds, agent_address)
+        create_policy_handler(ctx, coverage_amount, duration_seconds, agent_address, mandate)
     }
 
     /// Publish (or refresh) a risk attestation for an agent. Only the oracle
@@ -42,8 +43,17 @@ pub mod covantic {
         agent: Pubkey,
         tier: u8,
         valid_for_seconds: i64,
+        mandate_hash: [u8; 32],
+        envelope_surcharge_bps: u16,
     ) -> Result<()> {
-        upsert_attestation_handler(ctx, agent, tier, valid_for_seconds)
+        upsert_attestation_handler(
+            ctx,
+            agent,
+            tier,
+            valid_for_seconds,
+            mandate_hash,
+            envelope_surcharge_bps,
+        )
     }
 
     /// Cancel a policy with partial refund.
@@ -252,6 +262,14 @@ pub mod covantic {
     /// idempotent; required once per position after the same upgrade.
     pub fn migrate_staker_position(ctx: Context<MigrateStakerPosition>) -> Result<()> {
         migrate_staker_position_handler(ctx)
+    }
+
+    /// Grow a risk attestation to the current layout. Permissionless and
+    /// idempotent; required once per agent that was quoted before the envelope
+    /// was priced, or `upsert_attestation` cannot read the account it needs to
+    /// overwrite.
+    pub fn migrate_attestation(ctx: Context<MigrateAttestation>) -> Result<()> {
+        migrate_attestation_handler(ctx)
     }
 
     /// Withdraw a pending admin transfer.

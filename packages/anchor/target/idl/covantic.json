@@ -1030,6 +1030,154 @@
           }
         },
         {
+          "name": "mandate",
+          "docs": [
+            "The envelope, created with the policy it was priced for.",
+            "",
+            "Boxed: `CreatePolicy` already carries the config, vault, attestation and",
+            "two token accounts, and `PolicyAgentMandate` holds sixteen pubkeys.",
+            "Unboxed it overflows the BPF stack frame in `try_accounts`, which",
+            "`anchor build --no-idl` catches and `cargo check` does not."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  97,
+                  103,
+                  101,
+                  110,
+                  116,
+                  95,
+                  109,
+                  97,
+                  110,
+                  100,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "covered_token_account",
+          "docs": [
+            "The agent's covered account, read only to bound the retention floor.",
+            "",
+            "Derived by Anchor from `agent_address`, so a holder cannot point the",
+            "bound at some richer account of their choosing — the same constraint",
+            "`declare_agent_mandate` uses, for the same reason. An agent with no",
+            "covered account cannot be insured, and failing here says so at purchase",
+            "rather than at the first claim."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "arg",
+                "path": "agent_address"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "usdc_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
           "name": "holder_token_account",
           "docs": [
             "Holder's USDC token account"
@@ -1064,6 +1212,14 @@
         {
           "name": "agent_address",
           "type": "pubkey"
+        },
+        {
+          "name": "mandate",
+          "type": {
+            "defined": {
+              "name": "AgentMandate"
+            }
+          }
         }
       ]
     },
@@ -1856,6 +2012,80 @@
           "type": "pubkey"
         }
       ]
+    },
+    {
+      "name": "migrate_attestation",
+      "docs": [
+        "Grow a risk attestation to the current layout. Permissionless and",
+        "idempotent; required once per agent that was quoted before the envelope",
+        "was priced, or `upsert_attestation` cannot read the account it needs to",
+        "overwrite."
+      ],
+      "discriminator": [
+        244,
+        223,
+        18,
+        149,
+        166,
+        247,
+        185,
+        68
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "attestation",
+          "docs": [
+            "PDA seeds, and its discriminator is verified before it is resized."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  97,
+                  116,
+                  116,
+                  101,
+                  115,
+                  116,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "agent"
+              }
+            ]
+          }
+        },
+        {
+          "name": "agent"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
     },
     {
       "name": "migrate_staker_position",
@@ -2666,6 +2896,19 @@
         {
           "name": "valid_for_seconds",
           "type": "i64"
+        },
+        {
+          "name": "mandate_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "envelope_surcharge_bps",
+          "type": "u16"
         }
       ]
     },
@@ -4586,241 +4829,246 @@
     },
     {
       "code": 6015,
+      "name": "AttestationMandateMismatch",
+      "msg": "Attestation was priced for a different agent mandate"
+    },
+    {
+      "code": 6016,
       "name": "PayoutExceedsCoverage",
       "msg": "Payout exceeds coverage amount"
     },
     {
-      "code": 6016,
+      "code": 6017,
       "name": "PolicyNotClaimPending",
       "msg": "Policy is not in ClaimPending state"
     },
     {
-      "code": 6017,
+      "code": 6018,
       "name": "InsufficientVaultBalance",
       "msg": "Insufficient vault balance for payout"
     },
     {
-      "code": 6018,
+      "code": 6019,
       "name": "ProtocolPaused",
       "msg": "Protocol is paused — no new policies or stakes"
     },
     {
-      "code": 6019,
+      "code": 6020,
       "name": "SolvencyTooLow",
       "msg": "Solvency ratio too low for this risk tier"
     },
     {
-      "code": 6020,
+      "code": 6021,
       "name": "ZeroStakeAmount",
       "msg": "Stake amount must be greater than zero"
     },
     {
-      "code": 6021,
+      "code": 6022,
       "name": "UnstakeCooldownNotElapsed",
       "msg": "Unstake cooldown period not elapsed (48 hours)"
     },
     {
-      "code": 6022,
+      "code": 6023,
       "name": "NoUnstakeRequest",
       "msg": "No unstake request found"
     },
     {
-      "code": 6023,
+      "code": 6024,
       "name": "NoRewardsToClaim",
       "msg": "No pending rewards to claim"
     },
     {
-      "code": 6024,
+      "code": 6025,
       "name": "UnauthorizedOracle",
       "msg": "Unauthorized: only oracle authority can verify claims"
     },
     {
-      "code": 6025,
+      "code": 6026,
       "name": "UnauthorizedAdmin",
       "msg": "Unauthorized: only admin can modify config"
     },
     {
-      "code": 6026,
+      "code": 6027,
       "name": "UnauthorizedHolder",
       "msg": "Unauthorized: only policy holder can perform this action"
     },
     {
-      "code": 6027,
+      "code": 6028,
       "name": "InvalidTokenAccount",
       "msg": "Invalid token account: wrong owner or mint"
     },
     {
-      "code": 6028,
+      "code": 6029,
       "name": "AttestationExpired",
       "msg": "Risk attestation has expired — re-assess the agent"
     },
     {
-      "code": 6029,
+      "code": 6030,
       "name": "AttestationAgentMismatch",
       "msg": "Risk attestation agent does not match the policy's agent address"
     },
     {
-      "code": 6030,
+      "code": 6031,
       "name": "InvalidAttestationValidity",
       "msg": "Invalid attestation validity window (must be > 0 and <= 1 hour)"
     },
     {
-      "code": 6031,
+      "code": 6032,
       "name": "InvalidPriceEvidence",
       "msg": "Price evidence is malformed, for the wrong feed, or at the wrong exponent"
     },
     {
-      "code": 6032,
+      "code": 6033,
       "name": "PriceEvidenceSkew",
       "msg": "Signed price was not published close enough to the trigger transaction"
     },
     {
-      "code": 6033,
+      "code": 6034,
       "name": "PriceEvidenceOutOfWindow",
       "msg": "Trigger transaction falls outside the policy's claim window"
     },
     {
-      "code": 6034,
+      "code": 6035,
       "name": "DeviationBelowMinimum",
       "msg": "Deviation from the signed reference price is below the provable minimum"
     },
     {
-      "code": 6035,
+      "code": 6036,
       "name": "PayoutExceedsProvenLoss",
       "msg": "Payout exceeds the loss the signed price can account for"
     },
     {
-      "code": 6036,
+      "code": 6037,
       "name": "CheckpointMissing",
       "msg": "No balance checkpoint exists for this policy"
     },
     {
-      "code": 6037,
+      "code": 6038,
       "name": "CheckpointOutOfWindow",
       "msg": "Balance checkpoint is too old, or was taken after the claim was filed"
     },
     {
-      "code": 6038,
+      "code": 6039,
       "name": "DropBelowMinimum",
       "msg": "Observed balance drop is below the provable minimum"
     },
     {
-      "code": 6039,
+      "code": 6040,
       "name": "PayoutExceedsObservedDrop",
       "msg": "Payout exceeds the balance drop the program observed"
     },
     {
-      "code": 6040,
+      "code": 6041,
       "name": "InvalidCoveredAccount",
       "msg": "Covered token account does not belong to the policy's agent"
     },
     {
-      "code": 6041,
+      "code": 6042,
       "name": "GovernanceBaselineMissing",
       "msg": "No governance baseline has been declared for this policy"
     },
     {
-      "code": 6042,
+      "code": 6043,
       "name": "GovernanceBaselineNotMatured",
       "msg": "Governance baseline had not matured when the claim was filed"
     },
     {
-      "code": 6043,
+      "code": 6044,
       "name": "InvalidGovernanceBaseline",
       "msg": "Governance baseline is malformed — declare a real token owner"
     },
     {
-      "code": 6044,
+      "code": 6045,
       "name": "TooManyGovernanceAuthorities",
       "msg": "Too many extra authorities for the governance baseline"
     },
     {
-      "code": 6045,
+      "code": 6046,
       "name": "AuthorityCheckpointMissing",
       "msg": "No authority checkpoint exists for this policy"
     },
     {
-      "code": 6046,
+      "code": 6047,
       "name": "AuthorityCheckpointOutOfWindow",
       "msg": "Authority checkpoint is too old, or was taken after the claim was filed"
     },
     {
-      "code": 6047,
+      "code": 6048,
       "name": "AuthorityWithinBaseline",
       "msg": "Control over the covered account is still inside the declared set"
     },
     {
-      "code": 6048,
+      "code": 6049,
       "name": "PayoutExceedsProvenGovernanceLoss",
       "msg": "Payout exceeds the value the program can see was lost or seized"
     },
     {
-      "code": 6049,
+      "code": 6050,
       "name": "AgentMandateMissing",
       "msg": "No agent mandate has been declared for this policy"
     },
     {
-      "code": 6050,
+      "code": 6051,
       "name": "AgentMandateNotMatured",
       "msg": "Agent mandate had not matured when the claim was filed"
     },
     {
-      "code": 6051,
+      "code": 6052,
       "name": "InvalidAgentMandate",
       "msg": "Agent mandate is malformed — declare a real spending envelope"
     },
     {
-      "code": 6052,
+      "code": 6053,
       "name": "TooManyMandateCounterparties",
       "msg": "Too many declared counterparties for the agent mandate"
     },
     {
-      "code": 6053,
+      "code": 6054,
       "name": "TooManyMandatePrograms",
       "msg": "Too many declared programs for the agent mandate"
     },
     {
-      "code": 6054,
+      "code": 6055,
       "name": "OutflowWithinMandate",
       "msg": "The observed outflow stayed inside the declared mandate"
     },
     {
-      "code": 6055,
+      "code": 6056,
       "name": "BreachBelowMinimum",
       "msg": "Mandate breach is below the provable minimum"
     },
     {
-      "code": 6056,
+      "code": 6057,
       "name": "PayoutExceedsProvenBreach",
       "msg": "Payout exceeds the mandate breach the program measured"
     },
     {
-      "code": 6057,
+      "code": 6058,
       "name": "InvalidAdminCandidate",
       "msg": "Proposed admin must be a real key and not the current admin"
     },
     {
-      "code": 6058,
+      "code": 6059,
       "name": "NotProposedAdmin",
       "msg": "Signer is not the proposed admin"
     },
     {
-      "code": 6059,
+      "code": 6060,
       "name": "InvalidRentRefund",
       "msg": "Rent refund account is not the admin that opened the proposal"
     },
     {
-      "code": 6060,
+      "code": 6061,
       "name": "InvalidAccountForMigration",
       "msg": "Account is not a migratable Covantic account"
     },
     {
-      "code": 6061,
+      "code": 6062,
       "name": "MathOverflow",
       "msg": "Arithmetic overflow"
     },
     {
-      "code": 6062,
+      "code": 6063,
       "name": "ZeroPayout",
       "msg": "Payout amount must be greater than zero"
     }
@@ -7314,6 +7562,44 @@
               "`create_policy` rejects anything past this point."
             ],
             "type": "i64"
+          },
+          {
+            "name": "mandate_hash",
+            "docs": [
+              "The envelope this attestation's premium was quoted for.",
+              "",
+              "`AgentMandate::commitment()`. Zero means the oracle quoted no envelope,",
+              "which `create_policy` refuses: the deductible is the largest single",
+              "lever on what the vault can be made to pay, and a premium set without",
+              "it prices nothing.",
+              "",
+              "This closes the same hole the `tier` field closed, one level down. The",
+              "tier stopped a buyer picking LOW for a known-HIGH agent. It did not",
+              "stop them buying at any tier and *then* authoring a deductible narrow",
+              "enough to guarantee a breach — declaring a 100 USDC cap for an agent",
+              "holding 5,000, moving 600 to an address the verifier cannot know they",
+              "control, and collecting the 500 overshoot for the price of a premium",
+              "quoted before any of that was decided."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "envelope_surcharge_bps",
+            "docs": [
+              "What that envelope costs, in basis points on top of the tier premium.",
+              "",
+              "Priced off chain, where the agent's own outflow history lives: a cap",
+              "far above what the agent normally moves is a deductible the holder will",
+              "rarely reach, and a cap below it is one they will breach on ordinary",
+              "business. The chain cannot see that history; the oracle can, and it",
+              "signs for the number."
+            ],
+            "type": "u16"
           },
           {
             "name": "bump",

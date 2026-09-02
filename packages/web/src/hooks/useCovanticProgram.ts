@@ -84,6 +84,14 @@ export function derivePolicyPda(holder: PublicKey, policyId: bigint): PublicKey 
   )[0];
 }
 
+/** The envelope account, created with the policy it was priced for. */
+export function deriveAgentMandatePda(policy: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('covantic_agent_mandate'), policy.toBuffer()],
+    getProgramId(),
+  )[0];
+}
+
 export function deriveAttestationPda(agent: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync(
     [ATTESTATION_SEED, agent.toBuffer()],

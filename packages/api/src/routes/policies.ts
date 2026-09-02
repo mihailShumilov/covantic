@@ -9,8 +9,14 @@ import {
   SOLVENCY_THRESHOLDS,
   calculatePremium,
   tierToPremiumBps,
+  agentMandateCommitment,
+  MAX_ENVELOPE_SURCHARGE_BPS,
 } from '@covantic/shared';
 import { fetchOnChainPolicy, getPolicyReaderStatus } from '../utils/policy-reader.js';
+import { PublicKey } from '@solana/web3.js';
+import { priceEnvelope, type EnvelopePricing } from '../services/envelope-pricing.js';
+import { loadOutflowBaseline } from '../services/agent-error/baseline.js';
+import { getSolanaReader } from '../utils/solana-reader.js';
 
 /**
  * What the vault currently has behind the coverage it has already sold.
@@ -74,12 +80,89 @@ const policyQuerySchema = z.object({
  * it is derived server-side from the agent's latest stored risk assessment,
  * so buyers can't self-select a cheaper tier than their agent earns.
  */
+
+/**
+ * Price the declared envelope against what the agent actually does.
+ *
+ * Two readings, and the second is the one that is easy to skip: the agent's
+ * outflow history, and its current balance. The balance matters because the
+ * retention floor is measured against it — a floor of 4,990 is generous for an
+ * agent holding 50,000 and suffocating for one holding 5,000, and the number
+ * alone does not say which.
+ *
+ * A read that fails is not an agent with no history. `loadOutflowBaseline`
+ * returning nothing means the distribution is unknown, and `priceEnvelope`
+ * charges the ceiling for that rather than guessing — the same three-valued
+ * discipline the claim path uses, applied to a price.
+ */
+async function priceEnvelopeForAgent(
+  app: FastifyInstance,
+  agentAddress: string,
+  mandate: {
+    maxSingleOutflowRaw: number;
+    minRetainedBalanceRaw: number;
+  },
+): Promise<EnvelopePricing> {
+  const mint = app.config.USDC_MINT;
+  if (!mint) {
+    // No covered mint configured means nothing to price against, and the
+    // ceiling is the honest answer rather than a guess.
+    return { kind: 'priced', surchargeBps: MAX_ENVELOPE_SURCHARGE_BPS, headroom: null, basis: 'no_history' };
+  }
+
+  const baseline = await loadOutflowBaseline(
+    app.db,
+    agentAddress,
+    mint,
+    new Date(),
+    ENVELOPE_PRICING_WINDOW_SECONDS,
+  ).catch(() => null);
+
+  let coveredBalanceRaw = 0;
+  try {
+    const reader = getSolanaReader(app.config);
+    const { accounts } = await reader.getParsedTokenAccountsByOwner(agentAddress, { mint });
+    coveredBalanceRaw = accounts.reduce((sum, a) => sum + Number(a.amount), 0);
+  } catch (err) {
+    app.log.warn({ err, agentAddress }, 'envelope pricing: balance unreadable');
+  }
+
+  return priceEnvelope({
+    maxSingleOutflowRaw: mandate.maxSingleOutflowRaw,
+    minRetainedBalanceRaw: mandate.minRetainedBalanceRaw,
+    coveredBalanceRaw,
+    p95OutflowRaw: baseline?.p95OutflowRaw ?? null,
+    transferCount: baseline?.transferCount ?? 0,
+  });
+}
+
+/** How far back the agent's habits are read for pricing. A month is long
+ *  enough to describe a habit and short enough to notice a change. */
+const ENVELOPE_PRICING_WINDOW_SECONDS = 30 * 24 * 3600;
+
 const quoteSchema = z.object({
   coverageAmount: z.number().positive(),
   durationSeconds: z.number().positive(),
   agentAddress: z
     .string()
     .regex(SOLANA_ADDRESS_REGEX, 'Invalid Solana address'),
+  /**
+   * The operating envelope the holder is buying against.
+   *
+   * Required, because a premium quoted without it prices nothing: the
+   * deductible is the largest single lever on what the vault can be made to
+   * pay, and it used to be chosen *after* the price was fixed. The oracle
+   * commits to this envelope's hash in the attestation it signs, and
+   * `create_policy` refuses a purchase that declares a different one.
+   */
+  mandate: z.object({
+    maxSingleOutflowRaw: z.number().int().positive(),
+    maxWindowOutflowRaw: z.number().int().positive(),
+    windowSeconds: z.number().int().positive(),
+    minRetainedBalanceRaw: z.number().int().nonnegative(),
+    allowedCounterparties: z.array(z.string().regex(SOLANA_ADDRESS_REGEX)).max(8).default([]),
+    allowedPrograms: z.array(z.string().regex(SOLANA_ADDRESS_REGEX)).max(8).default([]),
+  }),
 });
 
 /**
@@ -454,7 +537,36 @@ export async function policyRoutes(app: FastifyInstance) {
 
     const tier = latest.tier as RiskTier;
     const premiumBps = tierToPremiumBps(tier);
-    const premium = calculatePremium(body.coverageAmount, body.durationSeconds, tier);
+    // What the declared deductible costs, before anything is signed.
+    //
+    // The refusal below is the important half. An envelope whose cap sits
+    // under what the agent moves in ordinary business is not a deductible; the
+    // claim is scheduled rather than risked, and there is no premium that
+    // prices it correctly. Saying so at the quote leaves the holder somewhere
+    // to go — widen the envelope — where saying it at purchase would be a
+    // failed transaction with no explanation.
+    const pricing = await priceEnvelopeForAgent(app, body.agentAddress, body.mandate);
+    if (pricing.kind === 'refused') {
+      return reply.status(400).send({
+        error:
+          'The declared envelope is tighter than the agent’s ordinary activity — widen it and quote again',
+        code: 'ENVELOPE_NOT_INSURABLE',
+        reason: pricing.reason,
+        headroom: pricing.headroom,
+        agentAddress: body.agentAddress,
+      });
+    }
+
+    // Priced with the surcharge, because the chain charges with it. A quote
+    // computed off the tier alone would show the holder one number and take
+    // another.
+    const premium = calculatePremium(
+      body.coverageAmount,
+      body.durationSeconds,
+      tier,
+      10000,
+      pricing.surchargeBps,
+    );
 
     if (premiumBps == null || premium == null) {
       // Defense-in-depth: EXTREME was already rejected above, but guard anyway.
@@ -467,13 +579,29 @@ export async function policyRoutes(app: FastifyInstance) {
       });
     }
 
+    const mandateHash = agentMandateCommitment({
+      maxSingleOutflowRaw: body.mandate.maxSingleOutflowRaw,
+      maxWindowOutflowRaw: body.mandate.maxWindowOutflowRaw,
+      windowSeconds: body.mandate.windowSeconds,
+      minRetainedBalanceRaw: body.mandate.minRetainedBalanceRaw,
+      allowedCounterparties: body.mandate.allowedCounterparties.map((k) =>
+        new PublicKey(k).toBytes(),
+      ),
+      allowedPrograms: body.mandate.allowedPrograms.map((k) => new PublicKey(k).toBytes()),
+    });
+
     // Publish (or refresh) the on-chain attestation. The client needs the
     // PDA in the `create_policy` accounts list — without it, the program
     // will reject the transaction.
     let attestationPda: string | null = null;
     let attestationExpiresAt: string | null = null;
     try {
-      const att = await app.attestationPublisher.ensureFresh(body.agentAddress, tier);
+      const att = await app.attestationPublisher.ensureFresh(
+        body.agentAddress,
+        tier,
+        mandateHash,
+        pricing.surchargeBps,
+      );
       attestationPda = att.attestationPda;
       attestationExpiresAt = att.expiresAt.toISOString();
     } catch (err) {
@@ -504,6 +632,8 @@ export async function policyRoutes(app: FastifyInstance) {
       validUntil: validUntil.toISOString(),
       attestationPda,
       attestationExpiresAt,
+      envelopeSurchargeBps: pricing.surchargeBps,
+      envelopeHeadroom: pricing.headroom,
       backing,
     });
   });

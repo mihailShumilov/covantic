@@ -80,6 +80,20 @@ export interface PremiumQuote {
   attestationPda: string | null;
   /** When the on-chain attestation expires (ISO-8601). */
   attestationExpiresAt: string | null;
+  /**
+   * What the declared envelope adds to the tier premium, in basis points.
+   *
+   * Disclosed rather than folded silently into the total: the deductible is
+   * the holder's own choice, and a price that moves with it should say so.
+   * A holder who sees the surcharge can widen the envelope and requote.
+   */
+  envelopeSurchargeBps: number;
+  /**
+   * How far the declared cap sits above what the agent normally moves, or
+   * null when there is no history to measure against — which is charged at
+   * the ceiling, not refused.
+   */
+  envelopeHeadroom: number | null;
 }
 
 /** Error codes returned by the quote endpoint when a quote cannot be issued. */
@@ -87,4 +101,7 @@ export type QuoteErrorCode =
   | 'ASSESSMENT_REQUIRED'
   | 'AGENT_UNINSURABLE'
   | 'ASSESSMENT_STALE'
-  | 'ATTESTATION_PUBLISH_FAILED';
+  | 'ATTESTATION_PUBLISH_FAILED'
+  /** The declared envelope is tighter than the agent's ordinary activity, so
+   *  a breach is scheduled rather than risked and no premium prices it. */
+  | 'ENVELOPE_NOT_INSURABLE';

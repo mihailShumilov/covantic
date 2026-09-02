@@ -122,6 +122,16 @@ pub const LOCK_GOVERNANCE_ATTACK: i64 = 30;
 #[cfg(not(feature = "devnet-fast-lock"))]
 pub const LOCK_GOVERNANCE_ATTACK: i64 = 7200;
 
+/// Ceiling on the envelope surcharge, in basis points on top of the tier
+/// premium.
+///
+/// The surcharge exists so a narrow deductible costs what it is worth, and an
+/// unbounded one would let a compromised oracle key price a policy out of
+/// existence — refusing coverage by arithmetic rather than by refusing to
+/// sign, which is harder to notice. Ten thousand is the whole coverage amount
+/// per year; past that the oracle should be declining to attest.
+pub const MAX_ENVELOPE_SURCHARGE_BPS: u16 = 10_000;
+
 /// USDC decimals
 pub const USDC_DECIMALS: u8 = 6;
 
