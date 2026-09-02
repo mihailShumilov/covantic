@@ -31,7 +31,8 @@
     "migrate:accounts": "tsx scripts/migrate-accounts.ts",
     "monitor:dev": "tsx src/workers/monitor-entry.ts",
     "demo:autonomous": "tsx scripts/demo-autonomous.ts",
-    "demo:arm": "tsx scripts/demo-arm.ts"
+    "demo:arm": "tsx scripts/demo-arm.ts",
+    "demo:status": "tsx scripts/demo-arm.ts --status"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",

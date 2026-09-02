@@ -32,7 +32,7 @@
  */
 
 import { resolve } from 'node:path';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { config as loadDotenv } from 'dotenv';
 
@@ -92,6 +92,56 @@ function say(line: string): void {
   process.stdout.write(`${line}\n`);
 }
 
+/**
+ * The armed policies, and when each becomes usable.
+ *
+ * A file rather than a chain read, because the question it answers is "what
+ * did we prepare", which is local knowledge. Whether a policy is still
+ * *spendable* is not — that comes from the API below, since a demo consumes
+ * the policy it runs on and a week later they expire.
+ */
+const LEDGER = resolve(REPO_ROOT, 'keys/demo-armed.json');
+
+interface Armed {
+  policyId: string;
+  agent: string;
+  readyAt: string;
+}
+
+function readLedger(): Armed[] {
+  if (!existsSync(LEDGER)) return [];
+  try {
+    return JSON.parse(readFileSync(LEDGER, 'utf8')) as Armed[];
+  } catch {
+    return [];
+  }
+}
+
+function appendLedger(entry: Armed): void {
+  writeFileSync(LEDGER, `${JSON.stringify([...readLedger(), entry], null, 2)}\n`);
+}
+
+type State = 'ready' | 'maturing' | 'spent';
+
+/** Live state of every armed policy. `spent` covers both outcomes that end a
+ *  policy: a demo that settled it, and a week going by. */
+async function survey(): Promise<Array<Armed & { state: State }>> {
+  const res = await fetch(`${API}/api/policies`);
+  const body = (await res.json()) as { policies?: Array<{ policyId: number; state: number }> };
+  const live = new Map((body.policies ?? []).map((p) => [String(p.policyId), p.state]));
+  const now = Date.now();
+
+  return readLedger().map((a) => ({
+    ...a,
+    state:
+      live.get(a.policyId) !== 0
+        ? 'spent'
+        : Date.parse(a.readyAt) <= now
+          ? 'ready'
+          : 'maturing',
+  }));
+}
+
 async function armOne(days: string): Promise<{ policyId: string; agent: string; readyAt: string }> {
   const before = fleetSize();
 
@@ -130,12 +180,58 @@ async function armOne(days: string): Promise<{ policyId: string; agent: string; 
     }
   }
 
+  appendLedger({ policyId, agent, readyAt });
   return { policyId, agent, readyAt };
 }
 
+function line(a: Armed): string {
+  return `  pnpm demo:autonomous --policy ${a.policyId} --agent ${a.agent} --amount 600`;
+}
+
+/** What could be shown right now, and what is on its way. */
+async function status(): Promise<void> {
+  const all = await survey();
+  const ready = all.filter((a) => a.state === 'ready');
+  const maturing = all.filter((a) => a.state === 'maturing');
+
+  say(ready.length > 0 ? `READY — ${ready.length} polic${ready.length === 1 ? 'y' : 'ies'}\n` : 'NOTHING READY\n');
+  for (const a of ready) say(line(a));
+  if (maturing.length > 0) {
+    say('\nMaturing:');
+    for (const a of maturing) say(`  #${a.policyId} usable from ${a.readyAt}`);
+  }
+  if (ready.length === 0 && maturing.length === 0) {
+    say('Run `pnpm demo:arm` — a declaration needs an hour before it can be proven against.');
+  }
+}
+
 async function main(): Promise<void> {
-  const count = Number(flag('count', '1'));
+  if (process.argv.includes('--status')) {
+    await status();
+    return;
+  }
+
   const days = flag('days', '7');
+
+  // `--target N` keeps a standing pool: arm only the shortfall.
+  //
+  // This is the answer to not knowing when the demo happens. A policy pays
+  // once and a declaration needs an hour, so "prepare beforehand" fails when
+  // beforehand is five minutes' notice. Keeping a few armed at all times costs
+  // one scheduled run and preserves the delay that makes the verdict mean
+  // something — which shortening it for a demo would not.
+  const targetFlag = process.argv.indexOf('--target');
+  let count = Number(flag('count', '1'));
+  if (targetFlag >= 0) {
+    const target = Number(process.argv[targetFlag + 1] ?? '3');
+    const standing = (await survey()).filter((a) => a.state !== 'spent').length;
+    count = Math.max(0, target - standing);
+    say(`${standing} armed or arming, target ${target} — arming ${count}\n`);
+    if (count === 0) {
+      await status();
+      return;
+    }
+  }
 
   say(`Arming ${count} polic${count === 1 ? 'y' : 'ies'} against ${API}\n`);
   const armed: Array<{ policyId: string; agent: string; readyAt: string }> = [];
@@ -147,15 +243,15 @@ async function main(): Promise<void> {
 
   say('Ready to present:\n');
   for (const a of armed) {
-    say(`  pnpm demo:autonomous --policy ${a.policyId} --agent ${a.agent} --amount 600`);
+    say(line(a));
     say(`    usable from ${a.readyAt}`);
   }
   say('');
   say('The declaration matures an hour after it lands, and that hour is the');
   say('mechanism rather than a wait: a mandate the holder could declare *after*');
-  say('watching a loss would prove nothing. Arm before the room fills.');
+  say('watching a loss would prove nothing.');
   say('');
-  say('Each policy pays once — settling closes it. Arm a spare.');
+  say('`pnpm demo:status` says what is showable right now.');
 }
 
 main().catch((err) => {
