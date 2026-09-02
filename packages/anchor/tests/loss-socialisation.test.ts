@@ -269,7 +269,7 @@ describe.skipIf(!hasIdl)('loss socialisation across stakers', () => {
     }
 
     await program.methods
-      .upsertAttestation(agent.publicKey, 0, new BN(3600), wideMandateHash(), 0)
+      .upsertAttestation(agent.publicKey, 0, new BN(3600), wideMandateHash(), new BN(0))
       .accountsPartial({
         oracle: oracle.publicKey,
         config,

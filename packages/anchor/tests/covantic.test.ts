@@ -367,7 +367,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
   ): Promise<void> {
     const [config] = configPda();
     await program.methods
-      .upsertAttestation(agent, tier, new BN(3600), mandateHash, 0)
+      .upsertAttestation(agent, tier, new BN(3600), mandateHash, new BN(0))
       .accountsPartial({
         oracle: oracle.publicKey,
         config,
@@ -921,7 +921,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       // moved to the oracle's own publish path.
       await expect(
         program.methods
-          .upsertAttestation(agentWallet.publicKey, 5, new BN(3600), testMandateHash(), 0)
+          .upsertAttestation(agentWallet.publicKey, 5, new BN(3600), testMandateHash(), new BN(0))
           .accountsPartial({
             oracle: oracle.publicKey,
             config: configPda()[0],

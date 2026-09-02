@@ -108,12 +108,9 @@ async function priceEnvelopeForAgent(
   if (!mint) {
     // No covered mint configured means nothing to price against, and the
     // ceiling is the honest answer rather than a guess.
-    return {
-      kind: 'priced',
-      surchargeBps: MAX_ENVELOPE_SURCHARGE_BPS,
-      headroom: null,
-      basis: 'balance',
-    };
+    // No covered mint configured means nothing can be measured, and the
+    // safest unmeasurable answer is that the whole coverage is extractable.
+    return { kind: 'priced', flatPremiumRaw: coverageAmountRaw, headroom: null, basis: 'balance' };
   }
 
   const baseline = await loadOutflowBaseline(
@@ -577,7 +574,7 @@ export async function policyRoutes(app: FastifyInstance) {
       body.durationSeconds,
       tier,
       10000,
-      pricing.surchargeBps,
+      pricing.flatPremiumRaw,
     );
 
     if (premiumBps == null || premium == null) {
@@ -612,7 +609,7 @@ export async function policyRoutes(app: FastifyInstance) {
         body.agentAddress,
         tier,
         mandateHash,
-        pricing.surchargeBps,
+        pricing.flatPremiumRaw,
       );
       attestationPda = att.attestationPda;
       attestationExpiresAt = att.expiresAt.toISOString();
@@ -644,7 +641,7 @@ export async function policyRoutes(app: FastifyInstance) {
       validUntil: validUntil.toISOString(),
       attestationPda,
       attestationExpiresAt,
-      envelopeSurchargeBps: pricing.surchargeBps,
+      envelopeFlatPremium: pricing.flatPremiumRaw,
       envelopeHeadroom: pricing.headroom,
       backing,
     });

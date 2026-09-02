@@ -110,27 +110,38 @@ pub fn create_policy_handler(
         _ => return Err(CovanticError::InvalidRiskTier.into()),
     };
 
-    // The deductible's own price, on top of the tier's.
-    //
-    // A cap far above what the agent normally moves is a deductible the holder
-    // will rarely reach; one below it is a deductible they breach on ordinary
-    // business. Only the oracle can tell those apart — the agent's outflow
-    // history is off chain — so it signs for the surcharge and the chain
-    // applies it.
-    let priced_bps = (premium_bps as u128)
-        .checked_add(attestation.envelope_surcharge_bps as u128)
-        .ok_or(CovanticError::MathOverflow)?;
-
     let annual_premium = (coverage_amount as u128)
-        .checked_mul(priced_bps)
+        .checked_mul(premium_bps as u128)
         .ok_or(CovanticError::MathOverflow)?
         .checked_div(10000)
         .ok_or(CovanticError::MathOverflow)?;
 
-    let premium = (annual_premium)
+    let tier_premium = (annual_premium)
         .checked_mul(duration_seconds as u128)
         .ok_or(CovanticError::MathOverflow)?
         .checked_div(SECONDS_PER_YEAR as u128)
+        .ok_or(CovanticError::MathOverflow)?;
+
+    // The deductible's own price, and it is **not** scaled by duration.
+    //
+    // What the envelope costs is the amount its holder can extract at will,
+    // and that ability exists from the first minute of the policy rather than
+    // accruing over its life. Charged as an annual rate it dissolved into the
+    // tenor: a one-hour policy cost a fraction of a percent of what it let the
+    // holder take, and no duration this program allows was long enough to
+    // close the gap — break-even sat at 356 days against a 30-day maximum.
+    //
+    // Bounded by the coverage, because the extractable amount is: the policy
+    // cannot pay more than it covers. The bound also stops a compromised
+    // oracle key pricing coverage out of existence instead of declining to
+    // attest, which is much harder to notice.
+    require!(
+        attestation.envelope_flat_premium <= coverage_amount,
+        CovanticError::InvalidRiskTier
+    );
+
+    let premium = tier_premium
+        .checked_add(attestation.envelope_flat_premium as u128)
         .ok_or(CovanticError::MathOverflow)?;
 
     // Apply premium multiplier (solvency-based)

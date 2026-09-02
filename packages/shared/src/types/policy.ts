@@ -81,13 +81,14 @@ export interface PremiumQuote {
   /** When the on-chain attestation expires (ISO-8601). */
   attestationExpiresAt: string | null;
   /**
-   * What the declared envelope adds to the tier premium, in basis points.
+   * What the declared envelope costs, as a flat amount in the covered mint's
+   * base units. Not scaled by duration — see `calculatePremium`.
    *
    * Disclosed rather than folded silently into the total: the deductible is
    * the holder's own choice, and a price that moves with it should say so.
-   * A holder who sees the surcharge can widen the envelope and requote.
+   * A holder who sees it can widen the envelope and requote.
    */
-  envelopeSurchargeBps: number;
+  envelopeFlatPremium: number;
   /**
    * How far the declared cap sits above what the agent normally moves, or
    * null when there is no history to measure against — which is charged at

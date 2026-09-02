@@ -41,7 +41,7 @@ interface OnChainAttestation {
   expiresAt: bigint;
   /** The envelope this attestation's premium was quoted for, hex. */
   mandateHash: string;
-  envelopeSurchargeBps: number;
+  envelopeFlatPremium: number;
 }
 
 /**
@@ -87,13 +87,13 @@ export class AttestationPublisher {
    * `agentMandateCommitment` computes it. `create_policy` recomputes it from
    * the arguments it is handed and refuses a mismatch, so an attestation
    * published for a generous envelope cannot be spent on a narrow one.
-   * @param envelopeSurchargeBps what that envelope costs on top of the tier.
+   * @param envelopeFlatPremium what that envelope costs, flat, in base units.
    */
   async ensureFresh(
     agentAddress: string,
     tier: RiskTier,
     mandateHash: Uint8Array,
-    envelopeSurchargeBps: number,
+    envelopeFlatPremium: number,
   ): Promise<AttestationInfo> {
     if (tier === RiskTier.EXTREME) {
       throw new Error('Refusing to publish attestation for EXTREME tier');
@@ -117,7 +117,7 @@ export class AttestationPublisher {
       existing &&
       existing.tier === tier &&
       existing.mandateHash === wantedHash &&
-      existing.envelopeSurchargeBps === envelopeSurchargeBps &&
+      existing.envelopeFlatPremium === envelopeFlatPremium &&
       Number(existing.expiresAt) > nowSec + REFRESH_THRESHOLD_SECONDS
     ) {
       return {
@@ -135,7 +135,7 @@ export class AttestationPublisher {
           tier,
           new BN(validFor),
           Array.from(mandateHash),
-          envelopeSurchargeBps,
+          new BN(envelopeFlatPremium),
         )
         .accounts({
           oracle: ctx.oracleKeypair!.publicKey,
@@ -207,7 +207,7 @@ export class AttestationPublisher {
         issuedAt: BigInt(raw.issuedAt.toString()),
         expiresAt: BigInt(raw.expiresAt.toString()),
         mandateHash: Buffer.from(raw.mandateHash ?? []).toString('hex'),
-        envelopeSurchargeBps: Number(raw.envelopeSurchargeBps ?? 0),
+        envelopeFlatPremium: Number(raw.envelopeFlatPremium ?? 0),
       };
     } catch (err) {
       if (err instanceof Error && /Account does not exist/i.test(err.message)) {

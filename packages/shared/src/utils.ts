@@ -7,27 +7,37 @@ import { PREMIUM_BPS, RISK_SCORE_BOUNDARIES, SOLVENCY_THRESHOLDS, DURATION } fro
  * (EXTREME) tiers — callers must check before using the value.
  */
 /**
- * @param envelopeSurchargeBps what the declared deductible adds, on top of the
- * tier. Added to the tier's basis points before anything else, exactly as
- * `create_policy` does — the quote and the chain have to agree on the price or
- * the holder is shown one number and charged another.
+ * @param envelopeFlatPremium what the declared deductible costs, as a flat
+ * amount in the covered mint's base units. Added *after* the duration scaling,
+ * exactly as `create_policy` does — the quote and the chain have to agree on
+ * the price or the holder is shown one number and charged another.
+ *
+ * Flat rather than a rate because the thing it prices — the amount a holder
+ * can extract at will — exists from the first minute of the policy instead of
+ * accruing over its life. As a rate it divided by the tenor, and a one-hour
+ * policy bought an ability worth the whole coverage for a fraction of a
+ * percent of it.
  */
 export function calculatePremium(
   coverageAmount: number,
   durationSeconds: number,
   riskTier: RiskTier,
   premiumMultiplierBps: number = 10000,
-  envelopeSurchargeBps: number = 0,
+  envelopeFlatPremium: number = 0,
 ): number | null {
-  const tierBps = tierToPremiumBps(riskTier);
-  if (tierBps == null) return null;
-  const bps = tierBps + envelopeSurchargeBps;
+  const bps = tierToPremiumBps(riskTier);
+  if (bps == null) return null;
 
   const annualPremium = (coverageAmount * bps) / 10000;
   const durationFraction = durationSeconds / (365 * 24 * 3600);
   let premium = Math.round(annualPremium * durationFraction);
 
   premium = Math.round((premium * premiumMultiplierBps) / 10000);
+
+  // After the duration scaling, and deliberately outside the floor below: the
+  // envelope's price is an amount, not a rate, and the order here has to match
+  // `create_policy` exactly or the quote and the chain disagree.
+  premium += envelopeFlatPremium;
 
   return Math.max(premium, 1000);
 }

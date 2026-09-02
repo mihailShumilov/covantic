@@ -2907,8 +2907,8 @@
           }
         },
         {
-          "name": "envelope_surcharge_bps",
-          "type": "u16"
+          "name": "envelope_flat_premium",
+          "type": "u64"
         }
       ]
     },
@@ -7589,17 +7589,27 @@
             }
           },
           {
-            "name": "envelope_surcharge_bps",
+            "name": "envelope_flat_premium",
             "docs": [
-              "What that envelope costs, in basis points on top of the tier premium.",
+              "What that envelope costs, as a flat amount in the covered mint's base",
+              "units. Added to the tier premium, and **not** scaled by duration.",
               "",
-              "Priced off chain, where the agent's own outflow history lives: a cap",
-              "far above what the agent normally moves is a deductible the holder will",
-              "rarely reach, and a cap below it is one they will breach on ordinary",
-              "business. The chain cannot see that history; the oracle can, and it",
-              "signs for the number."
+              "A rate was the wrong shape and the arithmetic said so. The envelope's",
+              "cost is the amount a holder can extract at will — move more than the",
+              "declared cap to an address the verifier cannot attribute to them, and",
+              "collect the overshoot — and that ability exists from the first minute of",
+              "the policy, not pro rata over its life. Charged as an annual rate it",
+              "dissolved into the tenor: a one-hour policy cost 0.23 USDC for an",
+              "ability worth up to the full coverage, and no duration this program",
+              "allows was long enough to close it. Break-even was 356 days against a",
+              "30-day maximum.",
+              "",
+              "Flat, the tenor stops being a lever. It is bounded by the coverage",
+              "because that is what bounds the extractable amount, and because an",
+              "unbounded figure would let a compromised oracle key refuse coverage by",
+              "arithmetic rather than by declining to attest."
             ],
-            "type": "u16"
+            "type": "u64"
           },
           {
             "name": "bump",

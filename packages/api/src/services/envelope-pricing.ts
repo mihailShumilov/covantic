@@ -1,4 +1,3 @@
-import { MAX_ENVELOPE_SURCHARGE_BPS } from '@covantic/shared';
 
 /**
  * What a declared deductible costs on top of the tier premium.
@@ -41,11 +40,17 @@ import { MAX_ENVELOPE_SURCHARGE_BPS } from '@covantic/shared';
  * The same agent with a 1,000,000 cap cannot cross it at all, whatever its
  * habits, because it does not hold that much.
  *
- * Pricing the extractable amount as a fraction of coverage is what makes the
- * manoeuvre pointless: extract the whole coverage and you have paid the whole
- * coverage for the privilege. It also prices a brand-new agent honestly, where
- * charging the ceiling for want of a history charged an unmeasured agent as
- * though it were a hostile one.
+ * Charging that amount **flat** is what makes the manoeuvre pointless: extract
+ * the whole coverage and you have paid the whole coverage for the privilege.
+ * It also prices a brand-new agent honestly, where charging a ceiling for want
+ * of a history charged an unmeasured agent as though it were a hostile one.
+ *
+ * Flat, and not a rate, because the arithmetic said so. The ability exists
+ * from the first minute of the policy; a rate divides it by the tenor. A
+ * one-hour policy cost 0.23 USDC for an ability worth up to the full 2,000
+ * coverage, and no duration the program allows was long enough to close the
+ * gap — break-even sat at 356 days against a 30-day maximum, and raising the
+ * rate instead would have overflowed the `u16` the attestation carried it in.
  *
  * The surcharge is the **larger** of the two. A holder pays for whichever is
  * worse: the chance their agent breaches by accident, or the amount they could
@@ -74,9 +79,9 @@ export const FREE_HEADROOM = 5;
 export const MIN_HEADROOM = 1;
 
 export type EnvelopePricing =
-  | { kind: 'priced'; surchargeBps: number; headroom: number; basis: 'history' }
+  | { kind: 'priced'; flatPremiumRaw: number; headroom: number; basis: 'history' }
   /** No history yet; priced on what the balance lets the holder extract. */
-  | { kind: 'priced'; surchargeBps: number; headroom: null; basis: 'balance' }
+  | { kind: 'priced'; flatPremiumRaw: number; headroom: null; basis: 'balance' }
   | { kind: 'refused'; reason: string; headroom: number };
 
 export interface EnvelopePricingInput {
@@ -125,28 +130,31 @@ function extractableRaw(input: EnvelopePricingInput): number {
   return Math.min(input.coverageAmountRaw, Math.max(viaCap, viaFloor));
 }
 
-function extractableSurcharge(input: EnvelopePricingInput): number {
-  if (input.coverageAmountRaw <= 0) return 0;
-  const fraction = extractableRaw(input) / input.coverageAmountRaw;
-  return Math.round(Math.min(1, Math.max(0, fraction)) * MAX_ENVELOPE_SURCHARGE_BPS);
-}
-
-function surchargeFor(headroom: number): number {
+/**
+ * The habit half, expressed as an amount rather than a rate.
+ *
+ * A tight envelope on an agent whose ordinary movements sit just under it will
+ * be breached in normal operation, and the vault owes the overshoot when it
+ * is. That is a real risk rather than a manoeuvre, so it is priced as a
+ * fraction of the coverage — but it is charged flat for the same reason the
+ * extractable half is: the breach can happen on the first day.
+ */
+function habitPremiumRaw(headroom: number, coverageAmountRaw: number): number {
   if (headroom >= FREE_HEADROOM) return 0;
   const tightness = (FREE_HEADROOM - headroom) / (FREE_HEADROOM - MIN_HEADROOM);
-  return Math.round(Math.min(1, Math.max(0, tightness)) * MAX_ENVELOPE_SURCHARGE_BPS);
+  return Math.round(Math.min(1, Math.max(0, tightness)) * coverageAmountRaw);
 }
 
 export function priceEnvelope(input: EnvelopePricingInput): EnvelopePricing {
   const { p95OutflowRaw, transferCount } = input;
 
-  const extractable = extractableSurcharge(input);
+  const extractable = extractableRaw(input);
 
   if (p95OutflowRaw === null || p95OutflowRaw <= 0 || transferCount < MIN_OBSERVATIONS_TO_PRICE) {
-    // No history is not a reason to charge the ceiling. What the holder can
-    // take at will is measurable without one, and an envelope the agent cannot
+    // No history is not a reason to charge a ceiling. What the holder can take
+    // at will is measurable without one, and an envelope the agent cannot
     // cross with the balance it holds carries no exposure however new it is.
-    return { kind: 'priced', surchargeBps: extractable, headroom: null, basis: 'balance' };
+    return { kind: 'priced', flatPremiumRaw: extractable, headroom: null, basis: 'balance' };
   }
 
   // Both declared dimensions are deductibles, and the tighter one governs.
@@ -176,7 +184,7 @@ export function priceEnvelope(input: EnvelopePricingInput): EnvelopePricing {
   // ordinary movements sit right under it.
   return {
     kind: 'priced',
-    surchargeBps: Math.max(surchargeFor(headroom), extractable),
+    flatPremiumRaw: Math.max(habitPremiumRaw(headroom, input.coverageAmountRaw), extractable),
     headroom: Number(headroom.toFixed(3)),
     basis: 'history',
   };

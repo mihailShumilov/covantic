@@ -24,9 +24,9 @@ const publisher = readFileSync(`${ROOT}src/services/attestation-publisher.ts`, '
 );
 
 describe('INV-ATTEST-01 — reuse requires the same envelope', () => {
-  it('compares the commitment and the surcharge, not only the tier', () => {
+  it('compares the commitment and the price, not only the tier', () => {
     expect(publisher).toMatch(/existing\.mandateHash === wantedHash/);
-    expect(publisher).toMatch(/existing\.envelopeSurchargeBps === envelopeSurchargeBps/);
+    expect(publisher).toMatch(/existing\.envelopeFlatPremium === envelopeFlatPremium/);
   });
 
   it('still requires the tier and the expiry, which reuse always rested on', () => {
