@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { AnchorProvider, BN, Program, type Idl } from '@coral-xyz/anchor';
+import { agentMandateCommitment } from '@covantic/shared';
 import {
   Keypair,
   PublicKey,
@@ -264,6 +265,16 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
         staker2.publicKey,
         usdcMint.publicKey,
       ),
+      // The agent's covered account. `create_policy` reads it now: the
+      // retention floor a holder declares has to be one they currently
+      // satisfy, and that is a balance. An agent with no covered account has
+      // nothing to lose and cannot be insured.
+      createAssociatedTokenAccountInstruction(
+        admin.publicKey,
+        getAssociatedTokenAddressSync(usdcMint.publicKey, agentWallet.publicKey),
+        agentWallet.publicKey,
+        usdcMint.publicKey,
+      ),
       createMintToInstruction(
         usdcMint.publicKey,
         holderAta,
@@ -297,10 +308,66 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
    * holder could pick LOW for a HIGH-risk agent. Every policy therefore needs
    * a live attestation first.
    */
-  async function ensureAttestation(agent: PublicKey, tier = 0): Promise<void> {
+  /**
+   * The envelope every test policy is bought against.
+   *
+   * Wide on purpose: these tests are about the rest of the protocol, and a
+   * narrow deductible would have them tripping the mandate rules instead of
+   * the behaviour under test. The agent-error tests declare their own.
+   */
+  function testMandate() {
+    return {
+      maxSingleOutflow: usdc(1_000_000),
+      maxWindowOutflow: usdc(1_000_000),
+      windowSeconds: new BN(3600),
+      minRetainedBalance: new BN(0),
+      allowedCounterparties: [],
+      allowedPrograms: [],
+      manifestHash: Array.from(new Uint8Array(32)),
+    };
+  }
+
+  /**
+   * The commitment the oracle signs, computed the way the program will.
+   *
+   * Takes the mandate rather than assuming one: the attestation now prices a
+   * specific envelope, so a test that buys a narrow envelope has to publish an
+   * attestation for *that* envelope. Getting this wrong is what
+   * `AttestationMandateMismatch` is for, and it is the whole point of the
+   * change — a premium quoted for one deductible cannot be spent on another.
+   */
+  function mandateHashOf(m: {
+    maxSingleOutflow: BN;
+    maxWindowOutflow: BN;
+    windowSeconds: BN;
+    minRetainedBalance: BN;
+    allowedCounterparties: PublicKey[];
+    allowedPrograms: PublicKey[];
+  }): number[] {
+    return Array.from(
+      agentMandateCommitment({
+        maxSingleOutflowRaw: BigInt(m.maxSingleOutflow.toString()),
+        maxWindowOutflowRaw: BigInt(m.maxWindowOutflow.toString()),
+        windowSeconds: BigInt(m.windowSeconds.toString()),
+        minRetainedBalanceRaw: BigInt(m.minRetainedBalance.toString()),
+        allowedCounterparties: m.allowedCounterparties.map((k) => k.toBytes()),
+        allowedPrograms: m.allowedPrograms.map((k) => k.toBytes()),
+      }),
+    );
+  }
+
+  function testMandateHash(): number[] {
+    return mandateHashOf(testMandate() as any);
+  }
+
+  async function ensureAttestation(
+    agent: PublicKey,
+    tier = 0,
+    mandateHash: number[] = testMandateHash(),
+  ): Promise<void> {
     const [config] = configPda();
     await program.methods
-      .upsertAttestation(agent, tier, new BN(3600))
+      .upsertAttestation(agent, tier, new BN(3600), mandateHash, 0)
       .accountsPartial({
         oracle: oracle.publicKey,
         config,
@@ -397,12 +464,20 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
     const holderBefore = await getAccount(provider.connection as any, holderAta);
 
     await program.methods
-      .createPolicy(usdc(100), new BN(86400), agentWallet.publicKey)
+      .createPolicy(usdc(100), new BN(86400), agentWallet.publicKey, testMandate() as any)
       .accountsPartial({
+        usdcMint: usdcMint.publicKey,
+        coveredTokenAccount: getAssociatedTokenAddressSync(usdcMint.publicKey, agentWallet.publicKey),
         holder: holder.publicKey,
         config,
         vault,
         policy,
+        usdcMint: usdcMint.publicKey,
+        mandate: agentMandatePda(policy)[0],
+        coveredTokenAccount: getAssociatedTokenAddressSync(
+          usdcMint.publicKey,
+          agentWallet.publicKey,
+        ),
         holderTokenAccount: holderAta,
         vaultTokenAccount: vaultAta,
         tokenProgram: TOKEN_PROGRAM_ID,
@@ -538,12 +613,20 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
 
     await ensureAttestation(agentWallet.publicKey);
     await program.methods
-      .createPolicy(usdc(50), new BN(86400), agentWallet.publicKey)
+      .createPolicy(usdc(50), new BN(86400), agentWallet.publicKey, testMandate() as any)
       .accountsPartial({
+        usdcMint: usdcMint.publicKey,
+        coveredTokenAccount: getAssociatedTokenAddressSync(usdcMint.publicKey, agentWallet.publicKey),
         holder: holder.publicKey,
         config,
         vault,
         policy,
+        usdcMint: usdcMint.publicKey,
+        mandate: agentMandatePda(policy)[0],
+        coveredTokenAccount: getAssociatedTokenAddressSync(
+          usdcMint.publicKey,
+          agentWallet.publicKey,
+        ),
         holderTokenAccount: holderAta,
         vaultTokenAccount: vaultAta,
         tokenProgram: TOKEN_PROGRAM_ID,
@@ -592,12 +675,20 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
 
     await ensureAttestation(agentWallet.publicKey);
     await program.methods
-      .createPolicy(usdc(20), new BN(3600), agentWallet.publicKey)
+      .createPolicy(usdc(20), new BN(3600), agentWallet.publicKey, testMandate() as any)
       .accountsPartial({
+        usdcMint: usdcMint.publicKey,
+        coveredTokenAccount: getAssociatedTokenAddressSync(usdcMint.publicKey, agentWallet.publicKey),
         holder: holder.publicKey,
         config,
         vault,
         policy,
+        usdcMint: usdcMint.publicKey,
+        mandate: agentMandatePda(policy)[0],
+        coveredTokenAccount: getAssociatedTokenAddressSync(
+          usdcMint.publicKey,
+          agentWallet.publicKey,
+        ),
         holderTokenAccount: holderAta,
         vaultTokenAccount: vaultAta,
         tokenProgram: TOKEN_PROGRAM_ID,
@@ -749,12 +840,20 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
     const [policy] = policyPda(holder.publicKey, policyId);
     await ensureAttestation(agentWallet.publicKey);
     await program.methods
-      .createPolicy(usdc(100), new BN(86400 * 10), agentWallet.publicKey)
+      .createPolicy(usdc(100), new BN(86400 * 10), agentWallet.publicKey, testMandate() as any)
       .accountsPartial({
+        usdcMint: usdcMint.publicKey,
+        coveredTokenAccount: getAssociatedTokenAddressSync(usdcMint.publicKey, agentWallet.publicKey),
         holder: holder.publicKey,
         config,
         vault,
         policy,
+        usdcMint: usdcMint.publicKey,
+        mandate: agentMandatePda(policy)[0],
+        coveredTokenAccount: getAssociatedTokenAddressSync(
+          usdcMint.publicKey,
+          agentWallet.publicKey,
+        ),
         holderTokenAccount: holderAta,
         vaultTokenAccount: vaultAta,
         tokenProgram: TOKEN_PROGRAM_ID,
@@ -798,8 +897,10 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       await ensureAttestation(agentWallet.publicKey);
       await expect(
         program.methods
-          .createPolicy(new BN(500_000), new BN(86400), agentWallet.publicKey)
+          .createPolicy(new BN(500_000), new BN(86400), agentWallet.publicKey, testMandate() as any)
           .accountsPartial({
+            usdcMint: usdcMint.publicKey,
+            coveredTokenAccount: getAssociatedTokenAddressSync(usdcMint.publicKey, agentWallet.publicKey),
             holder: holder.publicKey,
             config,
             vault,
@@ -820,7 +921,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       // moved to the oracle's own publish path.
       await expect(
         program.methods
-          .upsertAttestation(agentWallet.publicKey, 5, new BN(3600))
+          .upsertAttestation(agentWallet.publicKey, 5, new BN(3600), testMandateHash(), 0)
           .accountsPartial({
             oracle: oracle.publicKey,
             config: configPda()[0],
@@ -842,8 +943,10 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
 
       await ensureAttestation(agentWallet.publicKey);
       await program.methods
-        .createPolicy(usdc(50), new BN(86400), agentWallet.publicKey)
+        .createPolicy(usdc(50), new BN(86400), agentWallet.publicKey, testMandate() as any)
         .accountsPartial({
+          usdcMint: usdcMint.publicKey,
+          coveredTokenAccount: getAssociatedTokenAddressSync(usdcMint.publicKey, agentWallet.publicKey),
           holder: holder.publicKey,
           config,
           vault,
@@ -935,8 +1038,10 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       const [policy] = policyPda(holder.publicKey, policyId);
       await ensureAttestation(agentWallet.publicKey);
       await program.methods
-        .createPolicy(usdc(50), new BN(86400), agentWallet.publicKey)
+        .createPolicy(usdc(50), new BN(86400), agentWallet.publicKey, testMandate() as any)
         .accountsPartial({
+          usdcMint: usdcMint.publicKey,
+          coveredTokenAccount: getAssociatedTokenAddressSync(usdcMint.publicKey, agentWallet.publicKey),
           holder: holder.publicKey,
           config,
           vault,
@@ -1065,8 +1170,10 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
 
       await ensureAttestation(agent.publicKey);
       await program.methods
-        .createPolicy(usdc(100), new BN(86_400), agent.publicKey)
+        .createPolicy(usdc(100), new BN(86_400), agent.publicKey, testMandate() as any)
         .accountsPartial({
+          usdcMint: usdcMint.publicKey,
+          coveredTokenAccount: getAssociatedTokenAddressSync(usdcMint.publicKey, agent.publicKey),
           holder: holder.publicKey,
           config,
           vault,
@@ -1398,8 +1505,10 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
 
       await ensureAttestation(agent.publicKey);
       await program.methods
-        .createPolicy(usdc(100), new BN(86_400), agent.publicKey)
+        .createPolicy(usdc(100), new BN(86_400), agent.publicKey, testMandate() as any)
         .accountsPartial({
+          usdcMint: usdcMint.publicKey,
+          coveredTokenAccount: getAssociatedTokenAddressSync(usdcMint.publicKey, agent.publicKey),
           holder: holder.publicKey,
           config,
           vault,
@@ -1808,10 +1917,21 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       const cfg: any = await (program.account as any).protocolConfig.fetch(config);
       const [policy] = policyPda(holder.publicKey, cfg.policyCounter as BN);
 
-      await ensureAttestation(agent.publicKey);
+      await ensureAttestation(agent.publicKey, 0, mandateHashOf(envelope() as any));
       await program.methods
-        .createPolicy(usdc(100), new BN(86_400), agent.publicKey)
+        .createPolicy(
+          usdc(100),
+          new BN(86_400),
+          agent.publicKey,
+          // Bought *with* the envelope these tests are about. Buying wide and
+          // narrowing afterwards is what `create_policy` now prices and
+          // `declare_agent_mandate` now refuses — the deductible has to be the
+          // one the premium was quoted for.
+          envelope() as any,
+        )
         .accountsPartial({
+          usdcMint: usdcMint.publicKey,
+          coveredTokenAccount: getAssociatedTokenAddressSync(usdcMint.publicKey, agent.publicKey),
           holder: holder.publicKey,
           config,
           vault,
@@ -1983,8 +2103,15 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
 
       await expect(declareMandate(policy, { minRetainedBalance: usdc(1_000) })).rejects.toThrow();
 
-      // A floor inside the balance stays perfectly legal.
-      await declareMandate(policy, { minRetainedBalance: usdc(50) });
+      // Lowering it is fine, and raising it no longer is.
+      //
+      // That second half changed with the premium. The envelope is now priced
+      // at purchase, so a floor raised afterwards is a deductible the vault
+      // was never paid for — the same manoeuvre as tightening the cap, in the
+      // other dimension. Widening is free because it can only reduce what the
+      // vault owes.
+      await declareMandate(policy, { minRetainedBalance: usdc(1) });
+      await expect(declareMandate(policy, { minRetainedBalance: usdc(50) })).rejects.toThrow();
     });
 
     it('pays only the overshoot beyond the declared cap', async () => {

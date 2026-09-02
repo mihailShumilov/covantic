@@ -30,6 +30,9 @@ export {
   TRIGGER_SPECIFICITY,
 } from './types/claims.js';
 
+export { agentMandateCommitment } from './mandate-commitment.js';
+export type { MandateEnvelope } from './mandate-commitment.js';
+
 export type { StakerPositionResponse } from './types/staking.js';
 
 export type {

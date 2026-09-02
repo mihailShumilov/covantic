@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { AnchorProvider, BN, Program, type Idl } from '@coral-xyz/anchor';
+import { agentMandateCommitment } from '@covantic/shared';
 import {
   Keypair,
   PublicKey,
@@ -95,6 +96,43 @@ function airdrop(ctx: ProgramTestContext, pubkey: PublicKey): void {
   });
 }
 
+
+/**
+ * A wide envelope, and the commitment the oracle signs for it.
+ *
+ * These suites are about vault arithmetic, not about deductibles, so the
+ * envelope is permissive enough that nothing here trips it. It still has to be
+ * declared at purchase and priced: `create_policy` refuses an attestation
+ * whose commitment does not match the envelope handed to it, which is what
+ * stops a policy being bought against one deductible and settled against a
+ * narrower one.
+ */
+function wideMandate() {
+  return {
+    maxSingleOutflow: usdc(1_000_000),
+    maxWindowOutflow: usdc(1_000_000),
+    windowSeconds: new BN(3_600),
+    minRetainedBalance: new BN(0),
+    allowedCounterparties: [],
+    allowedPrograms: [],
+    manifestHash: Array.from(new Uint8Array(32)),
+  };
+}
+
+function wideMandateHash(): number[] {
+  const m = wideMandate();
+  return Array.from(
+    agentMandateCommitment({
+      maxSingleOutflowRaw: BigInt(m.maxSingleOutflow.toString()),
+      maxWindowOutflowRaw: BigInt(m.maxWindowOutflow.toString()),
+      windowSeconds: BigInt(m.windowSeconds.toString()),
+      minRetainedBalanceRaw: BigInt(m.minRetainedBalance.toString()),
+      allowedCounterparties: [],
+      allowedPrograms: [],
+    }),
+  );
+}
+
 describe.skipIf(!hasIdl)('loss socialisation across stakers', () => {
   let context: ProgramTestContext;
   let banks: BanksClient;
@@ -162,6 +200,17 @@ describe.skipIf(!hasIdl)('loss socialisation across stakers', () => {
     bAta = ata(stakerB.publicKey);
 
     const fundTx = new Transaction();
+    fundTx.add(
+      // The agent's covered account. `create_policy` reads it: a retention
+      // floor may only be declared by a holder who currently satisfies it,
+      // and that is a balance.
+      createAssociatedTokenAccountInstruction(
+        admin.publicKey,
+        getAssociatedTokenAddressSync(usdcMint.publicKey, agent.publicKey),
+        agent.publicKey,
+        usdcMint.publicKey,
+      ),
+    );
     for (const [owner, addr] of [
       [holder.publicKey, holderAta],
       [stakerA.publicKey, aAta],
@@ -220,7 +269,7 @@ describe.skipIf(!hasIdl)('loss socialisation across stakers', () => {
     }
 
     await program.methods
-      .upsertAttestation(agent.publicKey, 0, new BN(3600))
+      .upsertAttestation(agent.publicKey, 0, new BN(3600), wideMandateHash(), 0)
       .accountsPartial({
         oracle: oracle.publicKey,
         config,
@@ -234,13 +283,15 @@ describe.skipIf(!hasIdl)('loss socialisation across stakers', () => {
     policyId = cfg.policyCounter as BN;
 
     await program.methods
-      .createPolicy(usdc(COVERAGE), new BN(3600), agent.publicKey)
+      .createPolicy(usdc(COVERAGE), new BN(3600), agent.publicKey, wideMandate() as any)
       .accountsPartial({
         holder: holder.publicKey,
         config,
         vault,
         policy: policyPda(holder.publicKey, policyId)[0],
         attestation: attestationPda(agent.publicKey)[0],
+        usdcMint: usdcMint.publicKey,
+        coveredTokenAccount: getAssociatedTokenAddressSync(usdcMint.publicKey, agent.publicKey),
         holderTokenAccount: holderAta,
         vaultTokenAccount: vaultAta,
         tokenProgram: TOKEN_PROGRAM_ID,
@@ -308,6 +359,8 @@ describe.skipIf(!hasIdl)('loss socialisation across stakers', () => {
         policy,
         vault,
         vaultTokenAccount: vaultAta,
+        usdcMint: usdcMint.publicKey,
+        coveredTokenAccount: getAssociatedTokenAddressSync(usdcMint.publicKey, agent.publicKey),
         holderTokenAccount: holderAta,
         tokenProgram: TOKEN_PROGRAM_ID,
       } as any)

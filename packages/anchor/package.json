@@ -10,6 +10,7 @@
   },
   "devDependencies": {
     "@coral-xyz/anchor": "^0.32.1",
+    "@covantic/shared": "workspace:*",
     "@solana/spl-token": "^0.4.8",
     "@solana/web3.js": "^1.95.0",
     "@types/node": "^22.0.0",

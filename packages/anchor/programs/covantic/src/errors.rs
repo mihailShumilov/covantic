@@ -50,6 +50,9 @@ pub enum CovanticError {
     #[msg("Lock period has not elapsed")]
     LockPeriodNotElapsed,
 
+    #[msg("Attestation was priced for a different agent mandate")]
+    AttestationMandateMismatch,
+
     #[msg("Payout exceeds coverage amount")]
     PayoutExceedsCoverage,
 

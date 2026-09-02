@@ -27,6 +27,55 @@ pub struct AgentMandate {
     pub manifest_hash: [u8; 32],
 }
 
+impl AgentMandate {
+    /// The commitment a premium is quoted against.
+    ///
+    /// The deductible has to be priced, and it can only be priced if the
+    /// oracle and the program agree on *which* envelope was quoted. This is
+    /// that agreement: the oracle hashes the envelope it priced into the
+    /// attestation, and `create_policy` recomputes the hash from the arguments
+    /// it was handed and refuses a mismatch.
+    ///
+    /// The layout is written out explicitly rather than delegating to Borsh.
+    /// The other side of this hash is TypeScript, and a serialisation format
+    /// two languages merely *happen* to agree on is one an upgrade can quietly
+    /// split — after which every purchase fails, or worse, a stale commitment
+    /// keeps matching. Explicit little-endian fields and sorted keys are
+    /// something both sides can implement from the description.
+    ///
+    /// `manifest_hash` is deliberately excluded. It commits to off-chain terms
+    /// the program cannot read and the oracle does not price; folding it in
+    /// would make the quote depend on a value neither side can check.
+    pub fn commitment(&self) -> [u8; 32] {
+        let mut bytes = Vec::with_capacity(32 + 33 * 16);
+        bytes.extend_from_slice(&self.max_single_outflow.to_le_bytes());
+        bytes.extend_from_slice(&self.max_window_outflow.to_le_bytes());
+        bytes.extend_from_slice(&self.window_seconds.to_le_bytes());
+        bytes.extend_from_slice(&self.min_retained_balance.to_le_bytes());
+
+        // Sorted, so the same declared set hashes the same however a client
+        // ordered it. An unsorted list would make the commitment depend on
+        // form-field order.
+        let mut counterparties: Vec<[u8; 32]> =
+            self.allowed_counterparties.iter().map(|k| k.to_bytes()).collect();
+        counterparties.sort_unstable();
+        bytes.push(counterparties.len() as u8);
+        for k in &counterparties {
+            bytes.extend_from_slice(k);
+        }
+
+        let mut programs: Vec<[u8; 32]> =
+            self.allowed_programs.iter().map(|k| k.to_bytes()).collect();
+        programs.sort_unstable();
+        bytes.push(programs.len() as u8);
+        for k in &programs {
+            bytes.extend_from_slice(k);
+        }
+
+        solana_sha256_hasher::hash(&bytes).to_bytes()
+    }
+}
+
 /// Declare — or refresh — the operating envelope that is legitimate for an
 /// agent.
 ///
@@ -73,18 +122,13 @@ pub struct AgentMandate {
 /// and committed to permanently. Pretending to enforce them would be worse
 /// than committing to them and leaving the check to a reader who can perform
 /// it.
-pub fn declare_agent_mandate_handler(
-    ctx: Context<DeclareAgentMandate>,
-    mandate: AgentMandate,
-) -> Result<()> {
-    let clock = Clock::get()?;
-    let now = clock.unix_timestamp;
-    let policy = &ctx.accounts.policy;
 
-    require!(
-        policy.state == InsurancePolicy::STATE_ACTIVE,
-        CovanticError::PolicyNotActive
-    );
+/// The checks every declaration must pass, wherever it is made.
+///
+/// Shared because the envelope is now declared in two places — at purchase,
+/// where its price is fixed, and on a later refresh — and a rule enforced in
+/// one of them is a rule an attacker uses the other to skip.
+pub(crate) fn validate_mandate(mandate: &AgentMandate, covered_balance: u64) -> Result<()> {
     // A zero cap would make every outflow a breach, and a zero window would
     // make the window cap meaningless. Neither is a mandate; both are almost
     // certainly a client that failed to fill the form in.
@@ -126,31 +170,33 @@ pub fn declare_agent_mandate_handler(
     // A holder may only declare a floor they currently satisfy. Declaring one
     // you already breach is not a statement about how you intend to operate.
     require!(
-        mandate.min_retained_balance <= ctx.accounts.covered_token_account.amount,
+        mandate.min_retained_balance <= covered_balance,
         CovanticError::InvalidAgentMandate
     );
 
-    let record = &mut ctx.accounts.mandate;
-    let is_new = record.policy_id == 0 && record.effective_at == 0;
+    Ok(())
+}
 
-    // A first declaration has **no predecessor**, and `prev_effective_at`
-    // stays zero to say so. Seeding it with the new envelope and `now` would
-    // be the natural-looking thing to write and would silently destroy the
-    // entire mechanism: `envelope_at` falls back to `prev_*` for a claim filed
-    // before the declaration matured, so a self-dated predecessor would be
-    // usable as proof the instant it was written — which is exactly what the
-    // delay exists to prevent. Zero fails the maturity check below instead,
-    // and the claim goes to a reviewer.
-    //
-    // On a *refresh* the predecessor is real and had matured, so it is
-    // retained: a rotation landing between the incident and the claim must not
-    // erase the only usable "before".
+/// Write a validated envelope into its account.
+///
+/// Returns nothing the caller has to interpret: maturity, the predecessor
+/// fields and the event are all part of declaring, and splitting them across
+/// call sites is how the `prev_*` seeding bug described above gets reintroduced.
+pub(crate) fn write_mandate(
+    record: &mut PolicyAgentMandate,
+    mandate: &AgentMandate,
+    policy_id: u64,
+    holder: Pubkey,
+    now: i64,
+    bump: u8,
+) -> Result<()> {
+    let is_new = record.policy_id == 0 && record.effective_at == 0;
     let prev_max_single_outflow = if is_new { 0 } else { record.max_single_outflow };
     let prev_min_retained_balance = if is_new { 0 } else { record.min_retained_balance };
     let prev_effective_at = if is_new { 0 } else { record.effective_at };
 
-    record.policy_id = policy.policy_id;
-    record.holder = policy.holder;
+    record.policy_id = policy_id;
+    record.holder = holder;
     record.max_single_outflow = mandate.max_single_outflow;
     record.max_window_outflow = mandate.max_window_outflow;
     record.window_seconds = mandate.window_seconds;
@@ -176,7 +222,7 @@ pub fn declare_agent_mandate_handler(
     record.prev_max_single_outflow = prev_max_single_outflow;
     record.prev_min_retained_balance = prev_min_retained_balance;
     record.prev_effective_at = prev_effective_at;
-    record.bump = ctx.bumps.mandate;
+    record.bump = bump;
 
     emit!(AgentMandateDeclared {
         policy_id: record.policy_id,
@@ -191,6 +237,47 @@ pub fn declare_agent_mandate_handler(
         declared_at: record.declared_at,
         effective_at: record.effective_at,
     });
+
+    Ok(())
+}
+
+pub fn declare_agent_mandate_handler(
+    ctx: Context<DeclareAgentMandate>,
+    mandate: AgentMandate,
+) -> Result<()> {
+    let clock = Clock::get()?;
+    let now = clock.unix_timestamp;
+    let policy = &ctx.accounts.policy;
+
+    require!(
+        policy.state == InsurancePolicy::STATE_ACTIVE,
+        CovanticError::PolicyNotActive
+    );
+    validate_mandate(&mandate, ctx.accounts.covered_token_account.amount)?;
+
+    // A refresh may only *widen*.
+    //
+    // The premium was quoted against the envelope declared at purchase, and a
+    // narrower one is a larger exposure the vault was never paid for. Without
+    // this, everything `create_policy` now checks could be undone a block
+    // later: buy against a generous envelope, tighten it to guarantee a
+    // breach, collect the overshoot. Widening is free because it can only ever
+    // reduce what the vault owes.
+    let record = &mut ctx.accounts.mandate;
+    let is_refresh = !(record.policy_id == 0 && record.effective_at == 0);
+    if is_refresh {
+        require!(
+            mandate.max_single_outflow >= record.max_single_outflow
+                && mandate.max_window_outflow >= record.max_window_outflow
+                && mandate.min_retained_balance <= record.min_retained_balance,
+            CovanticError::InvalidAgentMandate
+        );
+    }
+
+    let policy_id = ctx.accounts.policy.policy_id;
+    let holder = ctx.accounts.policy.holder;
+    let bump = ctx.bumps.mandate;
+    write_mandate(&mut ctx.accounts.mandate, &mandate, policy_id, holder, now, bump)?;
 
     Ok(())
 }
@@ -240,4 +327,76 @@ pub struct DeclareAgentMandate<'info> {
     pub usdc_mint: Box<Account<'info, Mint>>,
 
     pub system_program: Program<'info, System>,
+}
+
+#[cfg(test)]
+mod commitment_tests {
+    use super::*;
+
+    fn key(byte: u8) -> Pubkey {
+        Pubkey::new_from_array([byte; 32])
+    }
+
+    fn envelope(counterparties: Vec<Pubkey>, programs: Vec<Pubkey>) -> AgentMandate {
+        AgentMandate {
+            max_single_outflow: 100_000_000,
+            max_window_outflow: 150_000_000,
+            window_seconds: 3_600,
+            min_retained_balance: 4_600_000_000,
+            allowed_counterparties: counterparties,
+            allowed_programs: programs,
+            manifest_hash: [7u8; 32],
+        }
+    }
+
+    /// The vector the TypeScript half is tested against.
+    ///
+    /// Both sides implement this layout from its description rather than from
+    /// each other, so something has to hold them together. If this constant
+    /// changes, `mandate-commitment.test.ts` fails too — and if only one side
+    /// changes, only one fails, which is the signal worth having.
+    #[test]
+    fn commits_to_a_known_value() {
+        let hash = envelope(vec![key(1)], vec![key(2)]).commitment();
+        assert_eq!(
+            hex(&hash),
+            "121da6db6c63adfbd79263f232f1f109da30043c1cad5dd7708c6af28b4ae515"
+        );
+    }
+
+    /// Order must not matter: a form that collects two addresses in the other
+    /// order would otherwise quote a different premium for the same envelope.
+    #[test]
+    fn is_independent_of_the_order_keys_arrive_in() {
+        let a = envelope(vec![key(1), key(9)], vec![key(2), key(8)]).commitment();
+        let b = envelope(vec![key(9), key(1)], vec![key(8), key(2)]).commitment();
+        assert_eq!(a, b);
+    }
+
+    /// The whole point: a different deductible is a different commitment, so
+    /// an attestation priced for one cannot be spent on the other.
+    #[test]
+    fn a_narrower_cap_is_a_different_commitment() {
+        let quoted = envelope(vec![], vec![]);
+        let mut narrowed = envelope(vec![], vec![]);
+        narrowed.max_single_outflow = 1_000_000;
+
+        assert_ne!(quoted.commitment(), narrowed.commitment());
+    }
+
+    /// `manifest_hash` is excluded deliberately — it commits to terms the
+    /// program cannot read and the oracle does not price.
+    #[test]
+    fn ignores_the_off_chain_manifest() {
+        let mut a = envelope(vec![], vec![]);
+        let mut b = envelope(vec![], vec![]);
+        a.manifest_hash = [1u8; 32];
+        b.manifest_hash = [2u8; 32];
+
+        assert_eq!(a.commitment(), b.commitment());
+    }
+
+    fn hex(bytes: &[u8; 32]) -> String {
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
 }
