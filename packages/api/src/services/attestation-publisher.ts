@@ -27,10 +27,21 @@ export interface AttestationInfo {
  * in the message and the caller has not read the account — this is the first
  * time anything touched it.
  */
-function isUndersizedAccount(err: unknown): boolean {
+export function isUndersizedAccount(err: unknown): boolean {
   const text = err instanceof Error ? `${err.message}` : String(err);
-  return /AccountDidNotDeserialize|failed to deserialize|Account discriminator did not match|range end index/i.test(
-    text,
+  return (
+    // The program's own answer, when the account reaches it.
+    /AccountDidNotDeserialize|failed to deserialize|Account discriminator did not match|range end index/i.test(
+      text,
+    ) ||
+    // The client decoder's, when it does not. This is the one that actually
+    // fires: Anchor reads the account before sending anything, and a struct
+    // six bytes longer than the buffer throws
+    // `The value of "offset" is out of range. It must be >= 0 and <= 83.
+    // Received 89` from Node's DataView — a message with no Solana in it at
+    // all. Matching only the Rust wording meant the guard never ran, and the
+    // read threw before the send it was guarding could be attempted.
+    /offset["']? is out of range|out of range.*Received \d+/i.test(text)
   );
 }
 
@@ -104,7 +115,25 @@ export class AttestationPublisher {
     const pda = this.deriveAttestationPda(agent);
     const nowSec = Math.floor(Date.now() / 1000);
 
-    const existing = await this.fetchExisting(ctx, pda);
+    const existingOrStale = await this.fetchExisting(ctx, pda);
+    // Grow it before anything else. The write below would fail on the same
+    // account, and the reuse check underneath cannot compare fields it could
+    // not read.
+    if (existingOrStale === 'unreadable') {
+      logger.warn(
+        { agent: agentAddress, pda: pda.toBase58() },
+        'attestation predates the current layout — growing it before republishing',
+      );
+      await (ctx.program.methods as any)
+        .migrateAttestation()
+        .accounts({
+          payer: ctx.oracleKeypair!.publicKey,
+          agent,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+    }
+    const existing = existingOrStale === 'unreadable' ? null : existingOrStale;
     // Reused only when it prices *this* envelope.
     //
     // The tier used to be the whole identity of an attestation, and it no
@@ -190,7 +219,7 @@ export class AttestationPublisher {
   private async fetchExisting(
     ctx: CovanticProgram,
     pda: PublicKey,
-  ): Promise<OnChainAttestation | null> {
+  ): Promise<OnChainAttestation | null | 'unreadable'> {
     // On the provider's connection rather than the read pool: the answer
     // decides whether the next instruction initialises this PDA or updates it,
     // and it is usually read moments after this same process wrote it. An
@@ -213,6 +242,11 @@ export class AttestationPublisher {
       if (err instanceof Error && /Account does not exist/i.test(err.message)) {
         return null;
       }
+      // An account written under an older layout is not a failure to read the
+      // chain, it is a migration waiting to happen — and it must not escape
+      // from here, because the caller's own guard sits around the *write*.
+      // Reporting it as unreadable lets that guard run.
+      if (isUndersizedAccount(err)) return 'unreadable';
       throw err;
     }
   }
