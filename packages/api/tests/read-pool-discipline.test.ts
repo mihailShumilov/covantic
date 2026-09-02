@@ -88,7 +88,16 @@ function offPoolAnchorReads(): string[] {
  */
 const DOCUMENTED_EXCEPTIONS: Record<string, number> = {
   'services/attestation-publisher.ts': 1, // AttestationPublisher.fetchExisting
-  'workers/claim-keeper.ts': 2, // isPolicySettledOnChain + the ClaimPending rescue
+  // isPolicySettledOnChain, the ClaimPending rescue, and claimSubmittedAtOnChain.
+  //
+  // The third joined the list deliberately. The program starts every lock from
+  // `claim_submitted_at`, which it writes when the submit lands; scheduling the
+  // payout off a locally-computed expiry fired early by the submit latency on
+  // every claim. Reading that field back is the same question the other two
+  // ask — did our own write land, and when — so it belongs on the connection
+  // we wrote from, for the same reason: a lagging endpoint would report no
+  // claim at all and the timer would fall back to the figure being corrected.
+  'workers/claim-keeper.ts': 3,
 };
 
 describe('INV-POOL-01 — Anchor reads off the endpoint pool are enumerated', () => {

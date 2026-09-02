@@ -103,8 +103,13 @@ const JOB_OPTS = {
  * (`LOCK_AGENT_ERROR`, six hours), so a correct claim survives any lock a
  * misconfiguration can put in front of it, and is bounded so a genuinely
  * stuck claim still reaches a human rather than requeueing forever.
+ *
+ * It starts at five seconds because the *common* case is not a
+ * misconfiguration at all — it is a near miss of a second or two, and paying a
+ * minute for that is disproportionate. The steps then grow quickly, so a
+ * genuinely wrong wait still costs only a handful of attempts.
  */
-export const LOCK_DEFERRAL_MS = [60_000, 300_000, 1_800_000, 7_200_000, 21_600_000] as const;
+export const LOCK_DEFERRAL_MS = [5_000, 30_000, 300_000, 1_800_000, 7_200_000, 21_600_000] as const;
 
 /**
  * Is this the chain telling us the lock has not elapsed?
@@ -846,13 +851,44 @@ async function processClaim(claimId: string, deps: ProcessDeps): Promise<void> {
   const approved = await loadClaim(claim.id, db);
   if (approved) await broadcastClaim(approved, redis);
 
-  // Schedule payout relative to the persisted lockExpiresAt so a restart
-  // doesn't reset the timer.
-  const delayMs = Math.max(0, lockExpiresAt.getTime() - Date.now());
+  // Re-anchor the timer to the chain's own clock.
+  //
+  // `lockExpiresAt` above was computed before the claim was submitted, and the
+  // program starts its lock from `claim_submitted_at` — which
+  // `oracle_submit_claim` sets when the transaction lands, several seconds
+  // later. Scheduling off the earlier figure therefore fires the payout
+  // *systematically early*, by however long the submit took, every single
+  // time.
+  //
+  // The revert that follows is handled — the keeper defers rather than
+  // recording a failure — but the cheapest deferral step is still far longer
+  // than the miss. One observed run spent 64 seconds waiting out a lock with
+  // two seconds left on it, which is most of a demonstration and, on a
+  // six-hour lock in production, a needless hour.
+  //
+  // Read from the connection we submitted through, not the pool: an endpoint a
+  // few slots behind would not see our own write yet.
+  const settledAt = await claimSubmittedAtOnChain(programCtx, claim).catch(() => null);
+  const anchored =
+    settledAt !== null ? new Date((settledAt + result.lockPeriod) * 1000) : lockExpiresAt;
+  if (settledAt !== null && anchored.getTime() !== lockExpiresAt.getTime()) {
+    await db
+      .update(claims)
+      .set({ lockExpiresAt: anchored, updatedAt: new Date() })
+      .where(eq(claims.id, claim.id));
+  }
+
+  const delayMs = Math.max(0, anchored.getTime() - Date.now());
   await payoutQueue.add('payout', { claimId: claim.id }, { delay: delayMs });
 
   logger.info(
-    { claimId: claim.id, submitSig, lockPeriod: result.lockPeriod, delayMs },
+    {
+      claimId: claim.id,
+      submitSig,
+      lockPeriod: result.lockPeriod,
+      delayMs,
+      anchoredToChain: settledAt !== null,
+    },
     'claim-keeper: on-chain claim submitted',
   );
 }
@@ -1123,6 +1159,30 @@ async function executePayout(
  * back is a reliable answer to "did the money move?" when the client's own
  * report is untrustworthy.
  */
+/**
+ * The instant the program started this claim's lock.
+ *
+ * `oracle_submit_claim` writes `claim_submitted_at` from the chain's own
+ * clock, and every lock is measured from it. Anything computed locally before
+ * the submit lands is earlier than that by the submit latency.
+ *
+ * Deliberately NOT on the read pool, for the reason given on
+ * {@link isPolicySettledOnChain}: this reads back a write we just made.
+ */
+async function claimSubmittedAtOnChain(
+  ctx: CovanticProgram,
+  claim: ClaimRow,
+): Promise<number | null> {
+  const { policy } = derivePdas(
+    ctx.programId,
+    new PublicKey(claim.holderAddress),
+    BigInt(claim.policyId),
+  );
+  const onChain: any = await (ctx.program.account as any).insurancePolicy.fetchNullable(policy);
+  const at = onChain === null ? 0 : Number(onChain.claimSubmittedAt ?? 0);
+  return at > 0 ? at : null;
+}
+
 async function isPolicySettledOnChain(ctx: CovanticProgram, claim: ClaimRow): Promise<boolean> {
   const { policy } = derivePdas(
     ctx.programId,

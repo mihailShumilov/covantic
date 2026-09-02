@@ -139,12 +139,15 @@ Filter to single package: `pnpm --filter api dev`, `pnpm --filter web dev`
   — `program.account.X.all()` is a `getProgramAccounts` on one endpoint's
   quota, every 60 s — with **exactly three exceptions**, each carrying a
   comment saying so and enforced by `tests/read-pool-discipline.test.ts`: a
-  read that asks whether *our own* write landed (`isPolicySettledOnChain`, the
-  `ClaimPending` rescue in the keeper, `AttestationPublisher.fetchExisting`)
-  stays on the connection we wrote from, because an endpoint a few slots behind
-  would answer "no" about a transaction that succeeded. That list was once
-  written as three and was actually nine; the test exists so it cannot drift
-  again.
+  read that asks whether *our own* write landed — or when — stays on the
+  connection we wrote from, because an endpoint a few slots behind would answer
+  "no" about a transaction that succeeded. The four are
+  `isPolicySettledOnChain`, the `ClaimPending` rescue in the keeper,
+  `claimSubmittedAtOnChain` (the payout timer is anchored to the chain's
+  `claim_submitted_at`, not to a locally computed expiry, which fired early by
+  the submit latency on every claim), and
+  `AttestationPublisher.fetchExisting`. That list was once written as three and
+  was actually nine; the test exists so it cannot drift again.
 - **Every endpoint's cluster is verified at boot** (`verifyReaderCluster`). A
   wrong-chain endpoint answers `getAccountInfo` with an authoritative "does not
   exist", which this codebase is contractually required to read as *absence* —
