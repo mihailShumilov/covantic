@@ -52,6 +52,25 @@ import { rpcEndpointName } from '../src/config/rpc-pool.js';
 
 const { BN } = anchorPkg;
 
+
+/**
+ * The envelope the fleet's policies are bought against.
+ *
+ * Wide enough that ordinary fleet activity never touches it — these agents
+ * exist to produce real on-chain traffic, not to breach anything — and
+ * declared at purchase because there is no longer anywhere else to declare it.
+ * The premium is quoted against this, so a fleet bought with a tight envelope
+ * would be paying for a deductible it has no use for.
+ */
+export const FLEET_ENVELOPE = {
+  maxSingleOutflowRaw: 1_000_000_000_000,
+  maxWindowOutflowRaw: 1_000_000_000_000,
+  windowSeconds: 3_600,
+  minRetainedBalanceRaw: 0,
+  allowedCounterparties: [] as string[],
+  allowedPrograms: [] as string[],
+};
+
 const REPO_ROOT = resolve(import.meta.dirname, '../../..');
 const AGENTS_DIR = resolve(REPO_ROOT, 'keys/agents');
 const HOLDER_KEYPAIR_PATH = resolve(REPO_ROOT, 'keys/fleet-holder.json');
@@ -205,6 +224,9 @@ async function fetchRiskAndQuote(
       agentAddress,
       coverageAmount: coverageRaw,
       durationSeconds,
+      // The quote prices this envelope and the oracle commits to its hash;
+      // `create_policy` refuses a purchase that declares a different one.
+      mandate: FLEET_ENVELOPE,
     }),
   });
   if (!quoteRes.ok) {
@@ -265,13 +287,27 @@ async function buyPolicy(
   const vaultAta = getAssociatedTokenAddressSync(usdcMint, vaultPda, true);
 
   const signature = await program.methods
-    .createPolicy(new BN(coverageRaw), new BN(durationSeconds), agentPubkey)
+    .createPolicy(new BN(coverageRaw), new BN(durationSeconds), agentPubkey, {
+      maxSingleOutflow: new BN(FLEET_ENVELOPE.maxSingleOutflowRaw),
+      maxWindowOutflow: new BN(FLEET_ENVELOPE.maxWindowOutflowRaw),
+      windowSeconds: new BN(FLEET_ENVELOPE.windowSeconds),
+      minRetainedBalance: new BN(FLEET_ENVELOPE.minRetainedBalanceRaw),
+      allowedCounterparties: [],
+      allowedPrograms: [],
+      manifestHash: Array.from(new Uint8Array(32)),
+    })
     .accounts({
       holder: holder.publicKey,
       config: configPda,
       vault: vaultPda,
       attestation: attestationPda,
       policy: policyPda,
+      mandate: PublicKey.findProgramAddressSync(
+        [Buffer.from(PDA_SEEDS.AGENT_MANDATE), policyPda.toBuffer()],
+        program.programId,
+      )[0],
+      coveredTokenAccount: getAssociatedTokenAddressSync(usdcMint, agentPubkey),
+      usdcMint,
       holderTokenAccount: holderAta,
       vaultTokenAccount: vaultAta,
       tokenProgram: TOKEN_PROGRAM_ID,
