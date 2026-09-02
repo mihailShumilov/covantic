@@ -54,6 +54,11 @@ const MIN_RETAINED = '4600';
 const COUNTERPARTY = '8SUV2eNzyrWfyZod1StCSuyBBTk5jruFydaMe8yRyLVC';
 const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 
+/** What the demo movement costs the agent. An agent holding less than this
+ *  cannot make it, so it cannot breach the envelope either — and cover bought
+ *  for it produces a claim that finds no movement to judge. */
+const BREACH_AMOUNT = 600;
+
 /** Movements that give the agent a history. Below every cap, so none of them
  *  is a breach; `MIN_OUTFLOW_OBSERVATIONS` is 5, and without a baseline the
  *  verdict carries a standing -0.03. */
@@ -121,7 +126,66 @@ function appendLedger(entry: Armed): void {
   writeFileSync(LEDGER, `${JSON.stringify([...readLedger(), entry], null, 2)}\n`);
 }
 
+const USDC_MINT = process.env.USDC_MINT ?? '';
+const RPC = process.env.SOLANA_RPC_URL ?? 'https://api.devnet.solana.com';
+
 type State = 'ready' | 'maturing' | 'spent';
+
+interface FleetAgent {
+  name: string;
+  pubkey: string;
+}
+
+function fleetAgents(): FleetAgent[] {
+  const manifest = JSON.parse(
+    readFileSync(resolve(REPO_ROOT, 'keys/fleet.json'), 'utf8'),
+  ) as { agents?: FleetAgent[] };
+  return manifest.agents ?? [];
+}
+
+/** Covered-mint balance, in whole USDC. Zero when the agent has no account. */
+async function usdcBalance(owner: string): Promise<number> {
+  if (!USDC_MINT) return 0;
+  const res = await fetch(RPC, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'getTokenAccountsByOwner',
+      params: [owner, { mint: USDC_MINT }, { encoding: 'jsonParsed' }],
+    }),
+  });
+  const body = (await res.json()) as {
+    result?: { value?: Array<{ account: { data: { parsed: { info: { tokenAmount: { uiAmount: number | null } } } } } }> };
+  };
+  return body.result?.value?.[0]?.account.data.parsed.info.tokenAmount.uiAmount ?? 0;
+}
+
+/**
+ * Agents a policy can be bought for right now, in the UI.
+ *
+ * "Right now" means no *active* policy already names them. The exclusion is
+ * not tidiness: the sweep resolves an agent to its policy with
+ * `state = Active … limit 1`, so a second live policy on the same agent makes
+ * which one settles a matter of row order.
+ *
+ * Balance matters too. An agent with nothing to lose cannot breach an
+ * envelope, and a demo that buys cover for an empty wallet ends in a claim
+ * that finds no movement.
+ */
+async function insurable(): Promise<Array<FleetAgent & { usdc: number }>> {
+  const res = await fetch(`${API}/api/policies`);
+  const body = (await res.json()) as {
+    policies?: Array<{ agentAddress: string; state: number }>;
+  };
+  const covered = new Set(
+    (body.policies ?? []).filter((p) => p.state === 0).map((p) => p.agentAddress),
+  );
+
+  const free = fleetAgents().filter((a) => !covered.has(a.pubkey));
+  return Promise.all(free.map(async (a) => ({ ...a, usdc: await usdcBalance(a.pubkey) })));
+}
 
 /** Live state of every armed policy. `spent` covers both outcomes that end a
  *  policy: a demo that settled it, and a week going by. */
@@ -201,7 +265,36 @@ async function status(): Promise<void> {
     for (const a of maturing) say(`  #${a.policyId} usable from ${a.readyAt}`);
   }
   if (ready.length === 0 && maturing.length === 0) {
-    say('Run `pnpm demo:arm` — a declaration needs an hour before it can be proven against.');
+    say('Run `pnpm demo:arm` — a declaration must mature before it can be proven against.');
+  }
+
+  const free = await insurable();
+  // The threshold is what the demo actually spends, not "more than nothing".
+  // Three agents from an early fleet hold fractions of a USDC; listing them as
+  // insurable invites buying cover for an agent that cannot perform, and the
+  // failure would only show up on stage.
+  const funded = free.filter((a) => a.usdc >= BREACH_AMOUNT).sort((a, b) => b.usdc - a.usdc);
+  const short = free.filter((a) => a.usdc < BREACH_AMOUNT);
+
+  say('\nInsurable from the UI — no active policy names these:\n');
+  if (funded.length === 0) {
+    say('  (none — every agent with enough USDC already holds a policy)');
+    say('  Prepare one: `pnpm agent:create --name <name>` then `pnpm agent:fund --name <name>`.');
+  }
+  for (const a of funded) {
+    say(`  ${a.pubkey}   ${a.name}   ${a.usdc.toLocaleString()} USDC`);
+  }
+  if (short.length > 0) {
+    const names = short.map((a) => `${a.name} (${a.usdc.toLocaleString()})`).join(', ');
+    say(`\n  Below ${BREACH_AMOUNT} USDC, so they cannot make the movement: ${names}.`);
+    say('  `pnpm agent:fund --name <name>` tops one up.');
+  }
+  if (funded.length > 0) {
+    say('\nAfter buying cover for one of these, declare its envelope:');
+    say('  pnpm --filter api exec tsx scripts/declare-agent-mandate.ts \\');
+    say('    --policy <id> --max-single 100 --max-window 150 --window 3600 \\');
+    say(`    --min-retained 4600 --counterparty ${COUNTERPARTY} \\`);
+    say(`    --program ${TOKEN_PROGRAM} --keypair keys/fleet-holder.json`);
   }
 }
 
