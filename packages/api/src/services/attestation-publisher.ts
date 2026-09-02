@@ -65,7 +65,19 @@ export class AttestationPublisher {
    * Callers must have already rejected EXTREME — this method assumes
    * `tier` is one of LOW/MEDIUM/HIGH.
    */
-  async ensureFresh(agentAddress: string, tier: RiskTier): Promise<AttestationInfo> {
+  /**
+   * @param mandateHash the envelope this quote prices, as
+   * `agentMandateCommitment` computes it. `create_policy` recomputes it from
+   * the arguments it is handed and refuses a mismatch, so an attestation
+   * published for a generous envelope cannot be spent on a narrow one.
+   * @param envelopeSurchargeBps what that envelope costs on top of the tier.
+   */
+  async ensureFresh(
+    agentAddress: string,
+    tier: RiskTier,
+    mandateHash: Uint8Array,
+    envelopeSurchargeBps: number,
+  ): Promise<AttestationInfo> {
     if (tier === RiskTier.EXTREME) {
       throw new Error('Refusing to publish attestation for EXTREME tier');
     }
@@ -90,7 +102,13 @@ export class AttestationPublisher {
 
     const validFor = DEFAULT_VALIDITY_SECONDS;
     const signature = await (ctx.program.methods as any)
-      .upsertAttestation(agent, tier, new BN(validFor))
+      .upsertAttestation(
+        agent,
+        tier,
+        new BN(validFor),
+        Array.from(mandateHash),
+        envelopeSurchargeBps,
+      )
       .accounts({
         oracle: ctx.oracleKeypair!.publicKey,
         // `config` + `attestation` are resolved automatically from IDL seeds;
