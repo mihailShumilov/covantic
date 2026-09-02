@@ -27,6 +27,7 @@ import {
 const usdc = (n: number) => n * 1_000_000;
 
 const base = (over: Partial<EnvelopePricingInput> = {}): EnvelopePricingInput => ({
+  coverageAmountRaw: usdc(2_000),
   maxSingleOutflowRaw: usdc(100),
   minRetainedBalanceRaw: 0,
   coveredBalanceRaw: usdc(5_000),
@@ -36,15 +37,34 @@ const base = (over: Partial<EnvelopePricingInput> = {}): EnvelopePricingInput =>
 });
 
 describe('INV-PRICE-01 — the envelope is priced on headroom', () => {
-  it('charges nothing when the cap sits well above what the agent does', () => {
-    // 100 against a 20 USDC habit: the agent has to behave five times
-    // abnormally before the vault owes anything, and a breach there is a
-    // genuine anomaly — which is the risk the product exists to carry.
-    const priced = priceEnvelope(base());
+  it('charges nothing when the cap is out of the agent’s reach entirely', () => {
+    // Habits do not enter into it: an agent holding 5,000 cannot move 10,000,
+    // so a 10,000 cap carries no exposure at all. This is the case that used
+    // to cost a full ceiling surcharge for want of a history.
+    const priced = priceEnvelope(base({ maxSingleOutflowRaw: usdc(10_000) }));
 
-    expect(priced.kind).toBe('priced');
     expect(priced.kind === 'priced' && priced.surchargeBps).toBe(0);
+  });
+
+  it('charges the whole coverage when the whole coverage can be taken at will', () => {
+    // The manoeuvre this exists to make pointless: an agent holding 5,000 with
+    // a 100 cap can be walked over the line for 4,900, bounded by the 2,000
+    // coverage — the entire policy, collectable on demand. Paying the entire
+    // coverage as premium is what removes the profit.
+    const priced = priceEnvelope(base({ p95OutflowRaw: usdc(20), transferCount: 50 }));
+
+    expect(priced.kind === 'priced' && priced.surchargeBps).toBe(MAX_ENVELOPE_SURCHARGE_BPS);
+  });
+
+  it('takes the worse of habit and opportunity', () => {
+    // A comfortable headroom does not excuse an envelope that can be walked
+    // over deliberately. Here the agent's habits are five times inside the
+    // cap — free, on the history model alone — and the balance still lets the
+    // holder take the whole policy.
+    const priced = priceEnvelope(base({ p95OutflowRaw: usdc(20), transferCount: 50 }));
+
     expect(priced.kind === 'priced' && priced.headroom).toBe(FREE_HEADROOM);
+    expect(priced.kind === 'priced' && priced.surchargeBps).toBeGreaterThan(0);
   });
 
   it('refuses to attest a cap the agent already crosses in ordinary business', () => {
@@ -60,8 +80,14 @@ describe('INV-PRICE-01 — the envelope is priced on headroom', () => {
   });
 
   it('charges more as the cap tightens toward what the agent does', () => {
-    const loose = priceEnvelope(base({ p95OutflowRaw: usdc(25) }));
-    const tight = priceEnvelope(base({ p95OutflowRaw: usdc(60) }));
+    // The cap sits just under the balance, so almost nothing is extractable
+    // on demand and the habit half of the model is what shows. With a cap far
+    // below the balance both cases would sit at the ceiling on opportunity
+    // alone and the gradient would be invisible — which is correct pricing and
+    // a useless test.
+    const nearBalance = { maxSingleOutflowRaw: usdc(4_900), transferCount: 50 };
+    const loose = priceEnvelope(base({ ...nearBalance, p95OutflowRaw: usdc(1_225) }));
+    const tight = priceEnvelope(base({ ...nearBalance, p95OutflowRaw: usdc(2_450) }));
 
     expect(loose.kind === 'priced' && tight.kind === 'priced').toBe(true);
     if (loose.kind !== 'priced' || tight.kind !== 'priced') return;
@@ -90,14 +116,25 @@ describe('INV-PRICE-01 — the envelope is priced on headroom', () => {
     expect(looseCap.kind === 'priced' && looseCap.headroom).toBe(2.5);
   });
 
-  it('charges the ceiling when there is no history to measure against', () => {
-    // Not a refusal. A new agent is not a bad risk, it is an unmeasured one,
-    // and refusing would make the product unbuyable on day one. The ceiling
-    // leaves the holder the option of building a record and quoting again.
+  it('prices a brand-new agent on its balance rather than charging the ceiling', () => {
+    // What the holder can take is measurable without any history, and an
+    // envelope the agent cannot cross carries no exposure however new it is.
+    // Charging the ceiling for want of a record priced an unmeasured agent as
+    // though it were a hostile one — a fleet agent's first week cost forty
+    // times the tier premium for cover it could not have claimed on.
+    const fresh = priceEnvelope(
+      base({ p95OutflowRaw: null, transferCount: 0, maxSingleOutflowRaw: usdc(10_000) }),
+    );
+
+    expect(fresh.kind === 'priced' && fresh.surchargeBps).toBe(0);
+    expect(fresh.kind === 'priced' && fresh.basis).toBe('balance');
+  });
+
+  it('still charges a brand-new agent whose envelope can be walked over', () => {
+    // The other half of the same rule: no history is not a discount either.
     const fresh = priceEnvelope(base({ p95OutflowRaw: null, transferCount: 0 }));
 
     expect(fresh.kind === 'priced' && fresh.surchargeBps).toBe(MAX_ENVELOPE_SURCHARGE_BPS);
-    expect(fresh.kind === 'priced' && fresh.basis).toBe('no_history');
   });
 
   it('will not read a thin sample as a habit', () => {
@@ -106,7 +143,7 @@ describe('INV-PRICE-01 — the envelope is priced on headroom', () => {
     // risk on the book.
     const thin = priceEnvelope(base({ transferCount: 2 }));
 
-    expect(thin.kind === 'priced' && thin.basis).toBe('no_history');
+    expect(thin.kind === 'priced' && thin.basis).toBe('balance');
   });
 
   it('does not read a zero percentile as infinite headroom', () => {
@@ -114,7 +151,7 @@ describe('INV-PRICE-01 — the envelope is priced on headroom', () => {
     // as the safest envelope possible for an agent that has moved nothing.
     const zero = priceEnvelope(base({ p95OutflowRaw: 0, transferCount: 50 }));
 
-    expect(zero.kind === 'priced' && zero.basis).toBe('no_history');
+    expect(zero.kind === 'priced' && zero.basis).toBe('balance');
   });
 
   it('never exceeds the ceiling the program will accept', () => {

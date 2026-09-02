@@ -98,6 +98,7 @@ const policyQuerySchema = z.object({
 async function priceEnvelopeForAgent(
   app: FastifyInstance,
   agentAddress: string,
+  coverageAmountRaw: number,
   mandate: {
     maxSingleOutflowRaw: number;
     minRetainedBalanceRaw: number;
@@ -107,7 +108,12 @@ async function priceEnvelopeForAgent(
   if (!mint) {
     // No covered mint configured means nothing to price against, and the
     // ceiling is the honest answer rather than a guess.
-    return { kind: 'priced', surchargeBps: MAX_ENVELOPE_SURCHARGE_BPS, headroom: null, basis: 'no_history' };
+    return {
+      kind: 'priced',
+      surchargeBps: MAX_ENVELOPE_SURCHARGE_BPS,
+      headroom: null,
+      basis: 'balance',
+    };
   }
 
   const baseline = await loadOutflowBaseline(
@@ -128,6 +134,7 @@ async function priceEnvelopeForAgent(
   }
 
   return priceEnvelope({
+    coverageAmountRaw,
     maxSingleOutflowRaw: mandate.maxSingleOutflowRaw,
     minRetainedBalanceRaw: mandate.minRetainedBalanceRaw,
     coveredBalanceRaw,
@@ -545,7 +552,12 @@ export async function policyRoutes(app: FastifyInstance) {
     // prices it correctly. Saying so at the quote leaves the holder somewhere
     // to go — widen the envelope — where saying it at purchase would be a
     // failed transaction with no explanation.
-    const pricing = await priceEnvelopeForAgent(app, body.agentAddress, body.mandate);
+    const pricing = await priceEnvelopeForAgent(
+      app,
+      body.agentAddress,
+      body.coverageAmount,
+      body.mandate,
+    );
     if (pricing.kind === 'refused') {
       return reply.status(400).send({
         error:

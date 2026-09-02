@@ -28,12 +28,36 @@ import { MAX_ENVELOPE_SURCHARGE_BPS } from '@covantic/shared';
  * record is off-chain data the program cannot see. The oracle prices it and
  * signs for the number, and `create_policy` applies it.
  *
+ * ## Two questions, and the answer is the worse of them
+ *
+ * Headroom asks whether a breach is *likely* — will this agent, behaving as it
+ * has been, cross the line by accident. That needs a history, and a new agent
+ * has none.
+ *
+ * The second question needs no history at all: how much can the holder extract
+ * *on purpose*, right now, if they choose to? That is arithmetic on the
+ * balance. An agent holding 5,000 with a 100 cap can be walked over the line
+ * for 4,900, bounded by the coverage — the whole policy, collectable at will.
+ * The same agent with a 1,000,000 cap cannot cross it at all, whatever its
+ * habits, because it does not hold that much.
+ *
+ * Pricing the extractable amount as a fraction of coverage is what makes the
+ * manoeuvre pointless: extract the whole coverage and you have paid the whole
+ * coverage for the privilege. It also prices a brand-new agent honestly, where
+ * charging the ceiling for want of a history charged an unmeasured agent as
+ * though it were a hostile one.
+ *
+ * The surcharge is the **larger** of the two. A holder pays for whichever is
+ * worse: the chance their agent breaches by accident, or the amount they could
+ * take deliberately.
+ *
  * ## The shape of the curve, and its honesty
  *
- * Linear between the two thresholds. The real probability of breach is not
- * linear in headroom, and pretending otherwise would be false precision — this
- * is a bound chosen to make the extraction unprofitable, not an estimate of
- * anything. The numbers below are the tunable part; the structure is not.
+ * The headroom half is linear between its two thresholds. The real probability
+ * of breach is not linear in headroom, and pretending otherwise would be false
+ * precision — that half is a bound chosen to make the manoeuvre unprofitable,
+ * not an estimate of anything. The extractable half is not a model at all; it
+ * is a measurement.
  */
 
 /** Headroom at or above which the envelope costs nothing extra. */
@@ -51,11 +75,14 @@ export const MIN_HEADROOM = 1;
 
 export type EnvelopePricing =
   | { kind: 'priced'; surchargeBps: number; headroom: number; basis: 'history' }
-  /** No history to measure against; charged the ceiling. */
-  | { kind: 'priced'; surchargeBps: number; headroom: null; basis: 'no_history' }
+  /** No history yet; priced on what the balance lets the holder extract. */
+  | { kind: 'priced'; surchargeBps: number; headroom: null; basis: 'balance' }
   | { kind: 'refused'; reason: string; headroom: number };
 
 export interface EnvelopePricingInput {
+  /** What the policy would pay at most, raw. The extractable amount is
+   *  bounded by it, so it is what the surcharge is a fraction of. */
+  coverageAmountRaw: number;
   /** The declared single-outflow cap, raw base units. */
   maxSingleOutflowRaw: number;
   /** The declared retention floor, raw. Zero means undeclared. */
@@ -75,6 +102,35 @@ export interface EnvelopePricingInput {
 /** Below this the distribution says nothing, whatever it computes. */
 export const MIN_OBSERVATIONS_TO_PRICE = 5;
 
+/**
+ * What the holder can take at will, given what the agent holds today.
+ *
+ * The cap is crossed by moving more than it, and the most that can be moved is
+ * the balance — so the overshoot available is `balance - cap`, or nothing when
+ * the cap is out of reach. The floor is crossed by moving enough to fall under
+ * it, and moving everything makes the shortfall the whole floor.
+ *
+ * Whichever is larger, bounded by the coverage: a single movement triggers one
+ * of them, and the policy cannot pay more than it covers.
+ *
+ * That last bound is arithmetically redundant with the clamp in
+ * `extractableSurcharge` — a mutation run proved it, by removing it and
+ * failing nothing. It stays because this function is named for a quantity, and
+ * the quantity is false without it: what a holder can *take* is capped by the
+ * policy whether or not the caller divides by it afterwards.
+ */
+function extractableRaw(input: EnvelopePricingInput): number {
+  const viaCap = Math.max(0, input.coveredBalanceRaw - input.maxSingleOutflowRaw);
+  const viaFloor = Math.min(input.minRetainedBalanceRaw, input.coveredBalanceRaw);
+  return Math.min(input.coverageAmountRaw, Math.max(viaCap, viaFloor));
+}
+
+function extractableSurcharge(input: EnvelopePricingInput): number {
+  if (input.coverageAmountRaw <= 0) return 0;
+  const fraction = extractableRaw(input) / input.coverageAmountRaw;
+  return Math.round(Math.min(1, Math.max(0, fraction)) * MAX_ENVELOPE_SURCHARGE_BPS);
+}
+
 function surchargeFor(headroom: number): number {
   if (headroom >= FREE_HEADROOM) return 0;
   const tightness = (FREE_HEADROOM - headroom) / (FREE_HEADROOM - MIN_HEADROOM);
@@ -84,12 +140,13 @@ function surchargeFor(headroom: number): number {
 export function priceEnvelope(input: EnvelopePricingInput): EnvelopePricing {
   const { p95OutflowRaw, transferCount } = input;
 
+  const extractable = extractableSurcharge(input);
+
   if (p95OutflowRaw === null || p95OutflowRaw <= 0 || transferCount < MIN_OBSERVATIONS_TO_PRICE) {
-    // The ceiling, not a refusal. A new agent is not a bad risk, it is an
-    // unmeasured one, and refusing would make the product unbuyable on day
-    // one. Charging the most it could cost leaves the holder the option of
-    // building a record and quoting again.
-    return { kind: 'priced', surchargeBps: MAX_ENVELOPE_SURCHARGE_BPS, headroom: null, basis: 'no_history' };
+    // No history is not a reason to charge the ceiling. What the holder can
+    // take at will is measurable without one, and an envelope the agent cannot
+    // cross with the balance it holds carries no exposure however new it is.
+    return { kind: 'priced', surchargeBps: extractable, headroom: null, basis: 'balance' };
   }
 
   // Both declared dimensions are deductibles, and the tighter one governs.
@@ -114,9 +171,12 @@ export function priceEnvelope(input: EnvelopePricingInput): EnvelopePricing {
     };
   }
 
+  // The worse of the two. Habits do not excuse an envelope that can be walked
+  // over deliberately, and an unreachable cap does not excuse an agent whose
+  // ordinary movements sit right under it.
   return {
     kind: 'priced',
-    surchargeBps: surchargeFor(headroom),
+    surchargeBps: Math.max(surchargeFor(headroom), extractable),
     headroom: Number(headroom.toFixed(3)),
     basis: 'history',
   };
