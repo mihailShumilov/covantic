@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_ENVELOPE_SURCHARGE_BPS } from '@covantic/shared';
 import {
   FREE_HEADROOM,
   MIN_HEADROOM,
@@ -43,7 +42,7 @@ describe('INV-PRICE-01 — the envelope is priced on headroom', () => {
     // to cost a full ceiling surcharge for want of a history.
     const priced = priceEnvelope(base({ maxSingleOutflowRaw: usdc(10_000) }));
 
-    expect(priced.kind === 'priced' && priced.surchargeBps).toBe(0);
+    expect(priced.kind === 'priced' && priced.flatPremiumRaw).toBe(0);
   });
 
   it('charges the whole coverage when the whole coverage can be taken at will', () => {
@@ -53,7 +52,9 @@ describe('INV-PRICE-01 — the envelope is priced on headroom', () => {
     // coverage as premium is what removes the profit.
     const priced = priceEnvelope(base({ p95OutflowRaw: usdc(20), transferCount: 50 }));
 
-    expect(priced.kind === 'priced' && priced.surchargeBps).toBe(MAX_ENVELOPE_SURCHARGE_BPS);
+    // The whole coverage, flat. Not a rate: a rate divided by the tenor, and a
+    // one-hour policy then bought this ability for 0.23 USDC.
+    expect(priced.kind === 'priced' && priced.flatPremiumRaw).toBe(usdc(2_000));
   });
 
   it('takes the worse of habit and opportunity', () => {
@@ -64,7 +65,7 @@ describe('INV-PRICE-01 — the envelope is priced on headroom', () => {
     const priced = priceEnvelope(base({ p95OutflowRaw: usdc(20), transferCount: 50 }));
 
     expect(priced.kind === 'priced' && priced.headroom).toBe(FREE_HEADROOM);
-    expect(priced.kind === 'priced' && priced.surchargeBps).toBeGreaterThan(0);
+    expect(priced.kind === 'priced' && priced.flatPremiumRaw).toBeGreaterThan(0);
   });
 
   it('refuses to attest a cap the agent already crosses in ordinary business', () => {
@@ -91,7 +92,7 @@ describe('INV-PRICE-01 — the envelope is priced on headroom', () => {
 
     expect(loose.kind === 'priced' && tight.kind === 'priced').toBe(true);
     if (loose.kind !== 'priced' || tight.kind !== 'priced') return;
-    expect(tight.surchargeBps).toBeGreaterThan(loose.surchargeBps);
+    expect(tight.flatPremiumRaw).toBeGreaterThan(loose.flatPremiumRaw);
   });
 
   it('prices the retention floor, which reads as generous and is not', () => {
@@ -126,7 +127,7 @@ describe('INV-PRICE-01 — the envelope is priced on headroom', () => {
       base({ p95OutflowRaw: null, transferCount: 0, maxSingleOutflowRaw: usdc(10_000) }),
     );
 
-    expect(fresh.kind === 'priced' && fresh.surchargeBps).toBe(0);
+    expect(fresh.kind === 'priced' && fresh.flatPremiumRaw).toBe(0);
     expect(fresh.kind === 'priced' && fresh.basis).toBe('balance');
   });
 
@@ -134,7 +135,7 @@ describe('INV-PRICE-01 — the envelope is priced on headroom', () => {
     // The other half of the same rule: no history is not a discount either.
     const fresh = priceEnvelope(base({ p95OutflowRaw: null, transferCount: 0 }));
 
-    expect(fresh.kind === 'priced' && fresh.surchargeBps).toBe(MAX_ENVELOPE_SURCHARGE_BPS);
+    expect(fresh.kind === 'priced' && fresh.flatPremiumRaw).toBe(usdc(2_000));
   });
 
   it('will not read a thin sample as a habit', () => {
@@ -154,15 +155,26 @@ describe('INV-PRICE-01 — the envelope is priced on headroom', () => {
     expect(zero.kind === 'priced' && zero.basis).toBe('balance');
   });
 
-  it('never exceeds the ceiling the program will accept', () => {
-    // `upsert_attestation` rejects a surcharge above it, so a model that could
-    // exceed it would fail at the oracle rather than at the quote.
+  it('never exceeds the coverage, which the program refuses above', () => {
+    // `create_policy` rejects a flat premium larger than the coverage, so a
+    // model that could exceed it would fail at the purchase rather than at the
+    // quote. The coverage is also the true bound: the policy cannot pay more
+    // than it covers, so nothing beyond it is extractable.
     for (const p95 of [usdc(20), usdc(50), usdc(99), usdc(100)]) {
       const priced = priceEnvelope(base({ p95OutflowRaw: p95 }));
       if (priced.kind !== 'priced') continue;
-      expect(priced.surchargeBps).toBeLessThanOrEqual(MAX_ENVELOPE_SURCHARGE_BPS);
-      expect(priced.surchargeBps).toBeGreaterThanOrEqual(0);
+      expect(priced.flatPremiumRaw).toBeLessThanOrEqual(usdc(2_000));
+      expect(priced.flatPremiumRaw).toBeGreaterThanOrEqual(0);
     }
     expect(MIN_HEADROOM).toBeLessThan(FREE_HEADROOM);
+  });
+
+  it('does not let the tenor undercut it', () => {
+    // The defect this shape exists to prevent, stated as a property: the price
+    // of the envelope is the same whether the policy runs an hour or a month,
+    // because the ability it prices is available in the first minute of both.
+    const priced = priceEnvelope(base({ p95OutflowRaw: usdc(20), transferCount: 50 }));
+
+    expect(priced.kind === 'priced' && priced.flatPremiumRaw).toBe(usdc(2_000));
   });
 });

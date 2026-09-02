@@ -44,7 +44,7 @@ pub mod covantic {
         tier: u8,
         valid_for_seconds: i64,
         mandate_hash: [u8; 32],
-        envelope_surcharge_bps: u16,
+        envelope_flat_premium: u64,
     ) -> Result<()> {
         upsert_attestation_handler(
             ctx,
@@ -52,7 +52,7 @@ pub mod covantic {
             tier,
             valid_for_seconds,
             mandate_hash,
-            envelope_surcharge_bps,
+            envelope_flat_premium,
         )
     }
 

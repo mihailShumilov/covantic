@@ -18,7 +18,7 @@ pub fn upsert_attestation_handler(
     tier: u8,
     valid_for_seconds: i64,
     mandate_hash: [u8; 32],
-    envelope_surcharge_bps: u16,
+    envelope_flat_premium: u64,
 ) -> Result<()> {
     // An attestation that commits to no envelope prices no deductible.
     // `create_policy` refuses one, and refusing it here too means the failure
@@ -27,10 +27,9 @@ pub fn upsert_attestation_handler(
         mandate_hash != [0u8; 32],
         CovanticError::InvalidAttestationValidity
     );
-    require!(
-        envelope_surcharge_bps <= MAX_ENVELOPE_SURCHARGE_BPS,
-        CovanticError::InvalidRiskTier
-    );
+    // No bound here on purpose: the flat premium is bounded by the coverage,
+    // and the coverage belongs to a policy that does not exist yet. The check
+    // lives in `create_policy`, where both numbers are in hand.
     // Only insurable tiers — the oracle must not mint EXTREME attestations.
     require!(tier <= RISK_TIER_HIGH, CovanticError::InvalidRiskTier);
 
@@ -55,7 +54,7 @@ pub fn upsert_attestation_handler(
     att.issued_at = now;
     att.expires_at = expires_at;
     att.mandate_hash = mandate_hash;
-    att.envelope_surcharge_bps = envelope_surcharge_bps;
+    att.envelope_flat_premium = envelope_flat_premium;
     att.bump = ctx.bumps.attestation;
 
     emit!(AttestationUpserted {

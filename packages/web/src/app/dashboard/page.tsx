@@ -1298,7 +1298,7 @@ function BuyPolicyForm({
           >
             ${formatUsdc(quote.premiumAmount)} USDC
           </p>
-          {quote.envelopeSurchargeBps > 0 && (
+          {quote.envelopeFlatPremium > 0 && (
             <p
               style={{
                 fontSize: '0.75rem',
@@ -1308,11 +1308,12 @@ function BuyPolicyForm({
                 lineHeight: 1.5,
               }}
             >
-              Includes {(quote.envelopeSurchargeBps / 100).toFixed(1)}% for the envelope you
-              declared
+              Includes ${formatUsdc(quote.envelopeFlatPremium)} for the envelope you declared —
+              the amount this envelope would let you move past its own limits, charged once
+              rather than per day, because that is available from the first minute.
               {quote.envelopeHeadroom === null
-                ? ' — this agent has no movement history yet, so it is priced at the ceiling until it builds one.'
-                : `: your cap sits ${quote.envelopeHeadroom.toFixed(1)}× above what this agent normally moves. Widen it to pay less.`}
+                ? ' Raise the cap above what the agent holds, and it costs nothing.'
+                : ` Your cap sits ${quote.envelopeHeadroom.toFixed(1)}× above what this agent normally moves.`}
             </p>
           )}
           {countdown && (

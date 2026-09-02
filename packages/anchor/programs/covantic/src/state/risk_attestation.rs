@@ -43,14 +43,24 @@ pub struct RiskAttestation {
     /// quoted before any of that was decided.
     pub mandate_hash: [u8; 32],
 
-    /// What that envelope costs, in basis points on top of the tier premium.
+    /// What that envelope costs, as a flat amount in the covered mint's base
+    /// units. Added to the tier premium, and **not** scaled by duration.
     ///
-    /// Priced off chain, where the agent's own outflow history lives: a cap
-    /// far above what the agent normally moves is a deductible the holder will
-    /// rarely reach, and a cap below it is one they will breach on ordinary
-    /// business. The chain cannot see that history; the oracle can, and it
-    /// signs for the number.
-    pub envelope_surcharge_bps: u16,
+    /// A rate was the wrong shape and the arithmetic said so. The envelope's
+    /// cost is the amount a holder can extract at will — move more than the
+    /// declared cap to an address the verifier cannot attribute to them, and
+    /// collect the overshoot — and that ability exists from the first minute of
+    /// the policy, not pro rata over its life. Charged as an annual rate it
+    /// dissolved into the tenor: a one-hour policy cost 0.23 USDC for an
+    /// ability worth up to the full coverage, and no duration this program
+    /// allows was long enough to close it. Break-even was 356 days against a
+    /// 30-day maximum.
+    ///
+    /// Flat, the tenor stops being a lever. It is bounded by the coverage
+    /// because that is what bounds the extractable amount, and because an
+    /// unbounded figure would let a compromised oracle key refuse coverage by
+    /// arithmetic rather than by declining to attest.
+    pub envelope_flat_premium: u64,
 
     /// PDA bump
     pub bump: u8,
