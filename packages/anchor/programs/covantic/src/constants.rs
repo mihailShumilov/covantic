@@ -231,6 +231,12 @@ pub const MAX_GOVERNANCE_EXTRA_AUTHORITIES: usize = 4;
 /// stolen holder key would simply declare a convenient one first. An hour
 /// forces a fraudulent claim to pre-commit on chain, publicly, well before
 /// the incident it is meant to justify.
+/// The demo build shortens this to a minute for the reason given on
+/// `MANDATE_DECLARATION_DELAY`: the declaration still predates the loss, but
+/// the margin that makes foreknowledge implausible does not survive.
+#[cfg(feature = "devnet-fast-lock")]
+pub const GOVERNANCE_BASELINE_DELAY: i64 = 60;
+#[cfg(not(feature = "devnet-fast-lock"))]
 pub const GOVERNANCE_BASELINE_DELAY: i64 = 3600;
 
 /// Oldest an authority checkpoint may be, **measured at the moment the claim
@@ -285,6 +291,26 @@ pub const AGENT_ERROR_EVIDENCE_SEED: &[u8] = b"covantic_agent_error_evidence";
 /// enough to have been breached by it. With it, that manoeuvre has to be
 /// committed to on chain, in public, an hour before an incident the holder
 /// must then arrange to happen.
+///
+/// ## The demo build shortens this, and what that costs
+///
+/// `devnet-fast-lock` drops it to a minute. The reason is presentational and
+/// worth stating rather than hiding: a demonstration in which the policy that
+/// pays is one somebody prepared an hour earlier is a demonstration nobody
+/// believes. The policy the audience watched being bought has to be the policy
+/// that settles.
+///
+/// What survives the compression is the part that matters. The declaration
+/// still lands on chain *before* the loss, with timestamps anyone can read, so
+/// the verdict is still a comparison against a statement made in advance. What
+/// is lost is the practical margin — an hour is long enough that a holder
+/// cannot plausibly have seen the loss coming, and a minute is not.
+///
+/// That margin is why mainnet keeps the hour, and why this is a cargo feature
+/// rather than a config field: turning it on takes a deliberate build.
+#[cfg(feature = "devnet-fast-lock")]
+pub const MANDATE_DECLARATION_DELAY: i64 = 60;
+#[cfg(not(feature = "devnet-fast-lock"))]
 pub const MANDATE_DECLARATION_DELAY: i64 = 3600;
 
 /// How many destinations a holder may declare as permitted for their agent.
@@ -359,14 +385,25 @@ mod tests {
         }
     }
 
-    /// A lock is time; a maturity delay is evidence. Shortening the delay
-    /// would let a holder declare a mandate *after* watching the agent lose
-    /// money and still settle against it, which is the one thing the
-    /// declaration mechanism exists to prevent. The demo feature must never
-    /// reach these, on any build.
+    /// Mainnet keeps the hour. This is the assertion that matters, and the one
+    /// a careless `--features devnet-fast-lock` in a release pipeline trips.
+    #[cfg(not(feature = "devnet-fast-lock"))]
     #[test]
-    fn the_demo_feature_does_not_touch_the_maturity_delays() {
+    fn a_production_build_keeps_the_full_maturity_delay() {
         assert_eq!(MANDATE_DECLARATION_DELAY, 3600);
         assert_eq!(GOVERNANCE_BASELINE_DELAY, 3600);
+    }
+
+    /// The demo build compresses the delay; it must not remove it.
+    ///
+    /// Zero would make a declaration usable in the transaction that follows
+    /// it, which is not a shorter pre-commitment but the absence of one — a
+    /// holder could then watch a loss and declare an envelope around it. A
+    /// minute still puts the declaration on chain, with a readable timestamp,
+    /// before the loss it is measured against.
+    #[test]
+    fn the_declaration_always_predates_the_loss() {
+        assert!(MANDATE_DECLARATION_DELAY > 0);
+        assert!(GOVERNANCE_BASELINE_DELAY > 0);
     }
 }

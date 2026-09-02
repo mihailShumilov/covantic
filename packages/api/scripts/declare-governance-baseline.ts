@@ -148,7 +148,17 @@ async function main(): Promise<void> {
     })
     .rpc();
 
-  const effectiveAt = new Date(Date.now() + GOVERNANCE_BASELINE_DELAY_SECONDS * 1000);
+  // Read it back rather than computing it — see the note in
+  // `declare-agent-mandate.ts`. A `devnet-fast-lock` build compresses the
+  // on-chain delay, and a locally-derived figure would tell a policyholder to
+  // wait for something that has already happened.
+  const onChain = (await (
+    program.account as unknown as Record<
+      string,
+      { fetch: (a: PublicKey) => Promise<{ effectiveAt: BN }> }
+    >
+  ).policyGovernanceBaseline!.fetch(baseline)) as { effectiveAt: BN };
+  const effectiveAt = new Date(onChain.effectiveAt.toNumber() * 1000);
   process.stdout.write(
     [
       `Declared governance baseline for policy ${policyId}`,
