@@ -42,7 +42,8 @@
     "idl:sync": "bash scripts/sync-idl.sh",
     "backtest:fetch": "pnpm --filter api exec tsx scripts/backtest-fetch.ts",
     "migrate:accounts": "pnpm --filter api exec tsx scripts/migrate-accounts.ts",
-    "demo:autonomous": "pnpm --filter api exec tsx scripts/demo-autonomous.ts"
+    "demo:autonomous": "pnpm --filter api exec tsx scripts/demo-autonomous.ts",
+    "demo:arm": "pnpm --filter api exec tsx scripts/demo-arm.ts"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^7",

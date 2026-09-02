@@ -30,7 +30,8 @@
     "backtest:fetch": "tsx scripts/backtest-fetch.ts",
     "migrate:accounts": "tsx scripts/migrate-accounts.ts",
     "monitor:dev": "tsx src/workers/monitor-entry.ts",
-    "demo:autonomous": "tsx scripts/demo-autonomous.ts"
+    "demo:autonomous": "tsx scripts/demo-autonomous.ts",
+    "demo:arm": "tsx scripts/demo-arm.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
