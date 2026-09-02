@@ -144,6 +144,37 @@ async function bootstrap() {
   logger.info(`Program ID: ${config.PROGRAM_ID}`);
 }
 
+/**
+ * A rejected promise nobody awaited must not take the service down.
+ *
+ * Node's default for an unhandled rejection is to throw, which exits. That is
+ * the right default for a script and the wrong one for a long-running service
+ * whose dependencies rate-limit: a single `429 Too Many Requests` from a
+ * floating promise inside `@solana/web3.js` — its blockhash refresh, its
+ * subscription reconnect — killed the API roughly every forty-five seconds,
+ * and `restart: unless-stopped` dutifully brought it back to do it again.
+ * Every restart re-ran migrations, restarted every worker, and dropped
+ * whatever was in flight, over a condition that resolves by waiting.
+ *
+ * There are no application frames in that stack, so there is no call site to
+ * put a `catch` on. The handler is the only place it can be caught.
+ *
+ * It is deliberately loud rather than silent. Swallowing unhandled rejections
+ * is how a real defect hides for a month, so this logs at error level with the
+ * stack intact — the same signal a crash gave, without the crash.
+ *
+ * `uncaughtException` is left alone on purpose. A synchronous throw that
+ * reached the top of the stack has left the process in a state nobody
+ * reasoned about, and continuing from there is a different and worse bet than
+ * continuing from a rejected promise.
+ */
+process.on('unhandledRejection', (reason) => {
+  logger.error(
+    { err: reason instanceof Error ? reason : new Error(String(reason)) },
+    'unhandled promise rejection — service continues',
+  );
+});
+
 bootstrap().catch((err) => {
   logger.error(err, 'Failed to start Covantic API');
   process.exit(1);

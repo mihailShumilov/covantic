@@ -31,6 +31,21 @@ async function main() {
   });
 }
 
+/**
+ * The same guard the API has, for the same reason.
+ *
+ * The monitor is the process that writes the balance checkpoints every proven
+ * payout is bounded by, so a restart here is worse than in the API: a gap in
+ * checkpointing is a window where an incident produces an uncompensated loss.
+ * A rate-limited RPC call must not open one. See the note in `index.ts`.
+ */
+process.on('unhandledRejection', (reason) => {
+  logger.error(
+    { err: reason instanceof Error ? reason : new Error(String(reason)) },
+    'unhandled promise rejection — monitor continues',
+  );
+});
+
 main().catch((err) => {
   logger.error(err, 'Monitor failed to start');
   process.exit(1);
