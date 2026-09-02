@@ -66,25 +66,28 @@ export async function healthRoutes(app: FastifyInstance) {
     { preHandler: [opsReadRateLimit] },
     async (request, reply) => {
       const status = app.solanaReader.status();
-      // Three states, not two.
+      // Three states, and the boundary between the last two is a real
+      // invariant rather than a preference.
       //
-      // `ok` used to mean "at least one endpoint answers", which reported
-      // green while the pool ran on its last endpoint — and a single endpoint
-      // is not a pool: it is the single point of failure the pool exists to
-      // remove, with no corroboration available for the reads that close
-      // claims. That is how a vendor's quota exhaustion went unnoticed for six
-      // hours behind a healthy status.
+      // `ok` used to mean "at least one endpoint answers", which reported green
+      // while the pool ran on its last endpoint — how a vendor's quota
+      // exhaustion went unnoticed for six hours. But "every configured endpoint
+      // is usable" is the wrong correction: a deployment that keeps a known-bad
+      // endpoint configured because its quota resets next week would then sit
+      // in `degraded` for a week, and a status that is always on says nothing.
       //
-      // `degraded` is deliberately not `no-endpoint-available`: settlement is
-      // still working, and paging as though it had stopped would train an
-      // operator to ignore the page that means it has.
+      // Two is the number that matters. `fetchAnchorAccount(…, { corroborate:
+      // true })` reads a holder's declaration from two endpoints and requires
+      // them to agree; with one it degrades — deliberately, and silently — to
+      // that endpoint's word. Those are the reads that *close* claims, and
+      // wrongful denial is the loss this product exists to prevent. So one
+      // usable endpoint is the state worth naming, whatever else is configured.
+      //
+      // A configured endpoint that is down stays visible in the counts either
+      // way, which is where an operator should read it from.
       const usable = status.endpoints.filter((e) => e.healthy && e.cooldownSec === 0).length;
       const verdict =
-        usable === 0
-          ? 'no-endpoint-available'
-          : usable < status.endpoints.length
-            ? 'degraded'
-            : 'ok';
+        usable === 0 ? 'no-endpoint-available' : usable < 2 ? 'degraded' : 'ok';
 
       // Per-endpoint detail only for an operator. To an anonymous caller,
       // `rateLimited` and `tripped` are a live success signal for a
