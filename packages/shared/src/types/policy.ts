@@ -90,6 +90,29 @@ export interface PremiumQuote {
    */
   envelopeFlatPremium: number;
   /**
+   * The most this policy can ever pay, in base units.
+   *
+   * The same number as `envelopeFlatPremium` whenever the envelope is what
+   * sets the price, and saying so is the point. A breach cannot overshoot the
+   * declared cap by more than the agent holds above it, so what a holder could
+   * take at will is both what they are charged and the ceiling on what they
+   * can be paid. Disclosed at the quote because that is where the decision is,
+   * rather than in the claim where it would be a surprise.
+   */
+  maxClaimable: number;
+  /**
+   * How much of the requested coverage no breach of this envelope can reach.
+   *
+   * Coverage above the agent's headroom over its own cap buys nothing: the
+   * payout is the overshoot, and the overshoot is bounded by what the agent
+   * holds. Non-zero here means the buyer is paying tier premium on cover that
+   * cannot be claimed.
+   */
+  coverageBeyondEnvelope: number;
+  /** What the agent holds now, in base units — the figure both of the above
+   *  are derived from, so the buyer can check the reasoning. */
+  agentCoveredBalance: number;
+  /**
    * How far the declared cap sits above what the agent normally moves, or
    * null when there is no history to measure against — which is charged at
    * the ceiling, not refused.

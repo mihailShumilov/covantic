@@ -78,10 +78,40 @@ export const FREE_HEADROOM = 5;
  */
 export const MIN_HEADROOM = 1;
 
+/**
+ * What a priced envelope means for the buyer, not only for the vault.
+ *
+ * `flatPremiumRaw` and `maxClaimableRaw` are the same number, and saying so is
+ * the point rather than a redundancy. What the holder can extract at will is
+ * what the policy charges *and* the most it can ever pay — a breach cannot
+ * overshoot the cap by more than the agent holds above it. A buyer told both
+ * figures can see the trade they are actually making, at the moment they make
+ * it, instead of discovering it in the claim.
+ *
+ * `headroomAboveCapRaw` is the same quantity before the coverage bound, which
+ * is what makes the second useful: coverage above it buys nothing, because no
+ * breach of this envelope can reach that far.
+ */
 export type EnvelopePricing =
-  | { kind: 'priced'; flatPremiumRaw: number; headroom: number; basis: 'history' }
+  | {
+      kind: 'priced';
+      flatPremiumRaw: number;
+      maxClaimableRaw: number;
+      headroomAboveCapRaw: number;
+      coveredBalanceRaw: number;
+      headroom: number;
+      basis: 'history';
+    }
   /** No history yet; priced on what the balance lets the holder extract. */
-  | { kind: 'priced'; flatPremiumRaw: number; headroom: null; basis: 'balance' }
+  | {
+      kind: 'priced';
+      flatPremiumRaw: number;
+      maxClaimableRaw: number;
+      headroomAboveCapRaw: number;
+      coveredBalanceRaw: number;
+      headroom: null;
+      basis: 'balance';
+    }
   | { kind: 'refused'; reason: string; headroom: number };
 
 export interface EnvelopePricingInput {
@@ -124,10 +154,14 @@ export const MIN_OBSERVATIONS_TO_PRICE = 5;
  * the quantity is false without it: what a holder can *take* is capped by the
  * policy whether or not the caller divides by it afterwards.
  */
-function extractableRaw(input: EnvelopePricingInput): number {
+function reachableRaw(input: EnvelopePricingInput): number {
   const viaCap = Math.max(0, input.coveredBalanceRaw - input.maxSingleOutflowRaw);
   const viaFloor = Math.min(input.minRetainedBalanceRaw, input.coveredBalanceRaw);
-  return Math.min(input.coverageAmountRaw, Math.max(viaCap, viaFloor));
+  return Math.max(viaCap, viaFloor);
+}
+
+function extractableRaw(input: EnvelopePricingInput): number {
+  return Math.min(input.coverageAmountRaw, reachableRaw(input));
 }
 
 /**
@@ -148,13 +182,22 @@ function habitPremiumRaw(headroom: number, coverageAmountRaw: number): number {
 export function priceEnvelope(input: EnvelopePricingInput): EnvelopePricing {
   const { p95OutflowRaw, transferCount } = input;
 
+  const reachable = reachableRaw(input);
   const extractable = extractableRaw(input);
 
   if (p95OutflowRaw === null || p95OutflowRaw <= 0 || transferCount < MIN_OBSERVATIONS_TO_PRICE) {
     // No history is not a reason to charge a ceiling. What the holder can take
     // at will is measurable without one, and an envelope the agent cannot
     // cross with the balance it holds carries no exposure however new it is.
-    return { kind: 'priced', flatPremiumRaw: extractable, headroom: null, basis: 'balance' };
+    return {
+      kind: 'priced',
+      flatPremiumRaw: extractable,
+      maxClaimableRaw: extractable,
+      headroomAboveCapRaw: reachable,
+      coveredBalanceRaw: input.coveredBalanceRaw,
+      headroom: null,
+      basis: 'balance',
+    };
   }
 
   // Both declared dimensions are deductibles, and the tighter one governs.
@@ -185,6 +228,12 @@ export function priceEnvelope(input: EnvelopePricingInput): EnvelopePricing {
   return {
     kind: 'priced',
     flatPremiumRaw: Math.max(habitPremiumRaw(headroom, input.coverageAmountRaw), extractable),
+    // What the policy can pay is bounded by the envelope, not by the premium:
+    // the habit half can push the price above the extractable amount, and it
+    // would be a lie to report that as claimable.
+    maxClaimableRaw: extractable,
+    headroomAboveCapRaw: reachable,
+    coveredBalanceRaw: input.coveredBalanceRaw,
     headroom: Number(headroom.toFixed(3)),
     basis: 'history',
   };
