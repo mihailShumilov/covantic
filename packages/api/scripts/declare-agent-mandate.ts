@@ -69,7 +69,13 @@ function loadKeypair(path: string): Keypair {
   return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(abs, 'utf-8')) as number[]));
 }
 
-/** Collect repeated `--flag value` pairs; single-valued flags take the last. */
+/**
+ * Collect repeated `--flag value` pairs; single-valued flags take the last.
+ *
+ * A flag with nothing after it records an empty string rather than vanishing,
+ * so a bare switch like `--read` is visible to `args.has`. It stays falsy, so
+ * the checks that reject a missing value still reject it.
+ */
 function parseArgs(argv: string[]): Map<string, string[]> {
   const args = new Map<string, string[]>();
   for (let i = 0; i < argv.length; i += 1) {
@@ -77,7 +83,10 @@ function parseArgs(argv: string[]): Map<string, string[]> {
     if (!token?.startsWith('--')) continue;
     const key = token.slice(2);
     const value = argv[i + 1];
-    if (value === undefined || value.startsWith('--')) continue;
+    if (value === undefined || value.startsWith('--')) {
+      args.set(key, [...(args.get(key) ?? []), '']);
+      continue;
+    }
     args.set(key, [...(args.get(key) ?? []), value]);
     i += 1;
   }
@@ -98,8 +107,15 @@ async function main(): Promise<void> {
   const policyId = args.get('policy')?.at(-1);
   if (!policyId) throw new Error('--policy <id> is required');
 
+  // Reading is a mode of its own, because declaring is no longer how a demo
+  // envelope comes to exist. `create_policy` writes the mandate in the same
+  // transaction that buys the cover, and a later declaration may only *widen*
+  // it — so the tooling needs a way to ask what was written without trying to
+  // write it again, which the program correctly refuses.
+  const readOnly = args.has('read');
+
   const maxSingle = args.get('max-single')?.at(-1);
-  if (!maxSingle) {
+  if (!readOnly && !maxSingle) {
     throw new Error(
       '--max-single <usdc> is required: an envelope with no cap is not a declaration, and ' +
         'the program refuses a zero cap because it would make every movement a breach.',
@@ -196,24 +212,26 @@ async function main(): Promise<void> {
     ),
   };
 
-  const signature = await (
-    program.methods as unknown as Record<
-      string,
-      (m: unknown) => {
-        accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
-      }
-    >
-  ).declareAgentMandate!(mandate)
-    .accounts({
-      holder: holder.publicKey,
-      policy,
-      mandate: mandatePda,
-      config: configPda,
-      coveredTokenAccount,
-      usdcMint,
-      systemProgram: SystemProgram.programId,
-    })
-    .rpc();
+  const signature = readOnly
+    ? '(not declared — read from chain)'
+    : await (
+        program.methods as unknown as Record<
+          string,
+          (m: unknown) => {
+            accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+          }
+        >
+      ).declareAgentMandate!(mandate)
+        .accounts({
+          holder: holder.publicKey,
+          policy,
+          mandate: mandatePda,
+          config: configPda,
+          coveredTokenAccount,
+          usdcMint,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
 
   // Read it back rather than computing it.
   //
@@ -224,24 +242,52 @@ async function main(): Promise<void> {
   // policyholder to wait for something that has already happened.
   //
   // The chain wrote `effective_at`; the chain is asked.
+  interface OnChainMandate {
+    effectiveAt: BN;
+    maxSingleOutflow: BN;
+    maxWindowOutflow: BN;
+    windowSeconds: BN;
+    minRetainedBalance: BN;
+    allowedCounterparties: PublicKey[];
+    counterpartyCount: number;
+    allowedPrograms: PublicKey[];
+    programCount: number;
+  }
   const onChain = (await (
     program.account as unknown as Record<
       string,
-      { fetch: (a: PublicKey) => Promise<{ effectiveAt: BN }> }
+      { fetch: (a: PublicKey) => Promise<OnChainMandate> }
     >
-  ).policyAgentMandate!.fetch(mandatePda)) as { effectiveAt: BN };
+  ).policyAgentMandate!.fetch(mandatePda)) as OnChainMandate;
   const effectiveAt = new Date(onChain.effectiveAt.toNumber() * 1000);
+
+  // Report what the chain holds, not what was asked for. In read mode nothing
+  // was asked for; in write mode the two agree, and if they ever did not, the
+  // chain is the one that decides claims.
+  const shown = {
+    maxSingleOutflow: onChain.maxSingleOutflow,
+    maxWindowOutflow: onChain.maxWindowOutflow,
+    windowSeconds: onChain.windowSeconds,
+    minRetainedBalance: onChain.minRetainedBalance,
+    // The arrays are fixed-size and zero-padded, and `*_count` says how many
+    // slots are real. Printing the padding would show the zero pubkey as a
+    // permitted destination — the exact reading the program refuses to allow.
+    allowedCounterparties: onChain.allowedCounterparties.slice(0, onChain.counterpartyCount),
+    allowedPrograms: onChain.allowedPrograms.slice(0, onChain.programCount),
+  };
   const ui = (v: BN) => (Number(v.toString()) / 10 ** USDC_DECIMALS).toLocaleString();
 
   process.stdout.write(
     [
-      `Declared agent mandate for policy ${policyId}`,
+      readOnly
+        ? `Agent mandate on chain for policy ${policyId}`
+        : `Declared agent mandate for policy ${policyId}`,
       `  mandate PDA    : ${mandatePda.toBase58()}`,
-      `  max single     : ${ui(maxSingleOutflow)} USDC   (checked on chain)`,
-      `  max per window : ${ui(maxWindowOutflow)} USDC over ${windowSeconds.toString()}s`,
-      `  min retained   : ${ui(minRetainedBalance)} USDC   (checked on chain)`,
-      `  counterparties : ${allowedCounterparties.map((k) => k.toBase58()).join(', ') || '(undeclared — silence, not prohibition)'}`,
-      `  programs       : ${allowedPrograms.map((k) => k.toBase58()).join(', ') || '(undeclared — silence, not prohibition)'}`,
+      `  max single     : ${ui(shown.maxSingleOutflow)} USDC   (checked on chain)`,
+      `  max per window : ${ui(shown.maxWindowOutflow)} USDC over ${shown.windowSeconds.toString()}s`,
+      `  min retained   : ${ui(shown.minRetainedBalance)} USDC   (checked on chain)`,
+      `  counterparties : ${shown.allowedCounterparties.map((k) => k.toBase58()).join(', ') || '(undeclared — silence, not prohibition)'}`,
+      `  programs       : ${shown.allowedPrograms.map((k) => k.toBase58()).join(', ') || '(undeclared — silence, not prohibition)'}`,
       `  signature      : ${signature}`,
       '',
       `Usable as proof from ${effectiveAt.toISOString()} — a claim filed before then`,

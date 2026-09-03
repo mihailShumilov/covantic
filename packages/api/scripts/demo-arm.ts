@@ -46,9 +46,21 @@ const API = process.env.API_URL ?? 'https://covantic.org';
  *  the confidence the payout lane needs. A sparse declaration lands at 0.63
  *  against a 0.75 bar and goes to a human — correctly. */
 const MAX_SINGLE = '100';
-const MAX_WINDOW = '150';
-const WINDOW_SEC = '3600';
-const MIN_RETAINED = '4600';
+const MIN_RETAINED = '400';
+/**
+ * What the agent is funded with, and why it is not the fleet default of 5000.
+ *
+ * The envelope now costs what it exposes: the flat premium is what the holder
+ * could walk the agent over the line for, which is `balance - cap`. Fund the
+ * agent with 5000 under a 100 cap and the envelope alone costs 4900 — capped
+ * at the coverage, so the policy costs the entire 2000 it insures. That is the
+ * correct price for that shape and a terrible thing to put in front of anyone.
+ *
+ * 800 leaves 700 exposed, so the policy costs 700 to insure 2000, and after
+ * the six history movements the agent still holds 680 — enough to make the
+ * 600 the demo asks of it.
+ */
+const FUND = '800';
 /** The sink `agent:trigger` sends to by default, declared so the counterparty
  *  check runs and passes rather than reporting unevaluated. */
 const COUNTERPARTY = '8SUV2eNzyrWfyZod1StCSuyBBTk5jruFydaMe8yRyLVC';
@@ -129,7 +141,13 @@ function appendLedger(entry: Armed): void {
 const USDC_MINT = process.env.USDC_MINT ?? '';
 const RPC = process.env.SOLANA_RPC_URL ?? 'https://api.devnet.solana.com';
 
-type State = 'ready' | 'maturing' | 'spent';
+type State = 'ready' | 'maturing' | 'spent' | 'underpriced';
+
+/**
+ * What the demo movement produces as a payout: everything past the declared
+ * cap. The first slice is the deductible the holder authored.
+ */
+const EXPECTED_PAYOUT_USDC = BREACH_AMOUNT - Number(MAX_SINGLE);
 
 interface FleetAgent {
   name: string;
@@ -189,31 +207,63 @@ async function insurable(): Promise<Array<FleetAgent & { usdc: number }>> {
 
 /** Live state of every armed policy. `spent` covers both outcomes that end a
  *  policy: a demo that settled it, and a week going by. */
-async function survey(): Promise<Array<Armed & { state: State }>> {
+async function survey(): Promise<Array<Armed & { state: State; premiumUsdc: number }>> {
   const res = await fetch(`${API}/api/policies`);
-  const body = (await res.json()) as { policies?: Array<{ policyId: number; state: number }> };
-  const live = new Map((body.policies ?? []).map((p) => [String(p.policyId), p.state]));
+  const body = (await res.json()) as {
+    policies?: Array<{ policyId: number; state: number; premiumPaid: number }>;
+  };
+  const live = new Map(
+    (body.policies ?? []).map((p) => [String(p.policyId), p] as const),
+  );
   const now = Date.now();
 
-  return readLedger().map((a) => ({
-    ...a,
-    state:
-      live.get(a.policyId) !== 0
+  return readLedger().map((a) => {
+    const chain = live.get(a.policyId);
+    // An agent-error payout cannot exceed the premium the policy was bought
+    // for. That is what closes the top-up: the envelope is priced against the
+    // balance the agent held at purchase, and funding it afterwards would
+    // otherwise widen the reachable overshoot for free.
+    //
+    // It also means a policy bought before that pricing existed pays a
+    // fraction of what the demo would produce. Such a policy is live, matured
+    // and useless on stage — and it would look like the protocol failing to
+    // pay rather than a bound doing its job, which is the worst thing this
+    // script can hand someone.
+    const underpriced =
+      chain !== undefined && chain.premiumPaid < EXPECTED_PAYOUT_USDC * 1_000_000;
+    return {
+      ...a,
+      premiumUsdc: (chain?.premiumPaid ?? 0) / 1_000_000,
+      state: (chain === undefined || chain.state !== 0
         ? 'spent'
-        : Date.parse(a.readyAt) <= now
-          ? 'ready'
-          : 'maturing',
-  }));
+        : underpriced
+          ? 'underpriced'
+          : Date.parse(a.readyAt) <= now
+            ? 'ready'
+            : 'maturing') as State,
+    };
+  });
 }
 
 async function armOne(days: string): Promise<{ policyId: string; agent: string; readyAt: string }> {
   const before = fleetSize();
 
   say('  buying a policy…');
+  // The envelope is bought, not declared afterwards.
+  //
+  // `create_policy` writes the mandate in the same transaction, because the
+  // premium is quoted against it, and a later declaration may only *widen* it
+  // — narrowing after the price is fixed is the extraction this all exists to
+  // stop. So the two-step arming this script used to do is now refused by the
+  // program, and correctly: it bought a wide envelope and then tried to
+  // tighten it.
   const bought = run('fleet-bootstrap.ts', [
     '--count', String(before + 1),
     '--coverage', '2000',
     '--duration', String(Number(days) * 86_400),
+    '--fund', FUND,
+    '--cap', MAX_SINGLE,
+    '--floor', MIN_RETAINED,
   ]);
   const policyId = /policy #(\d+) bought/.exec(bought)?.[1];
   const agent = /→ (fleet-[a-z0-9-]+)/.exec(bought)?.[1];
@@ -223,15 +273,13 @@ async function armOne(days: string): Promise<{ policyId: string; agent: string; 
   }
   say(`  policy #${policyId} for ${agent}`);
 
-  say('  declaring the envelope…');
+  // Ask the chain when the envelope becomes usable as proof rather than
+  // computing it: a `devnet-fast-lock` build compresses the delay to a minute,
+  // and the TypeScript constant still says an hour.
+  say('  reading the envelope the purchase wrote…');
   const declared = run('declare-agent-mandate.ts', [
     '--policy', policyId,
-    '--max-single', MAX_SINGLE,
-    '--max-window', MAX_WINDOW,
-    '--window', WINDOW_SEC,
-    '--min-retained', MIN_RETAINED,
-    '--counterparty', COUNTERPARTY,
-    '--program', TOKEN_PROGRAM,
+    '--read',
     '--keypair', 'keys/fleet-holder.json',
   ]);
   const readyAt = /Usable as proof from (\S+)/.exec(declared)?.[1] ?? '(unknown)';
@@ -257,12 +305,21 @@ async function status(): Promise<void> {
   const all = await survey();
   const ready = all.filter((a) => a.state === 'ready');
   const maturing = all.filter((a) => a.state === 'maturing');
+  const underpriced = all.filter((a) => a.state === 'underpriced');
 
   say(ready.length > 0 ? `READY — ${ready.length} polic${ready.length === 1 ? 'y' : 'ies'}\n` : 'NOTHING READY\n');
   for (const a of ready) say(line(a));
   if (maturing.length > 0) {
     say('\nMaturing:');
     for (const a of maturing) say(`  #${a.policyId} usable from ${a.readyAt}`);
+  }
+  if (underpriced.length > 0) {
+    say(`\nNot usable — the premium is below the ${EXPECTED_PAYOUT_USDC} USDC this demo pays out,`);
+    say('and a payout is capped at the premium the policy was bought for:');
+    for (const a of underpriced) {
+      say(`  #${a.policyId} premium ${a.premiumUsdc.toLocaleString()} USDC — would pay that, not ${EXPECTED_PAYOUT_USDC}`);
+    }
+    say('  Arm a fresh one with `pnpm demo:arm`.');
   }
   if (ready.length === 0 && maturing.length === 0) {
     say('Run `pnpm demo:arm` — a declaration must mature before it can be proven against.');
@@ -290,11 +347,14 @@ async function status(): Promise<void> {
     say('  `pnpm agent:fund --name <name>` tops one up.');
   }
   if (funded.length > 0) {
-    say('\nAfter buying cover for one of these, declare its envelope:');
+    say('\nThe envelope is part of the purchase, not a step after it. Set it in the');
+    say(`form: cap ${MAX_SINGLE} USDC, floor ${MIN_RETAINED}, counterparty ${COUNTERPARTY},`);
+    say(`program ${TOKEN_PROGRAM}. The quote prices it, and it can only be widened`);
+    say('afterwards — narrowing it once the price is fixed is what the program refuses.');
+    say('');
+    say('To read back what a purchase wrote:');
     say('  pnpm --filter api exec tsx scripts/declare-agent-mandate.ts \\');
-    say('    --policy <id> --max-single 100 --max-window 150 --window 3600 \\');
-    say(`    --min-retained 4600 --counterparty ${COUNTERPARTY} \\`);
-    say(`    --program ${TOKEN_PROGRAM} --keypair keys/fleet-holder.json`);
+    say('    --policy <id> --read --keypair keys/fleet-holder.json');
   }
 }
 
@@ -340,9 +400,10 @@ async function main(): Promise<void> {
     say(`    usable from ${a.readyAt}`);
   }
   say('');
-  say('The declaration matures an hour after it lands, and that hour is the');
+  say('The envelope matures before it can be proven against, and the delay is the');
   say('mechanism rather than a wait: a mandate the holder could declare *after*');
-  say('watching a loss would prove nothing.');
+  say('watching a loss would prove nothing. The exact time above comes from the');
+  say('chain — a devnet-fast-lock build compresses an hour to a minute.');
   say('');
   say('`pnpm demo:status` says what is showable right now.');
 }
