@@ -1,123 +1,118 @@
 # The autonomous settlement demo
 
-One command, run against devnet, that ends with the vault paying a policyholder
-without anyone approving anything.
+One command per step, run against devnet, ending with the vault paying a
+policyholder without anyone approving anything.
+
+Verified end to end on 2026-09-03: policy #37 paid **20 USDC** through
+`VerifyAndPayoutAgentError` — [`2qfcSvE6…`](https://explorer.solana.com/tx/2qfcSvE65PDtidt5YpLMyoWipW1ewP7dQj3jpE8VbwrJ71RfvYnih7vNF5LtnakuxTn7Es322bK8G67yUGTXeNks?cluster=devnet).
+Vault 7,757.01 → 7,737.01; holder 1,744.86 → 1,764.86. **74.7 seconds** from the
+breach to the payout confirming.
+
+## What this demonstrates, and what it does not
+
+It demonstrates **autonomous settlement**: a loss detected from the chain's own
+record, adjudicated against a declaration the holder made in advance, and paid
+by an instruction that re-derives the amount from a balance it reads itself. No
+human anywhere in that path.
+
+It does **not** demonstrate a profitable claim, and cannot. The premium is the
+amount the holder could extract at will, and any single breach yields less than
+that maximum — so a demo run always pays out less than it paid in. That is the
+pricing working rather than failing: a holder who controls their own agent must
+not be able to profit from breaching their own envelope, or the policy is a
+withdrawal slip. Cover is worth buying when the holder does *not* control the
+agent, and the protocol cannot tell those two apart, so it prices the worse one.
+
+Say that out loud rather than hoping nobody does the arithmetic. It is the
+strongest thing about the design.
+
+## The scenario
+
+### 1. Buy a policy, envelope and all — 40 seconds
 
 ```bash
-pnpm demo:autonomous --policy <id> --agent <name> --amount 600
+API_URL=https://covantic.org pnpm --filter api exec tsx scripts/fleet-bootstrap.ts \
+  --count <fleet size + 1> --fund 700 --cap 650 --coverage 200 --duration 604800
 ```
 
-Verified end to end on 2026-08-31: policy #26 paid **600 USDC**, on chain, via
-`VerifyAndPayoutAgentError` — [`4XzTbn5g…`](https://explorer.solana.com/tx/4XzTbn5g3CA951T8hZ8nRGFyXVD1WDh1auvCv8zcNyrVnS5CRRxsxRR47NTonhHpM8JGMkHqqZCoPFro3yzioam9?cluster=devnet).
-Vault 9,202.15 → 8,602.15; holder 299.71 → 899.71. **85 seconds** from the
-breach landing to the payout confirming, and that run included an unrelated API
-container restart in the middle of it.
+Creates an agent, funds it with 700 USDC, and buys a policy whose operating
+envelope is declared **in the same transaction**. Prints the policy number and
+the agent name; keep both.
 
-## Why agent-error, and not the exploit path
+```
+funded: 0.1 SOL + 700 USDC
+risk:   tier=1 premium=50095890 raw (≈ 50.0959 USDC)
+policy #37 bought: 2P7VjoRE…
+```
 
-The exploit path cannot be demonstrated by anyone holding the agent's key, and
-that is a property rather than a limitation. `verify_and_payout_exploit` pays
-on a movement the agent did **not** authorise. Only a token account's owner can
-sign `Approve`, so a delegate staged for a demo resolves to `granted_by_agent`
-and the claim is rejected. A payout there would be a payout on a hole.
+The premium is worth pausing on. 50 USDC is exactly `700 − 650` — what the
+holder could walk this agent over its own cap for. Widen the cap above the
+balance and it costs nothing; narrow it and it costs more, in exact step.
 
-Agent error is the honest one. The holder declares an operating envelope in
-advance, the agent exceeds it, and the program re-derives the overshoot from a
-balance it reads itself.
-
-## What the clock measures
-
-Setup is deliberately outside it. `MANDATE_DECLARATION_DELAY` is an hour and
-shortening it would destroy the thing being shown: the declaration has to
-predate the loss, or it is not a pre-commitment. The clock starts at the
-breach.
-
-| stage | typical |
-| --- | --- |
-| breach lands on devnet | t+0 |
-| sweep finds it from the chain's own record | ≤ `EXPLOIT_SWEEP_INTERVAL_MS` |
-| verdict, evidence hash, on-chain claim | +3–6 s |
-| `LOCK_AGENT_ERROR` | 30 s on a `devnet-fast-lock` build |
-| payout confirmed | +2–4 s |
-
-## Setup, once per demonstration
-
-A policy pays **once**: settling moves it to `ClaimPaid`, and the sweep stops
-examining a policy that is not `Active`. Every run needs a fresh one.
+### 2. Give the agent a history — 6 movements, ~6 minutes
 
 ```bash
-# 1. Agent, funding, policy. --count is the fleet's target size, so pass one
-#    more than it currently has.
-API_URL=https://covantic.org pnpm --filter api exec tsx \
-  scripts/fleet-bootstrap.ts --count <n+1> --coverage 2000 --duration 86400
-
-# 2. The holder declares the envelope. Declare all five dimensions: each one
-#    left silent is reported `unevaluated`, and each unevaluated dimension is
-#    -0.03 on the confidence the payout lane needs.
-pnpm --filter api exec tsx scripts/declare-agent-mandate.ts \
-  --policy <id> --max-single 100 --max-window 150 --window 3600 \
-  --min-retained 4600 \
-  --counterparty 8SUV2eNzyrWfyZod1StCSuyBBTk5jruFydaMe8yRyLVC \
-  --program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA \
-  --keypair keys/fleet-holder.json
-
-# 3. Wait out MANDATE_DECLARATION_DELAY — the script prints the exact time.
-
-# 4. Give the agent a history. Six transfers of 20 USDC, spaced, staying
-#    inside the envelope. Without a baseline the verdict carries a standing
-#    -0.03 and can sit below the review bar on evidence that is otherwise
-#    perfect.
-pnpm agent:trigger --name <agent> --amount 20 --kind transfer
+pnpm --filter api exec tsx scripts/agent-wallet.ts trigger \
+  --name <agent> --amount 5 --kind transfer     # six times, ~70s apart
 ```
 
-## Why the confidence arithmetic matters
+Ordinary movements, well inside the envelope. Without them the verdict scores
+0.63 against a 0.75 bar and goes to a human — correctly, because "this agent
+exceeded a limit" means nothing without knowing what it normally does.
 
-`REVIEW_CONFIDENCE` is 0.75 and `CONFIDENCE_CEILING` is 0.92, below
-`AUTO_PAY_CONFIDENCE` of 0.95 — so off-chain analysis alone can never release
-funds, and a payout always needs the chain's own check. **Do not move these to
-make a demo pass.** The only honest way to raise a score is to supply the
-evidence that was missing:
+**Five is the amount, not twenty.** Six movements of 20 would take the balance
+from 700 to 580, under the 650 cap, and the breach in step 4 becomes impossible.
+
+This step can run long before the demo. Its output is a row per movement in
+`agent_outflow_events`, and it does not expire.
+
+### 3. Wait out the declaration — 60 seconds
+
+`MANDATE_DECLARATION_DELAY` is a minute on a `devnet-fast-lock` build and an
+hour in production. The wait is the mechanism, not an inconvenience: a mandate
+a holder could declare *after* watching a loss would prove nothing. Step 2
+covers it several times over.
+
+### 4. Break it — 75 seconds, and this is the part to watch
+
+```bash
+pnpm demo:autonomous --policy <id> --agent <agent> --amount 670
+```
 
 ```
-0.60  base
-+0.15  the breach is one the chain re-derives
-+0.05  two or more declared dimensions crossed
--0.03  per dimension left unevaluated
--0.03  no outflow history for this agent
+t+ 0.3s  agent moves 670 USDC against a declared cap
+t+ 3.9s  transfer landed
+t+35.2s  claim → verifying          the sweep found it in the chain's own record
+t+39.4s  claim → approved           verdict reached, claim filed on chain
+t+68.5s  claim → paying             the program's own lock elapsed
+t+74.7s  claim → paid — 20 USDC
 ```
 
-A sparse declaration and a fresh agent land at 0.63 and go to a human — which
-is the product working, not failing. The full envelope plus a history reaches
-0.85.
+670 against a 650 cap is a 20 USDC overshoot, and the same movement crosses the
+declared window cap — two dimensions, which is what carries the confidence from
+0.63 to 0.80.
 
-## Deployment settings the demo needs
+The thirty seconds between `approved` and `paying` are the on-chain lock. Say
+what it is rather than waiting through it: the window in which a compromised
+oracle key can still be stopped before money moves. It is six hours in
+production.
 
-| variable | demo | production |
-| --- | --- | --- |
-| `EXPLOIT_LOCK_SECONDS` | 30 | 3600 |
-| `AGENT_ERROR_LOCK_SECONDS` | 30 | 21600 |
-| `EXPLOIT_SWEEP_INTERVAL_MS` | 20000 | 120000 |
-| `AGENT_ERROR_PROOF_ENABLED` | true | true |
+## Preparing ahead
 
-The short locks need a program built with `--features devnet-fast-lock`. Against
-a stock build the payout waits out the real lock instead — the keeper defers on
-`LockPeriodNotElapsed` rather than recording a failure.
+A policy pays **once** — settling moves it to `ClaimPaid` and the sweep stops
+examining it. `pnpm demo:status` lists what is ready and what is still maturing,
+along with the addresses a policy can be bought for.
 
-Do not take `EXPLOIT_SWEEP_INTERVAL_MS` below 20 s. At 10 s the sweep exhausted
-the public devnet RPC's rate limit — 334 `Too Many Requests` in forty minutes —
-after which every read failed, including the ones that decide claims.
+## When a run stops early
 
-## Reading a run that stops early
+`review` and `rejected` are verdicts, not hangs, and the script says so.
 
-`review` and `rejected` are verdicts, not hangs, and the script says so. The
-reason is in the claim's `verificationData`:
-
-- `confidence_below_review_bar:0.63` — the evidence is thin. See the arithmetic
-  above; this is the guarantee working.
-- `proof_path_unavailable` — the settlement plan could not route to the on-chain
-  instruction. Check `AGENT_ERROR_PROOF_ENABLED` in **both** the api and monitor
-  containers: compose has no `env_file`, so a variable it does not name never
-  reaches the process.
-- `mandate_not_matured` — fired before the declaration delay elapsed.
-- `trigger_tx_not_found` — neither the endpoint pool nor the indexer could
-  resolve the signature. Usually rate limiting; check `/api/health/rpc`.
+- `confidence_below_review_bar` — the evidence is thin. Almost always a missing
+  history (step 2) or an envelope with dimensions left silent, each of which
+  costs 0.03.
+- `ENVELOPE_NOT_INSURABLE` at the quote — the declared cap sits under what the
+  agent normally moves, so a breach is scheduled rather than risked. Widen it.
+- `mandate_not_matured` — fired inside the declaration delay.
+- `AttestationMandateMismatch` at purchase — the envelope quoted and the
+  envelope declared are not the same one. Check every field, including the
+  allowlists.
