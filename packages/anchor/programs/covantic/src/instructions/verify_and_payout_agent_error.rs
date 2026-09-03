@@ -107,30 +107,27 @@ pub fn verify_and_payout_agent_error_handler(
         CovanticError::PayoutExceedsCoverage
     );
 
-    // And never more than the premium this policy was bought for.
+    // The coverage, and nothing narrower. This is a claim being paid.
     //
-    // This trigger is the one where the holder controls the actor. An agent
-    // error is a loss the agent caused with its *own* authority, and the agent
-    // answers to the holder — so a holder who can be paid more than they paid
-    // in is holding a withdrawal slip rather than a policy. Move value past
-    // the declared cap to an address nothing on chain can attribute to them,
-    // and the overshoot comes back from the vault.
+    // There was a second bound here for a while: never more than the premium
+    // the policy was bought for. It closed the case where a holder walks their
+    // own agent past its cap and collects — this being the one trigger where
+    // the holder controls the actor — and it worked, because profit is payout
+    // minus premium and the bound made that zero.
     //
-    // The premium already prices exactly that: it carries a flat component
-    // equal to the amount the envelope let the holder extract, measured at
-    // purchase against the balance the agent held then. What it could not
-    // price is what happened afterwards — top the agent up and the reachable
-    // overshoot grows while the premium stays where it was. The bound is
-    // stated here instead, where the balance no longer matters: whatever the
-    // agent came to hold, the vault does not pay out more than it was paid.
+    // It also made the cover worthless, which is not a trade insurance makes.
+    // Premiums are pooled: many holders pay a little, few claim, and the ones
+    // who claim are paid in full. A policy that returns what it cost is a
+    // deposit with extra steps.
     //
-    // Only on this path. The exploit and governance triggers settle losses the
-    // holder did not cause and cannot arrange, and capping those at the
-    // premium would deny a genuine victim the cover they bought.
-    require!(
-        payout_amount <= policy.premium_paid,
-        CovanticError::PayoutExceedsCoverage
-    );
+    // Two things carry the risk instead, and neither is a bound on the amount.
+    // The envelope is derived from the agent's own record rather than chosen
+    // by the holder, so a breach means the agent moved several times what it
+    // ordinarily moves — an anomaly to arrange, not an arithmetic certainty to
+    // declare. And the payout is only the overshoot past that cap, so the
+    // first slice of every breach is a deductible the holder carries. What is
+    // left is ordinary moral hazard, which underwriting answers, not a
+    // `require!`.
 
     // A zero payout transfers nothing but still flips the policy to
     // `ClaimPaid` and releases the coverage — closing a live claim for free.

@@ -18,20 +18,25 @@ identical; only the scale differs.
 ## What this demonstrates, and what it does not
 
 It demonstrates **autonomous settlement**: a loss detected from the chain's own
-record, adjudicated against a declaration the holder made in advance, and paid
-by an instruction that re-derives the amount from a balance it reads itself. No
-human anywhere in that path.
+record, adjudicated against an envelope derived from what the agent actually
+does, and paid by an instruction that re-derives the amount from a balance it
+reads itself. No human anywhere in that path.
 
-It does **not** demonstrate a profitable claim, and cannot. The premium is the
-amount the holder could extract at will, and any single breach yields less than
-that maximum — so a demo run always pays out less than it paid in. That is the
-pricing working rather than failing: a holder who controls their own agent must
-not be able to profit from breaching their own envelope, or the policy is a
-withdrawal slip. Cover is worth buying when the holder does *not* control the
-agent, and the protocol cannot tell those two apart, so it prices the worse one.
+The premium is a rate on the cover for a term — the tier, the amount and the
+duration, and nothing else. The payout is the whole overshoot past the derived
+cap, paid in full, and the cap is the deductible. That is the trade insurance
+makes: many holders pay a small rate, few claim, and the ones who do are paid
+from the pool rather than from their own premium.
 
-Say that out loud rather than hoping nobody does the arithmetic. It is the
-strongest thing about the design.
+What it does **not** demonstrate is a trigger the holder cannot arrange. An
+agent error is a loss the agent caused with its own authority, and the agent
+answers to its holder. Two things carry that risk, and neither is a bound on
+the amount: the envelope is derived from the agent's own record rather than
+chosen, so a breach means it moved several times what it ordinarily moves; and
+the first slice of any breach is a deductible the holder carries. What is left
+is ordinary moral hazard, which underwriting answers rather than arithmetic.
+
+Say that out loud rather than hoping nobody asks. Every insurer lives with it.
 
 ## The scenario
 

@@ -186,23 +186,14 @@ const RPC = process.env.SOLANA_RPC_URL ?? 'https://api.devnet.solana.com';
 type State = 'ready' | 'maturing' | 'spent';
 
 /**
- * What the demo movement will actually pay out.
+ * What the demo movement pays out: everything past the derived cap.
  *
- * Two bounds, and the second is the one that bites. The breach is everything
- * past the derived cap — the first slice is the deductible. But an agent-error
- * settlement may not exceed the premium the policy was bought for, and with
- * the envelope no longer carrying a flat charge, that premium is a rate on the
- * cover for a term.
- *
- * So this trigger returns roughly what it cost, and no more. That is the
- * bound working rather than failing: an agent does what its holder tells it,
- * so a holder paid more than they paid in is holding a withdrawal slip. It
- * is printed rather than left to be discovered on stage.
+ * The first slice is the deductible — risk the policy does not carry — and
+ * the rest is paid in full, however small the premium was. That is the trade
+ * insurance makes: many holders pay a rate, few claim, and the ones who do
+ * are paid from the pool rather than from their own premium.
  */
-function expectedPayoutUsdc(premiumPaidRaw: number): number {
-  const breach = BREACH_AMOUNT - DERIVED_CAP;
-  return Math.min(breach, premiumPaidRaw / 1_000_000);
-}
+const EXPECTED_PAYOUT_USDC = BREACH_AMOUNT - DERIVED_CAP;
 
 interface FleetAgent {
   name: string;
@@ -290,7 +281,7 @@ async function survey(): Promise<
     return {
       ...a,
       premiumUsdc: (chain?.premiumPaid ?? 0) / 1_000_000,
-      payoutUsdc: expectedPayoutUsdc(chain?.premiumPaid ?? 0),
+      payoutUsdc: EXPECTED_PAYOUT_USDC,
       state: (chain === undefined || chain.state !== 0
         ? 'spent'
         : Date.parse(a.readyAt) <= now
@@ -461,10 +452,9 @@ async function status(): Promise<void> {
       );
     }
     say(
-      `  The breach is ${BREACH_AMOUNT - DERIVED_CAP} USDC past the derived cap, and an agent-error`,
+      `  ${BREACH_AMOUNT} moved against a cap of ${DERIVED_CAP} derived from the agent's own`,
     );
-    say('  settlement is capped at the premium — an agent does what its holder tells it.');
-    say('  The exploit, oracle and governance triggers are not capped and pay the full cover.');
+    say('  record. The cap is the deductible; the rest is paid in full.');
   }
   if (ready.length === 0 && maturing.length === 0) {
     say('Run `pnpm demo:arm` — a declaration must mature before it can be proven against.');
