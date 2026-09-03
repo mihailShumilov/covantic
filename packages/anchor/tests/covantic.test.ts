@@ -1889,7 +1889,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       await airdropSol(context, admin.publicKey);
     });
 
-    async function setupMandatedPolicy(agentFunding: BN, flatPremium: BN = usdc(100)) {
+    async function setupMandatedPolicy(agentFunding: BN, flatPremium: BN = new BN(0)) {
       const agent = Keypair.generate();
       const agentAta = getAssociatedTokenAddressSync(usdcMint.publicKey, agent.publicKey);
 
@@ -1922,14 +1922,10 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       const cfg: any = await (program.account as any).protocolConfig.fetch(config);
       const [policy] = policyPda(holder.publicKey, cfg.policyCounter as BN);
 
-      // Priced as production would price this envelope: the flat premium is
-      // what the holder could extract, and the payout is bounded by it.
-      await ensureAttestation(
-        agent.publicKey,
-        0,
-        mandateHashOf(envelope() as any),
-        flatPremium,
-      );
+      // Zero, as production publishes it. The envelope carried a flat charge
+      // while the holder chose it; it is derived now, and priced at nothing on
+      // top of the tier.
+      await ensureAttestation(agent.publicKey, 0, mandateHashOf(envelope() as any), flatPremium);
       await program.methods
         .createPolicy(
           usdc(100),
@@ -2155,25 +2151,20 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       expect(pol.state).toBe(2); // ClaimPaid
     });
 
-    it('never pays out more than the premium this policy was bought for', async () => {
-      // The bound that makes this trigger safe to offer at all.
+    it('pays the whole overshoot, however small the premium was', async () => {
+      // The trade insurance actually makes.
       //
-      // An agent error is a loss the agent caused with its own authority, and
-      // an agent does what its holder tells it. So on this trigger — and only
-      // on this one — a holder paid more than they paid in is holding a
-      // withdrawal slip: declare a narrow cap, move value past it to an
-      // address nothing on chain can tie back to you, collect the overshoot.
+      // A premium is a rate on the cover for a term, so it is small; premiums
+      // are pooled, and the few holders who claim are paid in full from what
+      // the many paid in. A settlement bounded by what this particular policy
+      // cost would be a deposit with extra steps, and for a while it was one.
       //
-      // Pricing answers most of that: the premium carries a flat component
-      // equal to what the envelope exposed at purchase. What pricing cannot
-      // answer is what happens afterwards — top the agent up and the reachable
-      // overshoot grows while the premium stays where it was set. Here the
-      // agent holds 100 against a 20 envelope, which is exactly that shape.
-      //
-      // The payout is where it closes, because there the balance is no longer
-      // an input: whatever the agent came to hold, the vault does not pay out
-      // more than it took in.
-      const { policy, agent, agentAta } = await setupMandatedPolicy(usdc(100), usdc(20));
+      // The risk that bound was answering has not gone away — this is the one
+      // trigger whose actor answers to the claimant — it is carried elsewhere:
+      // the envelope is derived from the agent's own record rather than chosen
+      // by the holder, and the payout is only the overshoot past it, so the
+      // first slice of every breach is a deductible.
+      const { policy, agent, agentAta } = await setupMandatedPolicy(usdc(100), new BN(0));
       await declareMandate(policy);
       await balanceCheckpoint(policy, agent.publicKey);
       await advanceClockBySeconds(context, 3_601);
@@ -2181,19 +2172,14 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       await fileClaim(policy);
       await advanceClockBySeconds(context, 21_601);
 
-      // 50 is the honest overshoot and well inside the 100 of coverage. It is
-      // still refused, because 20 is what was paid for it.
-      await expect(payout(policy, agent.publicKey, usdc(50)).rpc()).rejects.toThrow();
-      await payout(policy, agent.publicKey, usdc(20)).rpc();
+      const before: any = await (program.account as any).insurancePolicy.fetch(policy);
+      // Far above the premium, which is a fraction of a USDC on a day of
+      // cover, and paid anyway.
+      expect(before.premiumPaid.toNumber()).toBeLessThan(usdc(50).toNumber());
+      await payout(policy, agent.publicKey, usdc(50)).rpc();
 
       const pol: any = await (program.account as any).insurancePolicy.fetch(policy);
       expect(pol.state).toBe(2); // ClaimPaid
-      // The measurement is untouched: the program still saw the full breach.
-      // It is the transfer that is bounded, not the finding.
-      const record: any = await (program.account as any).agentErrorEvidenceRecord.fetch(
-        agentErrorEvidencePda(policy)[0],
-      );
-      expect(record.breachExcess.toString()).toBe(usdc(50).toString());
     });
 
     it('measures a breach of the retention floor when the cap was not crossed', async () => {

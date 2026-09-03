@@ -1012,34 +1012,15 @@ async function executePayout(
           bundleHash: proofPlan.bundleHash,
         });
         break;
-      case 'proven_mandate': {
-        // Capped at the premium, because the program caps it there.
-        //
-        // This is the one trigger whose actor answers to the claimant, so a
-        // payout above the premium would let a holder move value past their
-        // own declared cap and be paid the difference. The premium already
-        // prices the amount the envelope exposed *at purchase*; the cap is
-        // what holds once the agent has been topped up since.
-        //
-        // Enforced here as well so the keeper never sends a transaction it
-        // knows will revert — a reverted payout is recorded, and the record is
-        // worse than the shortfall.
-        const bounded = Math.min(payoutAmount, policy.premiumPaid);
-        if (bounded < payoutAmount) {
-          logger.warn(
-            { claimId: claim.id, payoutAmount, premiumPaid: policy.premiumPaid },
-            'claim-keeper: payout trimmed to the premium this policy was bought for',
-          );
-        }
+      case 'proven_mandate':
         payoutSig = await agentErrorProofPoster.settle({
           holderAddress: policy.holderAddress,
           agentAddress: policy.agentAddress,
           policyId: BigInt(claim.policyId),
-          payoutAmount: BigInt(bounded),
+          payoutAmount: BigInt(payoutAmount),
           bundleHash: proofPlan.bundleHash,
         });
         break;
-      }
       case 'proven_authority':
         payoutSig = await governanceProofPoster.settle({
           holderAddress: policy.holderAddress,

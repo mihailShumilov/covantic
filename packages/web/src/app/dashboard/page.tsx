@@ -1233,13 +1233,12 @@ function BuyPolicyForm({
             ${formatUsdc(quote.premiumAmount)} USDC
           </p>
           {/*
-            What the cover can actually pay, next to what it costs.
+            How the price is made, and what it buys.
 
-            The agent-error trigger cannot pay more than the premium — that is
-            what stops a holder who controls the agent from breaching their own
-            envelope for profit. The other three settle a loss the holder did
-            not cause and pay up to the full coverage. Both facts belong here,
-            at the decision, rather than in a claim.
+            A premium is a rate on the cover for a term — the three numbers
+            below multiply out to the figure above it — and the cover is the
+            full coverage on every trigger. The deductible is the one thing
+            that is not obvious from the coverage field, so it is stated.
           */}
           <div
             style={{
@@ -1251,19 +1250,37 @@ function BuyPolicyForm({
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--color-text-muted)' }}>
-                Exploit, oracle, governance
+              <span style={{ color: 'var(--color-text-muted)' }}>Rate</span>
+              <span>
+                {(quote.premiumBps / 100).toFixed(2)}% a year &middot;{' '}
+                {TIER_LABELS[quote.riskTier]}
               </span>
-              <span style={{ fontWeight: 600 }}>up to ${formatUsdc(quote.coverageAmount)}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--color-text-muted)' }}>Agent error</span>
-              <span style={{ fontWeight: 600 }}>up to ${formatUsdc(quote.premiumAmount)}</span>
+              <span style={{ color: 'var(--color-text-muted)' }}>On</span>
+              <span>
+                ${formatUsdc(quote.coverageAmount)} for{' '}
+                {quote.durationSeconds >= 86_400
+                  ? `${Math.round(quote.durationSeconds / 86_400)} days`
+                  : `${Math.round(quote.durationSeconds / 3600)} hours`}
+              </span>
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                marginTop: 6,
+                paddingTop: 6,
+                borderTop: '1px solid var(--color-border)',
+              }}
+            >
+              <span style={{ color: 'var(--color-text-muted)' }}>Pays up to</span>
+              <span style={{ fontWeight: 600 }}>${formatUsdc(quote.coverageAmount)} USDC</span>
             </div>
             <p style={{ margin: '6px 0 0', color: 'var(--color-text-muted)' }}>
-              An agent does what you tell it, so a settlement there is capped at what you paid
-              in — otherwise the cover would be a withdrawal slip. The other three settle losses
-              you did not cause and are not capped.
+              In full, on any of the four triggers. On an agent error the payout is what the
+              movement exceeded the cap by — the first ${formatUsdc(quote.mandate.maxSingleOutflowRaw)}{' '}
+              is the deductible.
             </p>
             <div
               style={{
