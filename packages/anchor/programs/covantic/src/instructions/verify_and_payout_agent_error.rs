@@ -107,6 +107,31 @@ pub fn verify_and_payout_agent_error_handler(
         CovanticError::PayoutExceedsCoverage
     );
 
+    // And never more than the premium this policy was bought for.
+    //
+    // This trigger is the one where the holder controls the actor. An agent
+    // error is a loss the agent caused with its *own* authority, and the agent
+    // answers to the holder — so a holder who can be paid more than they paid
+    // in is holding a withdrawal slip rather than a policy. Move value past
+    // the declared cap to an address nothing on chain can attribute to them,
+    // and the overshoot comes back from the vault.
+    //
+    // The premium already prices exactly that: it carries a flat component
+    // equal to the amount the envelope let the holder extract, measured at
+    // purchase against the balance the agent held then. What it could not
+    // price is what happened afterwards — top the agent up and the reachable
+    // overshoot grows while the premium stays where it was. The bound is
+    // stated here instead, where the balance no longer matters: whatever the
+    // agent came to hold, the vault does not pay out more than it was paid.
+    //
+    // Only on this path. The exploit and governance triggers settle losses the
+    // holder did not cause and cannot arrange, and capping those at the
+    // premium would deny a genuine victim the cover they bought.
+    require!(
+        payout_amount <= policy.premium_paid,
+        CovanticError::PayoutExceedsCoverage
+    );
+
     // A zero payout transfers nothing but still flips the policy to
     // `ClaimPaid` and releases the coverage — closing a live claim for free.
     // Nothing legitimate submits one.

@@ -10,7 +10,6 @@ import {
   calculatePremium,
   tierToPremiumBps,
   agentMandateCommitment,
-  MAX_ENVELOPE_SURCHARGE_BPS,
 } from '@covantic/shared';
 import { fetchOnChainPolicy, getPolicyReaderStatus } from '../utils/policy-reader.js';
 import { PublicKey } from '@solana/web3.js';

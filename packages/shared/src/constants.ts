@@ -87,17 +87,13 @@ export const PREMIUM_BPS = {
   HIGH: 500, // 5%
 } as const;
 
-/**
- * Ceiling on the envelope surcharge, in basis points on top of the tier
- * premium. Mirrors `MAX_ENVELOPE_SURCHARGE_BPS` in the program.
- *
- * The surcharge prices the deductible a holder declares. It is bounded because
- * an unbounded one would let a compromised oracle key refuse coverage by
- * arithmetic — quoting a policy out of existence rather than declining to
- * attest, which is far harder to notice. Ten thousand is the entire coverage
- * amount per year; past that the oracle should be saying no out loud.
- */
-export const MAX_ENVELOPE_SURCHARGE_BPS = 10_000;
+// The envelope surcharge was a rate on top of the tier premium, and it could
+// not work: pricing what the holder can extract needs a charge that does not
+// shrink when they shorten the policy, and any rate does. The envelope is
+// charged flat instead. The ceiling that used to live here — so a compromised
+// oracle key could not quote a policy out of existence by arithmetic rather
+// than by declining to sign — now reads `envelope_flat_premium <=
+// coverage_amount` in `create_policy`.
 
 
 /** Premium distribution shares (basis points, sum = 10000) */
