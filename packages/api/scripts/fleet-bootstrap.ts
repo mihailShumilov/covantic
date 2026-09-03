@@ -369,7 +369,15 @@ async function main() {
     throw new Error('fleet-bootstrap refuses to run with NODE_ENV=production');
   }
   const flags = parseFlags(process.argv.slice(2));
-  const targetCount = Math.max(1, Math.min(20, Number(flags.count ?? '3')));
+  // The ceiling is high because the fleet is consumed, not reused.
+  //
+  // An agent that has made the demo movement carries it in its own history
+  // forever, and the quote then refuses the tight envelope outright — so every
+  // demo spends an agent permanently. At twenty, arming simply stopped working
+  // after twenty runs, with "already at target size" and no hint that the cap
+  // was the reason. Creating a keypair and minting mock USDC is cheap; running
+  // out of agents mid-presentation is not.
+  const targetCount = Math.max(1, Math.min(200, Number(flags.count ?? '3')));
   // `--cap` buys a deliberately tight envelope, for a policy meant to be
   // breached. `--fund` sets what the agent holds, and the two together decide
   // the price: the flat premium is `balance - cap`, the amount a holder could
