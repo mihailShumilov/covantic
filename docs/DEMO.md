@@ -3,10 +3,17 @@
 One command per step, run against devnet, ending with the vault paying a
 policyholder without anyone approving anything.
 
-Verified end to end on 2026-09-03: policy #37 paid **20 USDC** through
-`VerifyAndPayoutAgentError` — [`2qfcSvE6…`](https://explorer.solana.com/tx/2qfcSvE65PDtidt5YpLMyoWipW1ewP7dQj3jpE8VbwrJ71RfvYnih7vNF5LtnakuxTn7Es322bK8G67yUGTXeNks?cluster=devnet).
-Vault 7,757.01 → 7,737.01; holder 1,744.86 → 1,764.86. **74.7 seconds** from the
-breach to the payout confirming.
+Verified end to end on 2026-09-03: policy #41 paid **500 USDC** through
+`VerifyAndPayoutAgentError` — [`3S9vsCET…`](https://explorer.solana.com/tx/3S9vsCETzytXAF9nFcakEcYynupD2JnVCyXXWGm4fbCF74msEgTJzsWC1UngiSuAXHQU5MQFp2BFCxr2aLaDYV3q?cluster=devnet).
+**75.0 seconds** from the breach to the payout confirming, against a premium of
+700.96 on 2,000 of coverage.
+
+Two paths lead here. `pnpm demo:arm` prepares one in a single command and is
+what `pnpm demo:status` hands you; the walkthrough below is the same thing
+step by step, with smaller numbers that are easier to narrate. The armed path
+funds 800 against a 100 cap and moves 600, so it pays 500 — the walkthrough
+funds 700 against a 650 cap and moves 670, so it pays 20. The arithmetic is
+identical; only the scale differs.
 
 ## What this demonstrates, and what it does not
 
