@@ -86,6 +86,23 @@ const DERIVED_CAP = Number(HISTORY_AMOUNT) * 5;
 /** Spaced past one sweep, so each is seen and recorded separately. */
 const HISTORY_GAP_MS = 25_000;
 
+/**
+ * How long after the purchase a claim can first be proven.
+ *
+ * Two clocks, and readiness is the later of them. The mandate matures on the
+ * chain's own delay, which the purchase writes and this script reads back.
+ * The other is the balance checkpoint: `verify_and_payout_agent_error` proves
+ * the loss by comparing the covered account against a checkpoint the sweep
+ * writes on its own schedule, and it must predate the movement. Break the
+ * envelope before the first one lands and the drop measures zero — the claim
+ * verifies, computes the whole overshoot, and then fails on chain with
+ * `DropBelowMinimum`, which reads as the protocol refusing to pay.
+ *
+ * Two sweep intervals plus slack. The interval is the deployment's
+ * `EXPLOIT_SWEEP_INTERVAL_MS`, a minute in this one.
+ */
+const CHECKPOINT_WAIT_MS = 150_000;
+
 function flag(name: string, fallback: string): string {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 && process.argv[i + 1] ? process.argv[i + 1]! : fallback;
@@ -405,7 +422,12 @@ async function armOne(days: string): Promise<{ policyId: string; agent: string; 
   if (bought === '') throw new Error('no agent could be insured under the demo envelope');
 
   const policyId = /policy #(\d+) bought/.exec(bought)?.[1];
-  const agent = /→ (fleet-[a-z0-9-]+)/.exec(bought)?.[1];
+  // Any name, not just `fleet-`. Agents armed here are created as `demo-…`
+  // now, because they have to move money before they can be underwritten and
+  // fleet-bootstrap creates, funds and quotes in one pass. The old pattern
+  // matched nothing, and arming threw *after* buying the policy — cover paid
+  // for and no record of it.
+  const agent = /→ ([A-Za-z0-9-]+) \(/.exec(bought)?.[1];
   if (!policyId || !agent) {
     process.stdout.write(bought);
     throw new Error('could not tell which policy was bought');
@@ -421,7 +443,13 @@ async function armOne(days: string): Promise<{ policyId: string; agent: string; 
     '--read',
     '--keypair', 'keys/fleet-holder.json',
   ]);
-  const readyAt = /Usable as proof from (\S+)/.exec(declared)?.[1] ?? '(unknown)';
+  const maturesAt = /Usable as proof from (\S+)/.exec(declared)?.[1] ?? '(unknown)';
+  // The later of the two clocks. See `CHECKPOINT_WAIT_MS`.
+  const checkpointedBy = new Date(Date.now() + CHECKPOINT_WAIT_MS).toISOString();
+  const readyAt =
+    maturesAt === '(unknown)' || Date.parse(maturesAt) < Date.parse(checkpointedBy)
+      ? checkpointedBy
+      : maturesAt;
 
   appendLedger({ policyId, agent, readyAt });
   return { policyId, agent, readyAt };
