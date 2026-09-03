@@ -4,6 +4,10 @@ import { z } from 'zod';
 import { SOLANA_ADDRESS_REGEX } from '@covantic/shared';
 import { agents, riskAssessments } from '../db/schema.js';
 import { assessRisk } from '../services/risk-scorer.js';
+import {
+  recordOutflow,
+  type OutflowObservation,
+} from '../services/agent-error/baseline.js';
 import { HeliusClient } from '../utils/helius.js';
 import { riskAssessmentRateLimit } from '../middleware/rate-limit.js';
 
@@ -82,6 +86,23 @@ async function saveAssessment(
 const ASSESSMENT_CACHE_TTL_SECONDS = 300;
 const cacheKey = (addr: string) => `risk:assessment:v2:${addr}`;
 
+/**
+ * Write down what the assessment saw leaving the agent.
+ *
+ * Idempotent on `(agent, signature, mint)`, so re-analysing an agent costs
+ * nothing and the sweep writing the same transaction later collides harmlessly.
+ * Failures are logged and swallowed for the same reason they are in the sweep:
+ * history is context, and losing a row must never be able to fail a quote.
+ */
+async function recordAssessedOutflows(
+  app: FastifyInstance,
+  observations: OutflowObservation[],
+): Promise<void> {
+  for (const observation of observations) {
+    await recordOutflow(app.db, observation);
+  }
+}
+
 export async function riskRoutes(app: FastifyInstance) {
   const helius = new HeliusClient(app.config.HELIUS_API_KEY, app.config.SOLANA_NETWORK);
 
@@ -108,7 +129,9 @@ export async function riskRoutes(app: FastifyInstance) {
       }
     }
 
-    const assessment = await assessRisk(agentAddress, app.solanaReader, helius);
+    const assessment = await assessRisk(agentAddress, app.solanaReader, helius, {
+      onOutflows: (observations) => recordAssessedOutflows(app, observations),
+    });
     const assessmentId = await saveAssessment(app.db, agentAddress, assessment);
     const response = { ...assessment, agentAddress, assessmentId };
 
@@ -130,7 +153,9 @@ export async function riskRoutes(app: FastifyInstance) {
     }
     const { agentAddress } = parseResult.data;
 
-    const assessment = await assessRisk(agentAddress, app.solanaReader, helius);
+    const assessment = await assessRisk(agentAddress, app.solanaReader, helius, {
+      onOutflows: (observations) => recordAssessedOutflows(app, observations),
+    });
     const assessmentId = await saveAssessment(app.db, agentAddress, assessment);
     const response = { ...assessment, agentAddress, assessmentId };
 

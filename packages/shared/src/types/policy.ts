@@ -81,43 +81,54 @@ export interface PremiumQuote {
   /** When the on-chain attestation expires (ISO-8601). */
   attestationExpiresAt: string | null;
   /**
-   * What the declared envelope costs, as a flat amount in the covered mint's
-   * base units. Not scaled by duration — see `calculatePremium`.
+   * What the envelope costs on top of the tier. Always zero now.
    *
-   * Disclosed rather than folded silently into the total: the deductible is
-   * the holder's own choice, and a price that moves with it should say so.
-   * A holder who sees it can widen the envelope and requote.
+   * It used to be the amount the holder could move past their own declared
+   * cap, charged flat — the only honest price while the holder chose the cap,
+   * and the reason a policy could cost more than the cover it bought. The
+   * envelope is derived from the agent's record instead, and an agent-error
+   * payout cannot exceed the premium, so there is no extraction capacity left
+   * to charge for. Kept in the response because the program still reads the
+   * field from the attestation, and a silent zero is worse than a stated one.
    */
   envelopeFlatPremium: number;
   /**
-   * The most this policy can ever pay, in base units.
+   * The most cover worth buying on this agent, in base units.
    *
-   * The same number as `envelopeFlatPremium` whenever the envelope is what
-   * sets the price, and saying so is the point. A breach cannot overshoot the
-   * declared cap by more than the agent holds above it, so what a holder could
-   * take at will is both what they are charged and the ceiling on what they
-   * can be paid. Disclosed at the quote because that is where the decision is,
-   * rather than in the claim where it would be a surprise.
+   * The tighter of two bounds: what the agent holds — cover above it pays for
+   * a loss that cannot happen — and what the vault's stake supports, since
+   * `create_policy` refuses below half of coverage staked. Both are knowable
+   * at the quote, where the buyer can still change the number, rather than at
+   * the purchase, where they are a failed transaction.
    */
-  maxClaimable: number;
-  /**
-   * How much of the requested coverage no breach of this envelope can reach.
-   *
-   * Coverage above the agent's headroom over its own cap buys nothing: the
-   * payout is the overshoot, and the overshoot is bounded by what the agent
-   * holds. Non-zero here means the buyer is paying tier premium on cover that
-   * cannot be claimed.
-   */
-  coverageBeyondEnvelope: number;
-  /** What the agent holds now, in base units — the figure both of the above
-   *  are derived from, so the buyer can check the reasoning. */
+  maxCoverage: number;
+  /** Which of the two bounds is the binding one, so the form can say why. */
+  maxCoverageBound: 'agent_balance' | 'vault_capacity';
+  /** What the agent holds now, in base units — the figure the bound above is
+   *  derived from, so the buyer can check the reasoning. */
   agentCoveredBalance: number;
   /**
-   * How far the declared cap sits above what the agent normally moves, or
-   * null when there is no history to measure against — which is charged at
-   * the ceiling, not refused.
+   * The operating envelope this policy will be bought against.
+   *
+   * Derived, not chosen: a holder who picks the cap picks the breach. The
+   * oracle commits to this exact shape in the attestation it signs, so the
+   * client must pass it back unchanged — `create_policy` compares the two and
+   * refuses anything else.
    */
-  envelopeHeadroom: number | null;
+  mandate: {
+    maxSingleOutflowRaw: number;
+    maxWindowOutflowRaw: number;
+    windowSeconds: number;
+    minRetainedBalanceRaw: number;
+    allowedCounterparties: string[];
+    allowedPrograms: string[];
+  };
+  /** `history` when the cap came from what the agent does, `balance` when
+   *  there was not enough of it and the cap is the balance itself. */
+  envelopeBasis: 'history' | 'balance';
+  /** The ordinary movement the cap was drawn from, base units, or null on the
+   *  balance basis. */
+  ordinaryOutflow: number | null;
 }
 
 /** Error codes returned by the quote endpoint when a quote cannot be issued. */

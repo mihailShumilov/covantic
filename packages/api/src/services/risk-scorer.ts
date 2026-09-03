@@ -27,6 +27,10 @@ import type {
 } from '../utils/solana-rpc-analyzer.js';
 import { logger } from '../utils/logger.js';
 import type { SolanaReader } from '../utils/solana-reader.js';
+import {
+  outflowsFromBalanceChanges,
+  type OutflowObservation,
+} from './agent-error/baseline.js';
 
 // Re-export transaction types for compatibility
 type EnhancedTransaction = AnalyzedTransaction;
@@ -112,6 +116,21 @@ export interface AssessRiskOptions {
    * replays / tests deterministic.
    */
   now?: Date;
+  /**
+   * Called with what the assessment observed leaving the agent.
+   *
+   * A side channel rather than a return value, because the observations are an
+   * API concern and `RiskAssessment` is a type the client shares. The scoring
+   * itself does not read them.
+   *
+   * They exist because the sweep that normally records an agent's spending
+   * only walks agents that already hold an active policy, and the envelope the
+   * quote derives is drawn from exactly that history. Without this an agent
+   * could never accumulate one before being insured, so its cap would fall
+   * back to its balance — a cap nothing can cross — and agent-error cover
+   * would never activate on a policy anyone actually bought.
+   */
+  onOutflows?: (observations: OutflowObservation[]) => void | Promise<void>;
 }
 
 export async function assessRisk(
@@ -185,6 +204,18 @@ export async function assessRisk(
     (tx.nativeTransfers ?? []).some((t) => t.toUserAccount === agentAddress) ||
     (tx.tokenTransfers ?? []).some((t) => t.toUserAccount === agentAddress),
   );
+
+  if (options.onOutflows) {
+    const observed = txs.flatMap((tx) =>
+      outflowsFromBalanceChanges({
+        agentAddress,
+        signature: tx.signature,
+        blockTime: new Date((tx.timestamp || Math.floor(nowMs / 1000)) * 1000),
+        accountData: tx.accountData ?? [],
+      }),
+    );
+    if (observed.length > 0) await options.onOutflows(observed);
+  }
 
   const walletAgeDays = computeWalletAgeDays(accountInfo, txs, nowMs);
 

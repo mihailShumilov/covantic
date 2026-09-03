@@ -45,8 +45,7 @@ const API = process.env.API_URL ?? 'https://covantic.org';
  *  dimension left silent is reported `unevaluated`, and each one costs 0.03 of
  *  the confidence the payout lane needs. A sparse declaration lands at 0.63
  *  against a 0.75 bar and goes to a human — correctly. */
-const MAX_SINGLE = '100';
-const MIN_RETAINED = '400';
+
 /**
  * What the agent is funded with, and why it is not the fleet default of 5000.
  *
@@ -76,6 +75,14 @@ const BREACH_AMOUNT = 600;
  *  verdict carries a standing -0.03. */
 const HISTORY_TRANSFERS = 6;
 const HISTORY_AMOUNT = '20';
+/**
+ * Where the quote will put the cap.
+ *
+ * Not a setting any more: the envelope is derived as five times what the agent
+ * ordinarily moves, and the history above is what makes that number 20. So the
+ * cap lands at 100, and the 600 the demo asks for is six times over it.
+ */
+const DERIVED_CAP = Number(HISTORY_AMOUNT) * 5;
 /** Spaced past one sweep, so each is seen and recorded separately. */
 const HISTORY_GAP_MS = 25_000;
 
@@ -176,13 +183,26 @@ function appendLedger(entry: Armed): void {
 const USDC_MINT = process.env.USDC_MINT ?? '';
 const RPC = process.env.SOLANA_RPC_URL ?? 'https://api.devnet.solana.com';
 
-type State = 'ready' | 'maturing' | 'spent' | 'underpriced';
+type State = 'ready' | 'maturing' | 'spent';
 
 /**
- * What the demo movement produces as a payout: everything past the declared
- * cap. The first slice is the deductible the holder authored.
+ * What the demo movement will actually pay out.
+ *
+ * Two bounds, and the second is the one that bites. The breach is everything
+ * past the derived cap — the first slice is the deductible. But an agent-error
+ * settlement may not exceed the premium the policy was bought for, and with
+ * the envelope no longer carrying a flat charge, that premium is a rate on the
+ * cover for a term.
+ *
+ * So this trigger returns roughly what it cost, and no more. That is the
+ * bound working rather than failing: an agent does what its holder tells it,
+ * so a holder paid more than they paid in is holding a withdrawal slip. It
+ * is printed rather than left to be discovered on stage.
  */
-const EXPECTED_PAYOUT_USDC = BREACH_AMOUNT - Number(MAX_SINGLE);
+function expectedPayoutUsdc(premiumPaidRaw: number): number {
+  const breach = BREACH_AMOUNT - DERIVED_CAP;
+  return Math.min(breach, premiumPaidRaw / 1_000_000);
+}
 
 interface FleetAgent {
   name: string;
@@ -253,7 +273,9 @@ async function insurable(): Promise<Array<FleetAgent & { usdc: number }>> {
 
 /** Live state of every armed policy. `spent` covers both outcomes that end a
  *  policy: a demo that settled it, and a week going by. */
-async function survey(): Promise<Array<Armed & { state: State; premiumUsdc: number }>> {
+async function survey(): Promise<
+  Array<Armed & { state: State; premiumUsdc: number; payoutUsdc: number }>
+> {
   const res = await fetch(`${API}/api/policies`);
   const body = (await res.json()) as {
     policies?: Array<{ policyId: number; state: number; premiumPaid: number }>;
@@ -265,28 +287,15 @@ async function survey(): Promise<Array<Armed & { state: State; premiumUsdc: numb
 
   return readLedger().map((a) => {
     const chain = live.get(a.policyId);
-    // An agent-error payout cannot exceed the premium the policy was bought
-    // for. That is what closes the top-up: the envelope is priced against the
-    // balance the agent held at purchase, and funding it afterwards would
-    // otherwise widen the reachable overshoot for free.
-    //
-    // It also means a policy bought before that pricing existed pays a
-    // fraction of what the demo would produce. Such a policy is live, matured
-    // and useless on stage — and it would look like the protocol failing to
-    // pay rather than a bound doing its job, which is the worst thing this
-    // script can hand someone.
-    const underpriced =
-      chain !== undefined && chain.premiumPaid < EXPECTED_PAYOUT_USDC * 1_000_000;
     return {
       ...a,
       premiumUsdc: (chain?.premiumPaid ?? 0) / 1_000_000,
+      payoutUsdc: expectedPayoutUsdc(chain?.premiumPaid ?? 0),
       state: (chain === undefined || chain.state !== 0
         ? 'spent'
-        : underpriced
-          ? 'underpriced'
-          : Date.parse(a.readyAt) <= now
-            ? 'ready'
-            : 'maturing') as State,
+        : Date.parse(a.readyAt) <= now
+          ? 'ready'
+          : 'maturing') as State,
     };
   });
 }
@@ -332,33 +341,71 @@ async function armOne(days: string): Promise<{ policyId: string; agent: string; 
   // program, and correctly: it bought a wide envelope and then tried to
   // tighten it.
   const common = [
-    '--coverage', '2000',
+    '--coverage', '600',
     '--duration', String(Number(days) * 86_400),
     '--fund', FUND,
-    '--cap', MAX_SINGLE,
-    '--floor', MIN_RETAINED,
   ];
-  // Every reusable agent, then a brand-new one as the last resort.
-  const attempts: Array<{ label: string; args: string[]; name?: string }> = [
-    ...spares.map((a) => ({
-      label: `buying cover for ${a.name}`,
-      args: ['--agent', a.name],
-      name: a.name,
-    })),
-    { label: 'buying a policy', args: ['--count', String(before + 1)] },
+  // Every reusable agent, then one made for the purpose.
+  //
+  // The fresh one is created and funded here rather than inside
+  // fleet-bootstrap, because it has to behave before it can be underwritten:
+  // the cap is five times what the agent ordinarily moves, and bootstrap
+  // creates, funds and quotes in one pass with no room for a history in
+  // between.
+  const fresh = `demo-${Date.now().toString(36)}`;
+  const attempts = [
+    ...spares.map((a) => ({ label: `buying cover for ${a.name}`, name: a.name, create: false })),
+    { label: `buying cover for ${fresh}`, name: fresh, create: true },
   ];
 
   let bought = '';
   for (const attempt of attempts) {
+    let pubkey = fleetAgents().find((c) => c.name === attempt.name)?.pubkey;
+    if (attempt.create) {
+      say(`  creating ${attempt.name}…`);
+      // A fresh agent is not in the fleet manifest yet — `agent:create` writes
+      // a keypair and prints the address, and nothing else knows about it
+      // until the purchase adds a row.
+      pubkey = /Pubkey: (\S+)/.exec(
+        run('agent-wallet.ts', ['create', '--name', attempt.name]),
+      )?.[1];
+      run('agent-wallet.ts', ['fund', '--name', attempt.name, '--usdc', FUND]);
+    }
+    // The history comes first, and the order is the change.
+    //
+    // The cap is derived from what the agent ordinarily moves, so an agent
+    // with no record gets a cap equal to its balance — one nothing can cross,
+    // since it cannot move more than it holds. Buying first and behaving
+    // afterwards, which is what this script used to do, produced a policy whose
+    // agent-error cover could never fire. An underwriter reads a record; it
+    // does not wait for one.
+    {
+      say(`  ${attempt.name}: ${HISTORY_TRANSFERS} ordinary movements, then underwriting…`);
+      for (let i = 0; i < HISTORY_TRANSFERS; i += 1) {
+        run('agent-wallet.ts', [
+          'trigger', '--name', attempt.name, '--amount', HISTORY_AMOUNT, '--kind', 'transfer',
+        ]);
+        if (i < HISTORY_TRANSFERS - 1) await new Promise((r) => setTimeout(r, HISTORY_GAP_MS));
+      }
+      // The quote reads the agent's record, and the record is written by the
+      // risk assessment — which is cached for five minutes. Forcing a refresh
+      // is what puts the movements above into it before the envelope is drawn
+      // from them.
+      if (pubkey) {
+        await fetch(`${API}/api/risk/${encodeURIComponent(pubkey)}/refresh`, {
+          method: 'POST',
+        }).catch(() => undefined);
+      }
+    }
     say(`  ${attempt.label}…`);
-    const result = tryRun('fleet-bootstrap.ts', [...attempt.args, ...common]);
+    const result = tryRun('fleet-bootstrap.ts', ['--agent', attempt.name, ...common]);
     if (result.ok) {
       bought = result.out;
       break;
     }
-    if (result.out.includes('ENVELOPE_NOT_INSURABLE')) {
-      say('    refused — this agent already moves more than the cap allows');
-      if (attempt.name) rememberRefused(attempt.name);
+    if (result.out.includes('ENVELOPE_NOT_INSURABLE') || result.out.includes('COVERAGE_ABOVE_MAX')) {
+      say('    refused — this agent cannot carry the demo envelope');
+      rememberRefused(attempt.name);
       continue;
     }
     process.stdout.write(result.out);
@@ -385,14 +432,6 @@ async function armOne(days: string): Promise<{ policyId: string; agent: string; 
   ]);
   const readyAt = /Usable as proof from (\S+)/.exec(declared)?.[1] ?? '(unknown)';
 
-  say(`  giving the agent a history (${HISTORY_TRANSFERS} movements inside the envelope)…`);
-  for (let i = 0; i < HISTORY_TRANSFERS; i += 1) {
-    run('agent-wallet.ts', ['trigger', '--name', agent, '--amount', HISTORY_AMOUNT, '--kind', 'transfer']);
-    if (i < HISTORY_TRANSFERS - 1) {
-      await new Promise((r) => setTimeout(r, HISTORY_GAP_MS));
-    }
-  }
-
   appendLedger({ policyId, agent, readyAt });
   return { policyId, agent, readyAt };
 }
@@ -406,7 +445,6 @@ async function status(): Promise<void> {
   const all = await survey();
   const ready = all.filter((a) => a.state === 'ready');
   const maturing = all.filter((a) => a.state === 'maturing');
-  const underpriced = all.filter((a) => a.state === 'underpriced');
 
   say(ready.length > 0 ? `READY — ${ready.length} polic${ready.length === 1 ? 'y' : 'ies'}\n` : 'NOTHING READY\n');
   for (const a of ready) say(line(a));
@@ -414,13 +452,19 @@ async function status(): Promise<void> {
     say('\nMaturing:');
     for (const a of maturing) say(`  #${a.policyId} usable from ${a.readyAt}`);
   }
-  if (underpriced.length > 0) {
-    say(`\nNot usable — the premium is below the ${EXPECTED_PAYOUT_USDC} USDC this demo pays out,`);
-    say('and a payout is capped at the premium the policy was bought for:');
-    for (const a of underpriced) {
-      say(`  #${a.policyId} premium ${a.premiumUsdc.toLocaleString()} USDC — would pay that, not ${EXPECTED_PAYOUT_USDC}`);
+  if (ready.length > 0) {
+    say('');
+    say('What each will pay, so nothing is a surprise on stage:');
+    for (const a of ready) {
+      say(
+        `  #${a.policyId} premium ${a.premiumUsdc.toFixed(2)} USDC → pays ${a.payoutUsdc.toFixed(2)} USDC`,
+      );
     }
-    say('  Arm a fresh one with `pnpm demo:arm`.');
+    say(
+      `  The breach is ${BREACH_AMOUNT - DERIVED_CAP} USDC past the derived cap, and an agent-error`,
+    );
+    say('  settlement is capped at the premium — an agent does what its holder tells it.');
+    say('  The exploit, oracle and governance triggers are not capped and pay the full cover.');
   }
   if (ready.length === 0 && maturing.length === 0) {
     say('Run `pnpm demo:arm` — a declaration must mature before it can be proven against.');

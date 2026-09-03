@@ -13,9 +13,11 @@
  *   pnpm fleet:bootstrap                    # target size 3 (default)
  *   pnpm fleet:bootstrap --count 5
  *   pnpm fleet:bootstrap --count 5 --coverage 200 --duration 86400
- *   pnpm fleet:bootstrap --count 6 --fund 700 --cap 650 --coverage 200
- *              A deliberately tight envelope, for a policy meant to be
- *              breached. The flat premium is `fund - cap`.
+ *   pnpm fleet:bootstrap --count 6 --fund 700 --coverage 200
+ *   pnpm fleet:bootstrap --agent <name>     # cover an agent that has none
+ *
+ * `--fund` sets what the agent holds. The operating envelope is derived by the
+ * quote from the agent's own record and is not settable here.
  *
  * Pre-reqs:
  *   - API running at $API_URL (default http://localhost:4099) with risk +
@@ -57,50 +59,15 @@ const { BN } = anchorPkg;
 
 
 /**
- * The envelope the fleet's policies are bought against.
+ * The envelope is no longer built here.
  *
- * Wide enough that ordinary fleet activity never touches it — these agents
- * exist to produce real on-chain traffic, not to breach anything — and
- * declared at purchase because there is no longer anywhere else to declare it.
- * The premium is quoted against this, so a fleet bought with a tight envelope
- * would be paying for a deductible it has no use for.
+ * `--cap` and `--floor` used to construct one, and the quote priced whatever
+ * was handed to it. Both are gone: a holder who picks the cap picks the
+ * breach, so the quote derives the envelope from the agent's own record and
+ * commits to it, and this script passes back what it is given. `--fund` still
+ * matters — it decides what the agent holds, and therefore both what it can
+ * lose and, until it has a spending history, where its cap sits.
  */
-export const FLEET_ENVELOPE = {
-  maxSingleOutflowRaw: 1_000_000_000_000,
-  maxWindowOutflowRaw: 1_000_000_000_000,
-  windowSeconds: 3_600,
-  minRetainedBalanceRaw: 0,
-  allowedCounterparties: [] as string[],
-  allowedPrograms: [] as string[],
-};
-
-/**
- * A tighter envelope, for a policy meant to be breached on purpose.
- *
- * `--cap` narrows it; `--fund` sets what the agent holds. The two together
- * decide the price, and the relationship is the whole point of the pricing
- * change: the flat premium is what the holder could extract at will, which is
- * `balance - cap`. A 700 USDC agent under a 650 cap costs 50 and can be walked
- * over for 50. Widen the gap and the policy costs more, in exact step.
- */
-function envelopeFrom(capUsdc: number | null, floorUsdc: number): typeof FLEET_ENVELOPE {
-  if (capUsdc === null) return FLEET_ENVELOPE;
-  return {
-    maxSingleOutflowRaw: Math.round(capUsdc * 1_000_000),
-    maxWindowOutflowRaw: Math.round(capUsdc * 1_000_000),
-    windowSeconds: 3_600,
-    minRetainedBalanceRaw: Math.round(floorUsdc * 1_000_000),
-    // Declared, not left blank, and the difference is 0.06 of the confidence a
-    // payout needs. A silent allowlist is reported `unevaluated` — correctly,
-    // since silence is not prohibition — and each unevaluated dimension costs
-    // 0.03. Two of them put an otherwise perfect verdict under the review bar.
-    //
-    // These are the destination `agent:trigger` actually sends to and the
-    // program it goes through, so both checks run and both pass.
-    allowedCounterparties: [DEMO_SINK_OWNER],
-    allowedPrograms: [TOKEN_PROGRAM_ID.toBase58()],
-  };
-}
 
 /** Where `agent:trigger` sends by default: the mint authority's own wallet. */
 const DEMO_SINK_OWNER = '8SUV2eNzyrWfyZod1StCSuyBBTk5jruFydaMe8yRyLVC';
@@ -234,6 +201,19 @@ interface QuoteResponse {
   durationSeconds: number;
   attestationPda?: string | null;
   attestationExpiresAt?: string | null;
+  /** The envelope the quote derived. The oracle has committed to this exact
+   *  shape, so `create_policy` must be handed it unchanged. */
+  mandate: {
+    maxSingleOutflowRaw: number;
+    maxWindowOutflowRaw: number;
+    windowSeconds: number;
+    minRetainedBalanceRaw: number;
+    allowedCounterparties: string[];
+    allowedPrograms: string[];
+  };
+  envelopeBasis: 'history' | 'balance';
+  ordinaryOutflow: number | null;
+  maxCoverage: number;
 }
 
 async function fetchRiskAndQuote(
@@ -241,7 +221,6 @@ async function fetchRiskAndQuote(
   agentAddress: string,
   coverageRaw: number,
   durationSeconds: number,
-  envelope: typeof FLEET_ENVELOPE,
 ): Promise<QuoteResponse> {
   // 1. Trigger / refresh the risk score.
   const riskRes = await fetch(`${apiUrl}/api/risk/${encodeURIComponent(agentAddress)}`);
@@ -259,9 +238,9 @@ async function fetchRiskAndQuote(
       agentAddress,
       coverageAmount: coverageRaw,
       durationSeconds,
-      // The quote prices this envelope and the oracle commits to its hash;
-      // `create_policy` refuses a purchase that declares a different one.
-      mandate: envelope,
+      // No envelope is sent. The quote derives it from the agent's own record
+      // and returns it, and the oracle commits to that shape — so the purchase
+      // below passes back what came out of here, unchanged.
     }),
   });
   if (!quoteRes.ok) {
@@ -285,7 +264,7 @@ async function buyPolicy(
   usdcMint: PublicKey,
   coverageRaw: number,
   durationSeconds: number,
-  envelope: typeof FLEET_ENVELOPE,
+  envelope: QuoteResponse['mandate'],
 ): Promise<{ policyId: number; signature: string }> {
   const programId = program.programId;
 
@@ -378,13 +357,9 @@ async function main() {
   // was the reason. Creating a keypair and minting mock USDC is cheap; running
   // out of agents mid-presentation is not.
   const targetCount = Math.max(1, Math.min(200, Number(flags.count ?? '3')));
-  // `--cap` buys a deliberately tight envelope, for a policy meant to be
-  // breached. `--fund` sets what the agent holds, and the two together decide
-  // the price: the flat premium is `balance - cap`, the amount a holder could
-  // walk the agent over the line for.
-  const capUsdc = flags.cap === undefined ? null : Number(flags.cap);
-  const floorUsdc = Number(flags.floor ?? '0');
-  const envelope = envelopeFrom(capUsdc, floorUsdc);
+  // `--fund` sets what the agent holds. It is the only lever left on the
+  // envelope, and an indirect one: the quote derives the cap from the agent's
+  // spending history, falling back to its balance when there is none.
   const fundUsdc = Number(flags.fund ?? '5000');
   const coverageUi = Number(flags.coverage ?? '100'); // USDC
   const coverageRaw = Math.round(coverageUi * 10 ** 6);
@@ -426,9 +401,11 @@ async function main() {
   //
   // `ensureUsdc` tops up to a target, so sizing this for the whole fleet costs
   // one mint of the shortfall.
-  const envelopePremium =
-    capUsdc === null ? 0 : Math.min(coverageUi, Math.max(0, fundUsdc - capUsdc));
-  const holderBudget = targetCount * (envelopePremium + 5) + 100;
+  // Back to a small, bounded figure: the premium is a rate on the cover for a
+  // term again, with no flat envelope charge on top. HIGH is 500 bps annual
+  // and the longest policy is 30 days, so five USDC an agent is generous for
+  // any coverage this script buys.
+  const holderBudget = targetCount * 5 + 100;
   await ensureUsdc(connection, mintAuthority, usdcMint, holder.publicKey, holderBudget);
   console.log('  SOL + USDC funded for holder.');
 
@@ -495,12 +472,19 @@ async function main() {
       agentPubkey.toBase58(),
       coverageRaw,
       durationSeconds,
-      envelope,
     );
     console.log(
       `  risk:  tier=${quote.riskTier} premium=${quote.premiumAmount} raw (≈ ${(
         quote.premiumAmount / 10 ** 6
       ).toFixed(4)} USDC)`,
+    );
+    console.log(
+      `  envelope: cap ${(quote.mandate.maxSingleOutflowRaw / 10 ** 6).toLocaleString()} USDC ` +
+        `(${quote.envelopeBasis}${
+          quote.ordinaryOutflow === null
+            ? ''
+            : `, ordinary ${(quote.ordinaryOutflow / 10 ** 6).toLocaleString()}`
+        })`,
     );
 
     // Buy policy (holder signs).
@@ -512,7 +496,7 @@ async function main() {
       usdcMint,
       coverageRaw,
       durationSeconds,
-      envelope,
+      quote.mandate,
     );
     console.log(`  policy #${policyId} bought: ${signature}`);
 
@@ -526,12 +510,18 @@ async function main() {
       durationSeconds,
       createdAt: new Date().toISOString(),
     };
-    manifest = target.isNew
-      ? appendAgent(manifest, row)
-      : {
-          ...manifest,
-          agents: manifest.agents.map((a) => (a.name === name ? row : a)),
-        };
+    // An agent named with `--agent` may not be in the manifest at all —
+    // `agent:create` writes a keypair into `keys/agents/` and nothing else. A
+    // blind map-replace silently dropped those on the floor: cover was bought,
+    // the policy existed, and the fleet had no row for it.
+    const known = manifest.agents.some((a) => a.name === name);
+    manifest =
+      target.isNew || !known
+        ? appendAgent(manifest, row)
+        : {
+            ...manifest,
+            agents: manifest.agents.map((a) => (a.name === name ? row : a)),
+          };
     saveManifest(manifest);
   }
 

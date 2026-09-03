@@ -73,6 +73,67 @@ export async function recordOutflow(db: Database, observation: OutflowObservatio
 }
 
 /**
+ * What left the agent in one transaction, read from its balance changes.
+ *
+ * The sweep builds these from a `RawTxView`, but the sweep only walks agents
+ * that already hold an active policy — so an agent nobody has insured yet has
+ * no history, and the envelope derived at the quote falls back to its balance:
+ * a cap nothing can cross, and agent-error cover that can never activate.
+ * Cover that requires a history, and a history that requires cover.
+ *
+ * The risk assessment is the way out. It is required before a quote, it
+ * already reads a hundred of the agent's transactions to score it, and those
+ * carry the same balance changes. Underwriting an agent and writing down what
+ * it spends are the same act.
+ *
+ * A balance *change*, not a transfer list: a transfer says who sent what, and
+ * an outflow is what the account is left short by. The two differ whenever a
+ * transaction both credits and debits the same account, and the second is what
+ * the caps are measured against.
+ */
+export function outflowsFromBalanceChanges(input: {
+  agentAddress: string;
+  signature: string;
+  blockTime: Date;
+  accountData: Array<{
+    tokenBalanceChanges: Array<{
+      mint: string;
+      userAccount: string;
+      rawTokenAmount: { tokenAmount: string; decimals: number };
+    }>;
+  }>;
+}): OutflowObservation[] {
+  const byMint = new Map<string, { deltaRaw: number; decimals: number }>();
+
+  for (const account of input.accountData) {
+    for (const change of account.tokenBalanceChanges ?? []) {
+      if (change.userAccount !== input.agentAddress) continue;
+      const delta = Number(change.rawTokenAmount?.tokenAmount ?? 0);
+      if (!Number.isFinite(delta)) continue;
+      const seen = byMint.get(change.mint);
+      byMint.set(change.mint, {
+        deltaRaw: (seen?.deltaRaw ?? 0) + delta,
+        decimals: change.rawTokenAmount?.decimals ?? seen?.decimals ?? 0,
+      });
+    }
+  }
+
+  const observations: OutflowObservation[] = [];
+  for (const [mint, leg] of byMint) {
+    if (leg.deltaRaw >= 0) continue;
+    observations.push({
+      agentAddress: input.agentAddress,
+      txSignature: input.signature,
+      mint,
+      amountRaw: Math.abs(leg.deltaRaw),
+      decimals: leg.decimals,
+      blockTime: input.blockTime,
+    });
+  }
+  return observations;
+}
+
+/**
  * Summarise an agent's outflow history as of a moment.
  *
  * `at` is passed in rather than read from a clock so the summary a verdict was

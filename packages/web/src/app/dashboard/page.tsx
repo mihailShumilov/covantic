@@ -843,33 +843,14 @@ function BuyPolicyForm({
   const { program, provider } = useCovanticProgram();
   const [coverage, setCoverage] = useState('100');
   const [duration, setDuration] = useState('24');
-  // The operating envelope — the deductible the holder authors.
+  // The operating envelope is not asked for any more.
   //
-  // Declared here rather than afterwards because the premium is quoted against
-  // it: until it was, a holder could buy cover and then choose a cap their
-  // agent was certain to cross. The defaults are deliberately loose; a tighter
-  // envelope costs more, and the quote says by how much.
-  const [maxSingle, setMaxSingle] = useState('1000');
-  const [maxWindow, setMaxWindow] = useState('5000');
-  const [windowHours, setWindowHours] = useState('1');
-  const [minRetained, setMinRetained] = useState('0');
-
-  /**
-   * The envelope, in the shape both the quote and the program want.
-   *
-   * Counterparties and programs are left undeclared. An empty allowlist
-   * means the holder said nothing about destinations — silence, not
-   * prohibition — and reading a blank field as "nothing is permitted" would
-   * make every ordinary transfer a covered event.
-   */
-  const envelopeForQuote = () => ({
-    maxSingleOutflowRaw: Math.round(Number(maxSingle) * 1_000_000),
-    maxWindowOutflowRaw: Math.round(Number(maxWindow) * 1_000_000),
-    windowSeconds: Math.round(Number(windowHours) * 3600),
-    minRetainedBalanceRaw: Math.round(Number(minRetained) * 1_000_000),
-    allowedCounterparties: [] as string[],
-    allowedPrograms: [] as string[],
-  });
+  // It was five fields here, and it was the wrong five: a holder who picks the
+  // cap picks the breach, so the price had to charge for what they could take
+  // through it — which is how a policy came to cost more than it covered. The
+  // quote derives the envelope from the agent's own history and returns it;
+  // this form shows it and sends it back unchanged, because the oracle has
+  // committed to that exact shape and the program refuses any other.
 
   const [quote, setQuote] = useState<PremiumQuote | null>(null);
   const [txPhase, setTxPhase] = useState<TxPhase>('idle');
@@ -909,7 +890,6 @@ function BuyPolicyForm({
           coverageAmount: Math.round(coverageNum * 1_000_000),
           durationSeconds: Math.round(durationNum * 3600),
           agentAddress: assessment.agentAddress,
-          mandate: envelopeForQuote(),
         });
         setQuote(q);
         setQuoteErrorCode(null);
@@ -930,6 +910,14 @@ function BuyPolicyForm({
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [coverage, duration, assessment.agentAddress]);
+
+  // The ceiling the coverage field validates against, in whole USDC.
+  //
+  // It comes from the quote rather than from anything the form knows: the
+  // binding number is the tighter of what the agent holds and what the vault's
+  // stake supports, and only the server can see the second one.
+  const maxCoverageUi = quote ? Math.floor(quote.maxCoverage / 1_000_000) : null;
+  const overMax = maxCoverageUi !== null && parseFloat(coverage) > maxCoverageUi;
 
   const validUntilMs = quote ? new Date(quote.validUntil).getTime() : 0;
   const msLeft = validUntilMs ? validUntilMs - now : 0;
@@ -985,15 +973,18 @@ function BuyPolicyForm({
       const holderAta = getAssociatedTokenAddressSync(usdcMint, publicKey);
       const vaultAta = getAssociatedTokenAddressSync(usdcMint, vaultPda, true);
 
-      const env = envelopeForQuote();
+      // Sent back exactly as quoted. The oracle committed to this envelope's
+      // hash in the attestation it signed, and `create_policy` compares the
+      // two — so a client that edits any field here buys nothing.
+      const env = quote.mandate;
       const tx = await program.methods
         .createPolicy(new BN(coverageNum), new BN(durationNum), agentPk, {
           maxSingleOutflow: new BN(env.maxSingleOutflowRaw),
           maxWindowOutflow: new BN(env.maxWindowOutflowRaw),
           windowSeconds: new BN(env.windowSeconds),
           minRetainedBalance: new BN(env.minRetainedBalanceRaw),
-          allowedCounterparties: [],
-          allowedPrograms: [],
+          allowedCounterparties: env.allowedCounterparties.map((k) => new PublicKey(k)),
+          allowedPrograms: env.allowedPrograms.map((k) => new PublicKey(k)),
           // Commits to off-chain terms there are none of yet. The program does
           // not read it and the oracle does not price it, which is why it is
           // excluded from the commitment the two sides compare.
@@ -1128,17 +1119,36 @@ function BuyPolicyForm({
         </label>
         <input
           type="number"
+          min={1}
+          max={maxCoverageUi ?? undefined}
           value={coverage}
           onChange={(e) => setCoverage(e.target.value)}
+          aria-invalid={overMax}
           style={{
             width: '100%',
             padding: '0.5rem',
             background: 'var(--color-bg)',
-            border: '1px solid var(--color-border)',
+            border: `1px solid ${overMax ? 'var(--color-danger)' : 'var(--color-border)'}`,
             borderRadius: 'var(--radius-md)',
             color: 'var(--color-text)',
           }}
         />
+        {maxCoverageUi !== null && (
+          <p
+            style={{
+              fontSize: '0.75rem',
+              margin: '4px 0 0',
+              lineHeight: 1.5,
+              color: overMax ? 'var(--color-danger)' : 'var(--color-text-muted)',
+            }}
+          >
+            {overMax ? 'Above the maximum — ' : 'Maximum '}
+            ${maxCoverageUi.toLocaleString()} USDC.{' '}
+            {quote?.maxCoverageBound === 'vault_capacity'
+              ? 'That is what the vault’s stake currently supports.'
+              : 'That is what this agent holds — cover above it would pay for a loss it cannot suffer.'}
+          </p>
+        )}
       </div>
       <div>
         <label
@@ -1165,117 +1175,41 @@ function BuyPolicyForm({
           }}
         />
       </div>
-      <div style={{ gridColumn: '1 / -1', marginTop: '0.5rem' }}>
-        <div style={{ fontSize: '0.8125rem', fontWeight: 600, marginBottom: 2 }}>
-          Operating envelope
+      {/*
+        The envelope is shown, not asked for.
+
+        It used to be four inputs here, and they were the wrong four: a holder
+        who picks the cap picks the breach, so the price had to charge for
+        whatever they could move through it — which is how a policy came to
+        cost more than the cover it bought. It is derived from the agent's own
+        record now, so two agents that behave the same are underwritten the
+        same however much they happen to hold.
+      */}
+      {quote && !quoteExpired && (
+        <div style={{ gridColumn: '1 / -1', marginTop: '0.25rem' }}>
+          <div style={{ fontSize: '0.8125rem', fontWeight: 600, marginBottom: 2 }}>
+            Operating envelope
+          </div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', lineHeight: 1.55 }}>
+            {quote.envelopeBasis === 'history' ? (
+              <>
+                Set from this agent&rsquo;s own record: it ordinarily moves $
+                {formatUsdc(quote.ordinaryOutflow ?? 0)}, so a single transfer over{' '}
+                <strong>${formatUsdc(quote.mandate.maxSingleOutflowRaw)}</strong> — five times
+                that — is treated as a covered error. A loss inside the envelope is not covered;
+                that first slice is the deductible.
+              </>
+            ) : (
+              <>
+                This agent has no spending history yet, so the cap is set at what it holds — $
+                {formatUsdc(quote.mandate.maxSingleOutflowRaw)}, which nothing can cross, since an
+                agent cannot move more than it has. The other three triggers cover it from the
+                first minute; agent-error cover begins once it has been observed.
+              </>
+            )}
+          </div>
         </div>
-        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
-          What your agent is permitted to do. A loss inside it is not covered — this is the
-          deductible, and you author it. It is declared with the purchase and priced into the
-          premium, so a tighter envelope costs more; it can be widened later but never narrowed,
-          because narrowing is exposure the premium did not buy.
-        </div>
-      </div>
-      <div>
-        <label
-          style={{
-            fontSize: '0.8125rem',
-            color: 'var(--color-text-muted)',
-            display: 'block',
-            marginBottom: 4,
-          }}
-        >
-          Max single transfer (USDC)
-        </label>
-        <input
-          type="number"
-          value={maxSingle}
-          onChange={(e) => setMaxSingle(e.target.value)}
-          style={{
-            width: '100%',
-            padding: '0.5rem',
-            background: 'var(--color-bg)',
-            border: '1px solid var(--color-border)',
-            borderRadius: 'var(--radius-md)',
-            color: 'var(--color-text)',
-          }}
-        />
-      </div>
-      <div>
-        <label
-          style={{
-            fontSize: '0.8125rem',
-            color: 'var(--color-text-muted)',
-            display: 'block',
-            marginBottom: 4,
-          }}
-        >
-          Max per window (USDC)
-        </label>
-        <input
-          type="number"
-          value={maxWindow}
-          onChange={(e) => setMaxWindow(e.target.value)}
-          style={{
-            width: '100%',
-            padding: '0.5rem',
-            background: 'var(--color-bg)',
-            border: '1px solid var(--color-border)',
-            borderRadius: 'var(--radius-md)',
-            color: 'var(--color-text)',
-          }}
-        />
-      </div>
-      <div>
-        <label
-          style={{
-            fontSize: '0.8125rem',
-            color: 'var(--color-text-muted)',
-            display: 'block',
-            marginBottom: 4,
-          }}
-        >
-          Window (hours)
-        </label>
-        <input
-          type="number"
-          value={windowHours}
-          onChange={(e) => setWindowHours(e.target.value)}
-          style={{
-            width: '100%',
-            padding: '0.5rem',
-            background: 'var(--color-bg)',
-            border: '1px solid var(--color-border)',
-            borderRadius: 'var(--radius-md)',
-            color: 'var(--color-text)',
-          }}
-        />
-      </div>
-      <div>
-        <label
-          style={{
-            fontSize: '0.8125rem',
-            color: 'var(--color-text-muted)',
-            display: 'block',
-            marginBottom: 4,
-          }}
-        >
-          Must retain (USDC)
-        </label>
-        <input
-          type="number"
-          value={minRetained}
-          onChange={(e) => setMinRetained(e.target.value)}
-          style={{
-            width: '100%',
-            padding: '0.5rem',
-            background: 'var(--color-bg)',
-            border: '1px solid var(--color-border)',
-            borderRadius: 'var(--radius-md)',
-            color: 'var(--color-text)',
-          }}
-        />
-      </div>
+      )}
 
       {quote && !quoteExpired && (
         <div
@@ -1299,15 +1233,13 @@ function BuyPolicyForm({
             ${formatUsdc(quote.premiumAmount)} USDC
           </p>
           {/*
-            What the policy can pay, next to what it costs.
-            
-            These are usually the same number, and the buyer should see that at
-            the moment of the decision rather than in a claim. What an agent
-            can be walked over its own cap for is both what the premium charges
-            and the ceiling on what a breach can recover — so a policy on an
-            agent with a wide gap above its cap is expensive and a policy on one
-            with none is nearly free, and neither fact is guessable from the
-            coverage field alone.
+            What the cover can actually pay, next to what it costs.
+
+            The agent-error trigger cannot pay more than the premium — that is
+            what stops a holder who controls the agent from breaching their own
+            envelope for profit. The other three settle a loss the holder did
+            not cause and pay up to the full coverage. Both facts belong here,
+            at the decision, rather than in a claim.
           */}
           <div
             style={{
@@ -1319,46 +1251,32 @@ function BuyPolicyForm({
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--color-text-muted)' }}>Most this policy can pay</span>
-              <span style={{ fontWeight: 600 }}>${formatUsdc(quote.maxClaimable)} USDC</span>
+              <span style={{ color: 'var(--color-text-muted)' }}>
+                Exploit, oracle, governance
+              </span>
+              <span style={{ fontWeight: 600 }}>up to ${formatUsdc(quote.coverageAmount)}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--color-text-muted)' }}>Agent holds now</span>
-              <span>${formatUsdc(quote.agentCoveredBalance)} USDC</span>
+              <span style={{ color: 'var(--color-text-muted)' }}>Agent error</span>
+              <span style={{ fontWeight: 600 }}>up to ${formatUsdc(quote.premiumAmount)}</span>
             </div>
-            {quote.coverageBeyondEnvelope > 0 && (
-              <p
-                style={{
-                  marginTop: 6,
-                  marginBottom: 0,
-                  color: 'var(--color-warning, #b45309)',
-                }}
-              >
-                ${formatUsdc(quote.coverageBeyondEnvelope)} of the coverage you asked for cannot be
-                claimed under this envelope — a payout is the overshoot past your cap, and this
-                agent does not hold enough above it to reach that far. Lower the coverage, or
-                lower the cap.
-              </p>
-            )}
-          </div>
-          {quote.envelopeFlatPremium > 0 && (
-            <p
+            <p style={{ margin: '6px 0 0', color: 'var(--color-text-muted)' }}>
+              An agent does what you tell it, so a settlement there is capped at what you paid
+              in — otherwise the cover would be a withdrawal slip. The other three settle losses
+              you did not cause and are not capped.
+            </p>
+            <div
               style={{
-                fontSize: '0.75rem',
+                display: 'flex',
+                justifyContent: 'space-between',
+                marginTop: 6,
                 color: 'var(--color-text-muted)',
-                marginTop: 4,
-                marginBottom: 0,
-                lineHeight: 1.5,
               }}
             >
-              Includes ${formatUsdc(quote.envelopeFlatPremium)} for the envelope you declared —
-              the amount this envelope would let you move past its own limits, charged once
-              rather than per day, because that is available from the first minute.
-              {quote.envelopeHeadroom === null
-                ? ' Raise the cap above what the agent holds, and it costs nothing.'
-                : ` Your cap sits ${quote.envelopeHeadroom.toFixed(1)}× above what this agent normally moves.`}
-            </p>
-          )}
+              <span>Agent holds now</span>
+              <span>${formatUsdc(quote.agentCoveredBalance)} USDC</span>
+            </div>
+          </div>
           {countdown && (
             <p
               style={{

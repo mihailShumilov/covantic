@@ -1,92 +1,71 @@
 import { describe, expect, it } from 'vitest';
-import { priceEnvelope, type EnvelopePricingInput } from '../src/services/envelope-pricing.js';
+import { calculatePremium } from '@covantic/shared';
+import { RiskTier } from '@covantic/shared';
+import { COVERAGE, DURATION } from '@covantic/shared';
 
 /**
- * INV-DISCLOSE-01 — the quote says what the policy can pay, not only what it
- * costs.
+ * INV-PRICE-01 — a premium is a fraction of the cover, never a multiple of it.
  *
- * The two are usually the same number. What a holder can walk their agent over
- * its own cap for is both what the premium charges *and* the ceiling on what a
- * breach can recover, because the payout is the overshoot and the overshoot is
- * bounded by what the agent holds above the cap.
+ * This is the property that broke, so it is the property that gets a test.
  *
- * Neither figure is guessable from the coverage field. A buyer who asks for
- * 2,000 of cover on an agent holding 700 under a 650 cap can be paid at most
- * 50, and is charged for exactly that — so the remaining 1,950 is tier premium
- * on cover no breach of this envelope can reach. Saying so at the quote is the
- * difference between a considered decision and a surprise in the claim.
+ * The envelope used to carry a flat charge equal to what the holder could move
+ * past their own declared cap. While the holder chose that cap there was no
+ * honest alternative — an envelope drawn tight around the agent's balance is
+ * a scheduled claim, and the only price that covers it is the whole thing. The
+ * arithmetic was right and the product was absurd: a policy quoted at 2,000.96
+ * to insure 2,000.
+ *
+ * Two changes removed the need for it. The envelope is derived from the
+ * agent's own record rather than chosen, so there is no cap to draw tight; and
+ * an agent-error payout cannot exceed the premium, so extraction cannot profit
+ * whatever the envelope looks like. What is left is a rate on the cover for a
+ * term — which is what a premium is.
  */
 
-const usdc = (n: number) => n * 1_000_000;
+const usdc = (n: number) => Math.round(n * 1_000_000);
 
-const base = (over: Partial<EnvelopePricingInput> = {}): EnvelopePricingInput => ({
-  coverageAmountRaw: usdc(2_000),
-  maxSingleOutflowRaw: usdc(650),
-  minRetainedBalanceRaw: 0,
-  coveredBalanceRaw: usdc(700),
-  p95OutflowRaw: usdc(5),
-  transferCount: 10,
-  ...over,
-});
+const TIERS = [RiskTier.LOW, RiskTier.MEDIUM, RiskTier.HIGH];
 
-describe('INV-DISCLOSE-01 — a buyer can see the trade at the quote', () => {
-  it('reports the ceiling on a payout, which the coverage does not give', () => {
-    // 2,000 of cover asked for; 50 is what any breach of this envelope can
-    // actually reach.
-    const priced = priceEnvelope(base());
+describe('INV-PRICE-01 — the premium stays a fraction of the cover', () => {
+  const coverages = [COVERAGE.MIN, usdc(100), usdc(2_000), usdc(50_000), COVERAGE.MAX];
+  const durations = [DURATION.MIN, 3600 * 24, 3600 * 24 * 7, DURATION.MAX];
 
-    expect(priced.kind === 'priced' && priced.maxClaimableRaw).toBe(usdc(50));
+  for (const tier of TIERS) {
+    for (const coverage of coverages) {
+      for (const duration of durations) {
+        it(`tier ${tier}, ${coverage / 1_000_000} USDC over ${Math.round(duration / 3600)}h`, () => {
+          const premium = calculatePremium(coverage, duration, tier, 10000, 0);
+
+          expect(premium).not.toBeNull();
+          expect(premium as number).toBeLessThan(coverage);
+        });
+      }
+    }
+  }
+
+  it('is far below the cover even at the worst combination the domain allows', () => {
+    // The maximum rate over the maximum term: HIGH is 500 bps annual and the
+    // longest policy is 30 days, so the ceiling is about 0.41% of the cover.
+    // Stated as a bound rather than an equality, so a tier change fails this
+    // for the right reason.
+    const premium = calculatePremium(usdc(10_000), DURATION.MAX, RiskTier.HIGH, 10000, 0);
+
+    expect(premium as number).toBeLessThan(usdc(10_000) * 0.01);
   });
 
-  it('reports it as the same number the premium charges', () => {
-    // Not a coincidence worth hiding: the amount a holder could take at will
-    // is the amount they are charged for the ability.
-    const priced = priceEnvelope(base());
-    if (priced.kind !== 'priced') throw new Error('expected a price');
+  it('still charges something — a free policy is not the fix for an expensive one', () => {
+    const premium = calculatePremium(usdc(2_000), 3600 * 24 * 7, RiskTier.MEDIUM, 10000, 0);
 
-    expect(priced.flatPremiumRaw).toBe(priced.maxClaimableRaw);
+    expect(premium as number).toBeGreaterThan(0);
   });
 
-  it('separates the two when the agent’s habits, not its balance, set the price', () => {
-    // A cap that sits inside the agent's ordinary movements is priced on the
-    // likelihood of an accidental breach, which can exceed what the envelope
-    // physically exposes. Reporting that higher figure as claimable would be a
-    // lie in the buyer's favour, and then a shortfall in the claim.
-    const priced = priceEnvelope(base({ p95OutflowRaw: usdc(400), transferCount: 50 }));
-    if (priced.kind !== 'priced') throw new Error('expected a price');
+  it('would breach the property if the envelope were charged again', () => {
+    // The guard on the change rather than a restatement of it: feeding the old
+    // flat charge back in reproduces the quote that started this, so the test
+    // fails if anything ever puts it back.
+    const coverage = usdc(2_000);
+    const asItWas = calculatePremium(coverage, 3600 * 24 * 7, RiskTier.MEDIUM, 10000, coverage);
 
-    expect(priced.flatPremiumRaw).toBeGreaterThan(priced.maxClaimableRaw);
-    expect(priced.maxClaimableRaw).toBe(usdc(50));
-  });
-
-  it('measures the unreachable coverage before the coverage bound', () => {
-    // `headroomAboveCapRaw` is what a breach can reach regardless of how much
-    // cover was requested; the route subtracts it from the coverage to show
-    // what is being paid for and cannot be claimed.
-    const priced = priceEnvelope(base());
-
-    expect(priced.kind === 'priced' && priced.headroomAboveCapRaw).toBe(usdc(50));
-  });
-
-  it('reports nothing unreachable when the envelope exposes more than the cover', () => {
-    // An agent holding far more than its cap can overshoot past the whole
-    // policy, so every USDC of coverage is claimable and the warning must stay
-    // quiet.
-    const priced = priceEnvelope(base({ coveredBalanceRaw: usdc(9_000) }));
-    if (priced.kind !== 'priced') throw new Error('expected a price');
-
-    // Strictly greater, and that matters: `headroomAboveCapRaw` is what the
-    // envelope exposes *before* the coverage bound, so bounding it by the
-    // coverage would make the "unreachable" figure always zero and the warning
-    // never fire. An earlier version of this assertion said `>=` and a
-    // mutation slipped straight through it.
-    expect(priced.headroomAboveCapRaw).toBeGreaterThan(usdc(2_000));
-    expect(priced.maxClaimableRaw).toBe(usdc(2_000));
-  });
-
-  it('passes the balance through, so the arithmetic can be checked', () => {
-    const priced = priceEnvelope(base());
-
-    expect(priced.kind === 'priced' && priced.coveredBalanceRaw).toBe(usdc(700));
+    expect(asItWas as number).toBeGreaterThan(coverage);
   });
 });
