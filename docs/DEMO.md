@@ -3,15 +3,16 @@
 One command per step, run against devnet, ending with the vault paying a
 policyholder without anyone approving anything.
 
-Verified end to end on 2026-09-03: policy #28 paid **500 USDC** through
-`VerifyAndPayoutAgentError` — [`2EUpjaxW…`](https://explorer.solana.com/tx/2EUpjaxWGNxeHXL6X2qxobRQHsyMd75TJ3KXipF8Dk8Boe9QUuubCvJnF5h3YKauAesh26pXDGudY1zh11pBMJVj?cluster=devnet)
-— against a premium of **0.96 USDC**. **82.2 seconds** from the breach to the
+Verified end to end on 2026-09-03: policy #56 paid **500 USDC** through
+`VerifyAndPayoutAgentError` — [`3BSF8bTt…`](https://explorer.solana.com/tx/3BSF8bTtk8jjtFRZvwKvHv8UjPdo4UuYnGFzCdjp8dyNS9C4mp5ZM2kbYKnKerUeL91nSpcf64rsiY31YXWQKZzw?cluster=devnet)
+— against a premium of **0.29 USDC**. **47.4 seconds** from the breach to the
 payout confirming.
 
 That ratio is the product, not a demo artefact. A premium is a rate on the
 cover for a term; premiums are pooled; the few holders who claim are paid in
-full from what the many paid in. Policy #55, bought under the derived envelope,
-paid the same 500 against a premium of 0.29 in 101.7 seconds.
+full from what the many paid in. Policy #28, bought at an older price, paid the
+same 500 against 0.96 in 82.2 seconds — the ratio moves with the premium, and
+the payout does not.
 
 `pnpm demo:arm` prepares a policy in one command and `pnpm demo:status` hands
 you the line to run, along with what each armed policy will pay. The
