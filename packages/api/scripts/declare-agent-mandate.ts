@@ -45,6 +45,15 @@ import anchorPkg, { AnchorProvider, Program, Wallet, type Idl } from '@coral-xyz
 // looked like a broken CLI rather than a dependency change. The rest of the
 // scripts already reach it through the default export.
 const { BN } = anchorPkg;
+/**
+ * The type of what `BN` constructs.
+ *
+ * Anchor 1.x is CJS and its `.d.ts` does not export `BN` as a named binding,
+ * so it arrives through the default import as a *value* — usable with `new`,
+ * and not usable in a type position. `InstanceType` recovers the type from the
+ * constructor rather than importing a name that is not there.
+ */
+type AnchorBN = InstanceType<typeof BN>;
 import { Connection, Keypair, PublicKey, SystemProgram } from '@solana/web3.js';
 import { getAssociatedTokenAddressSync } from '@solana/spl-token';
 import {
@@ -94,7 +103,7 @@ function parseArgs(argv: string[]): Map<string, string[]> {
 }
 
 /** UI USDC → base units. The mandate is denominated in the covered mint. */
-function usdc(value: string | undefined, fallback = 0): BN {
+function usdc(value: string | undefined, fallback = 0): AnchorBN {
   if (value === undefined) return new BN(fallback);
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) throw new Error(`Not a USDC amount: ${value}`);
@@ -243,11 +252,11 @@ async function main(): Promise<void> {
   //
   // The chain wrote `effective_at`; the chain is asked.
   interface OnChainMandate {
-    effectiveAt: BN;
-    maxSingleOutflow: BN;
-    maxWindowOutflow: BN;
-    windowSeconds: BN;
-    minRetainedBalance: BN;
+    effectiveAt: AnchorBN;
+    maxSingleOutflow: AnchorBN;
+    maxWindowOutflow: AnchorBN;
+    windowSeconds: AnchorBN;
+    minRetainedBalance: AnchorBN;
     allowedCounterparties: PublicKey[];
     counterpartyCount: number;
     allowedPrograms: PublicKey[];
@@ -275,7 +284,7 @@ async function main(): Promise<void> {
     allowedCounterparties: onChain.allowedCounterparties.slice(0, onChain.counterpartyCount),
     allowedPrograms: onChain.allowedPrograms.slice(0, onChain.programCount),
   };
-  const ui = (v: BN) => (Number(v.toString()) / 10 ** USDC_DECIMALS).toLocaleString();
+  const ui = (v: AnchorBN) => (Number(v.toString()) / 10 ** USDC_DECIMALS).toLocaleString();
 
   process.stdout.write(
     [

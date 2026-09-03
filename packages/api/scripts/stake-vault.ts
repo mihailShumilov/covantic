@@ -201,7 +201,7 @@ async function main() {
   );
 
   const signature = await program.methods
-    .stake(new BN(amountRaw.toString()))
+    .stake!(new BN(amountRaw.toString()))
     .accounts({
       staker: staker.publicKey,
       config: configPda,

@@ -49,21 +49,14 @@ const API = process.env.API_URL ?? 'https://covantic.org';
 /**
  * What the agent is funded with, and why it is not the fleet default of 5000.
  *
- * The envelope now costs what it exposes: the flat premium is what the holder
- * could walk the agent over the line for, which is `balance - cap`. Fund the
- * agent with 5000 under a 100 cap and the envelope alone costs 4900 — capped
- * at the coverage, so the policy costs the entire 2000 it insures. That is the
- * correct price for that shape and a terrible thing to put in front of anyone.
+ * The balance is the ceiling on the cover — nothing insures a loss the agent
+ * cannot suffer — and, until the agent has a spending history, it is also
+ * where the derived cap sits.
  *
- * 800 leaves 700 exposed, so the policy costs 700 to insure 2000, and after
- * the six history movements the agent still holds 680 — enough to make the
- * 600 the demo asks of it.
+ * 800, because after the six history movements the agent still holds 680 —
+ * enough to make the 600 the demo asks of it.
  */
 const FUND = '800';
-/** The sink `agent:trigger` sends to by default, declared so the counterparty
- *  check runs and passes rather than reporting unevaluated. */
-const COUNTERPARTY = '8SUV2eNzyrWfyZod1StCSuyBBTk5jruFydaMe8yRyLVC';
-const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 
 /** What the demo movement costs the agent. An agent holding less than this
  *  cannot make it, so it cannot breach the envelope either — and cover bought
@@ -266,7 +259,7 @@ async function usdcBalance(owner: string): Promise<number | null> {
  * envelope, and a demo that buys cover for an empty wallet ends in a claim
  * that finds no movement.
  */
-async function insurable(): Promise<Array<FleetAgent & { usdc: number }>> {
+async function insurable(): Promise<Array<FleetAgent & { usdc: number | null }>> {
   const res = await fetch(`${API}/api/policies`);
   const body = (await res.json()) as {
     policies?: Array<{ agentAddress: string; state: number }>;
@@ -518,10 +511,9 @@ async function status(): Promise<void> {
     say(`\n  Balance unreadable (the RPC did not answer): ${unread.map((a) => a.name).join(', ')}.`);
   }
   if (funded.length > 0) {
-    say('\nThe envelope is part of the purchase, not a step after it. Set it in the');
-    say(`form: cap ${MAX_SINGLE} USDC, floor ${MIN_RETAINED}, counterparty ${COUNTERPARTY},`);
-    say(`program ${TOKEN_PROGRAM}. The quote prices it, and it can only be widened`);
-    say('afterwards — narrowing it once the price is fixed is what the program refuses.');
+    say('\nThe envelope is not something you set. The quote derives it from what the');
+    say('agent already does — a cap of five times its ordinary movement — and the');
+    say('oracle commits to that shape, so the purchase must declare it unchanged.');
     say('');
     say('To read back what a purchase wrote:');
     say('  pnpm --filter api exec tsx scripts/declare-agent-mandate.ts \\');

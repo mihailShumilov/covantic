@@ -29,7 +29,11 @@ async function main() {
       'http://localhost:4099/api/risk/7nYBm3hXGDFQGfTXvbVwHJCmKxXJEATBGVK7FvCGVzDr',
     );
     if (res.ok) {
-      const data = await res.json();
+      const data = (await res.json()) as {
+        tier?: number;
+        score?: number;
+        premiumBps?: number;
+      };
       logger.info(
         { tier: data.tier, score: data.score, premiumBps: data.premiumBps },
         'SafeTrader risk',

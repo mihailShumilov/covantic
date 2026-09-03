@@ -56,8 +56,18 @@ async function loadIdl(): Promise<Idl> {
     }
   }
   // Fallback: the web package ships the hand-written IDL as a TS module.
-  const webIdl = await import('../../web/src/idl/covantic.ts');
-  return webIdl.COVANTIC_IDL as unknown as Idl;
+  //
+  // Reached by path rather than by package name — `@covantic/web` is an
+  // application, not a library, and does not export it. The specifier is built
+  // at runtime so this stays a dynamic import of another package's source:
+  // naming it statically pulls the whole web tree into this package's
+  // compilation, which is what `rootDir` reports and the reason the fallback
+  // is a fallback.
+  const webIdlPath = '../../web/src/idl/covantic.js';
+  const webIdl = (await import(/* @vite-ignore */ webIdlPath)) as {
+    COVANTIC_IDL: unknown;
+  };
+  return webIdl.COVANTIC_IDL as Idl;
 }
 
 function explorerTxUrl(sig: string, network: string): string {
@@ -152,7 +162,7 @@ async function main() {
   const vaultTokenAccount = getAssociatedTokenAddressSync(usdcMint, vaultPda, true);
 
   const sig = await program.methods
-    .initialize(keypair.publicKey)
+    .initialize!(keypair.publicKey)
     .accounts({
       admin: keypair.publicKey,
       config: configPda,

@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev --port 3099",
     "build": "next build",
+    "typecheck": "tsc --noEmit",
     "start": "next start",
     "test": "vitest run --passWithNoTests",
     "lint": "eslint src/",
