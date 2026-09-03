@@ -248,7 +248,28 @@ async function survey(): Promise<Array<Armed & { state: State; premiumUsdc: numb
 async function armOne(days: string): Promise<{ policyId: string; agent: string; readyAt: string }> {
   const before = fleetSize();
 
-  say('  buying a policy…');
+  // Reuse an uninsured agent before making another.
+  //
+  // The fleet is capped at twenty, and every failed arming leaves a funded
+  // agent behind with no policy on it — so without this the cap fills up with
+  // exactly the agents that should have been reused, and arming stops.
+  //
+  // Only one at or below the funding level qualifies: `ensureUsdc` tops up to
+  // a target and never down, and the envelope is priced on what the agent
+  // holds. Reusing a 5000 USDC agent under a 100 cap would price the policy at
+  // the whole coverage.
+  //
+  // And never one that has already been through this. The demo movement is
+  // six times the cap, so once an agent has made it, that movement *is* its
+  // ordinary behaviour — the quote then refuses the envelope outright, with
+  // `declared_cap_below_agent_normal_movement`, which is the pricing being
+  // right rather than a bug to work around.
+  const used = new Set(readLedger().map((a) => a.agent));
+  const spare = (await insurable())
+    .filter((a) => a.usdc <= Number(FUND) && !used.has(a.name))
+    .sort((a, b) => b.usdc - a.usdc)[0];
+
+  say(spare ? `  buying cover for ${spare.name}…` : '  buying a policy…');
   // The envelope is bought, not declared afterwards.
   //
   // `create_policy` writes the mandate in the same transaction, because the
@@ -258,7 +279,7 @@ async function armOne(days: string): Promise<{ policyId: string; agent: string; 
   // program, and correctly: it bought a wide envelope and then tried to
   // tighten it.
   const bought = run('fleet-bootstrap.ts', [
-    '--count', String(before + 1),
+    ...(spare ? ['--agent', spare.name] : ['--count', String(before + 1)]),
     '--coverage', '2000',
     '--duration', String(Number(days) * 86_400),
     '--fund', FUND,
