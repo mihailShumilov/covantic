@@ -98,6 +98,16 @@ function run(script: string, args: string[]): string {
   return out;
 }
 
+/** Like `run`, but hands back a failure instead of throwing on one. */
+function tryRun(script: string, args: string[]): { ok: boolean; out: string } {
+  const result = spawnSync('pnpm', ['exec', 'tsx', resolve(import.meta.dirname, script), ...args], {
+    cwd: resolve(import.meta.dirname, '..'),
+    encoding: 'utf8',
+    env: { ...process.env, API_URL: API },
+  });
+  return { ok: result.status === 0, out: `${result.stdout ?? ''}${result.stderr ?? ''}` };
+}
+
 function fleetSize(): number {
   const manifest = JSON.parse(
     readFileSync(resolve(REPO_ROOT, 'keys/fleet.json'), 'utf8'),
@@ -118,6 +128,31 @@ function say(line: string): void {
  * the policy it runs on and a week later they expire.
  */
 const LEDGER = resolve(REPO_ROOT, 'keys/demo-armed.json');
+
+/**
+ * Agents the quote has refused this envelope for, so it is not asked twice.
+ *
+ * A refusal is permanent: it means the agent's ordinary movement has grown
+ * past the cap, and its history only ever grows. Without this, every arming
+ * spends a quote round-trip rediscovering the same answer about the same
+ * agent.
+ */
+const REFUSED = resolve(REPO_ROOT, 'keys/demo-uninsurable.json');
+
+function readRefused(): string[] {
+  if (!existsSync(REFUSED)) return [];
+  try {
+    return JSON.parse(readFileSync(REFUSED, 'utf8')) as string[];
+  } catch {
+    return [];
+  }
+}
+
+function rememberRefused(name: string): void {
+  const all = readRefused();
+  if (all.includes(name)) return;
+  writeFileSync(REFUSED, `${JSON.stringify([...all, name], null, 2)}\n`);
+}
 
 interface Armed {
   policyId: string;
@@ -161,9 +196,19 @@ function fleetAgents(): FleetAgent[] {
   return manifest.agents ?? [];
 }
 
-/** Covered-mint balance, in whole USDC. Zero when the agent has no account. */
-async function usdcBalance(owner: string): Promise<number> {
-  if (!USDC_MINT) return 0;
+/**
+ * Covered-mint balance, in whole USDC. Zero when the agent has no account,
+ * `null` when the balance could not be read.
+ *
+ * The two must not collapse into each other. A rate-limited RPC answers
+ * without a `result`, and reading that as zero makes a well-funded agent look
+ * empty — which passes the "at or below the funding level" test and buys it
+ * cover priced on a balance nobody checked. Policy #50 cost 2,000.96 to insure
+ * 2,000 that way: the agent held 3,629, the read failed, and the envelope was
+ * priced on what it actually had.
+ */
+async function usdcBalance(owner: string): Promise<number | null> {
+  if (!USDC_MINT) return null;
   const res = await fetch(RPC, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -177,7 +222,8 @@ async function usdcBalance(owner: string): Promise<number> {
   const body = (await res.json()) as {
     result?: { value?: Array<{ account: { data: { parsed: { info: { tokenAmount: { uiAmount: number | null } } } } } }> };
   };
-  return body.result?.value?.[0]?.account.data.parsed.info.tokenAmount.uiAmount ?? 0;
+  if (body.result?.value === undefined) return null;
+  return body.result.value[0]?.account.data.parsed.info.tokenAmount.uiAmount ?? 0;
 }
 
 /**
@@ -259,17 +305,24 @@ async function armOne(days: string): Promise<{ policyId: string; agent: string; 
   // holds. Reusing a 5000 USDC agent under a 100 cap would price the policy at
   // the whole coverage.
   //
-  // And never one that has already been through this. The demo movement is
-  // six times the cap, so once an agent has made it, that movement *is* its
-  // ordinary behaviour — the quote then refuses the envelope outright, with
-  // `declared_cap_below_agent_normal_movement`, which is the pricing being
-  // right rather than a bug to work around.
-  const used = new Set(readLedger().map((a) => a.agent));
-  const spare = (await insurable())
-    .filter((a) => a.usdc <= Number(FUND) && !used.has(a.name))
-    .sort((a, b) => b.usdc - a.usdc)[0];
-
-  say(spare ? `  buying cover for ${spare.name}…` : '  buying a policy…');
+  // And never one that has already been through this. The demo movement is six
+  // times the cap, so once an agent has made it, that movement *is* its
+  // ordinary behaviour, and the quote refuses the envelope outright with
+  // `declared_cap_below_agent_normal_movement` — the pricing being right
+  // rather than a bug to route around.
+  //
+  // The ledger knows only what this script armed, so it cannot be the test: an
+  // agent broken by hand, or by an older version of this script, is missing
+  // from it and looks reusable. The quote is the authority on whether an agent
+  // can be insured under this envelope, so ask it, and move to the next
+  // candidate when it says no.
+  const used = new Set([...readLedger().map((a) => a.agent), ...readRefused()]);
+  const spares = (await insurable())
+    // `null` is not a small balance. An agent whose balance could not be read
+    // is not a candidate, because the envelope would be priced on whatever it
+    // turns out to hold.
+    .filter((a) => a.usdc !== null && a.usdc <= Number(FUND) && !used.has(a.name))
+    .sort((a, b) => (b.usdc ?? 0) - (a.usdc ?? 0));
   // The envelope is bought, not declared afterwards.
   //
   // `create_policy` writes the mandate in the same transaction, because the
@@ -278,14 +331,41 @@ async function armOne(days: string): Promise<{ policyId: string; agent: string; 
   // stop. So the two-step arming this script used to do is now refused by the
   // program, and correctly: it bought a wide envelope and then tried to
   // tighten it.
-  const bought = run('fleet-bootstrap.ts', [
-    ...(spare ? ['--agent', spare.name] : ['--count', String(before + 1)]),
+  const common = [
     '--coverage', '2000',
     '--duration', String(Number(days) * 86_400),
     '--fund', FUND,
     '--cap', MAX_SINGLE,
     '--floor', MIN_RETAINED,
-  ]);
+  ];
+  // Every reusable agent, then a brand-new one as the last resort.
+  const attempts: Array<{ label: string; args: string[]; name?: string }> = [
+    ...spares.map((a) => ({
+      label: `buying cover for ${a.name}`,
+      args: ['--agent', a.name],
+      name: a.name,
+    })),
+    { label: 'buying a policy', args: ['--count', String(before + 1)] },
+  ];
+
+  let bought = '';
+  for (const attempt of attempts) {
+    say(`  ${attempt.label}…`);
+    const result = tryRun('fleet-bootstrap.ts', [...attempt.args, ...common]);
+    if (result.ok) {
+      bought = result.out;
+      break;
+    }
+    if (result.out.includes('ENVELOPE_NOT_INSURABLE')) {
+      say('    refused — this agent already moves more than the cap allows');
+      if (attempt.name) rememberRefused(attempt.name);
+      continue;
+    }
+    process.stdout.write(result.out);
+    throw new Error('fleet-bootstrap.ts failed');
+  }
+  if (bought === '') throw new Error('no agent could be insured under the demo envelope');
+
   const policyId = /policy #(\d+) bought/.exec(bought)?.[1];
   const agent = /→ (fleet-[a-z0-9-]+)/.exec(bought)?.[1];
   if (!policyId || !agent) {
@@ -351,8 +431,11 @@ async function status(): Promise<void> {
   // Three agents from an early fleet hold fractions of a USDC; listing them as
   // insurable invites buying cover for an agent that cannot perform, and the
   // failure would only show up on stage.
-  const funded = free.filter((a) => a.usdc >= BREACH_AMOUNT).sort((a, b) => b.usdc - a.usdc);
-  const short = free.filter((a) => a.usdc < BREACH_AMOUNT);
+  const funded = free
+    .filter((a) => a.usdc !== null && a.usdc >= BREACH_AMOUNT)
+    .sort((a, b) => (b.usdc ?? 0) - (a.usdc ?? 0));
+  const short = free.filter((a) => a.usdc !== null && a.usdc < BREACH_AMOUNT);
+  const unread = free.filter((a) => a.usdc === null);
 
   say('\nInsurable from the UI — no active policy names these:\n');
   if (funded.length === 0) {
@@ -360,12 +443,17 @@ async function status(): Promise<void> {
     say('  Prepare one: `pnpm agent:create --name <name>` then `pnpm agent:fund --name <name>`.');
   }
   for (const a of funded) {
-    say(`  ${a.pubkey}   ${a.name}   ${a.usdc.toLocaleString()} USDC`);
+    say(`  ${a.pubkey}   ${a.name}   ${(a.usdc ?? 0).toLocaleString()} USDC`);
   }
   if (short.length > 0) {
-    const names = short.map((a) => `${a.name} (${a.usdc.toLocaleString()})`).join(', ');
+    const names = short.map((a) => `${a.name} (${(a.usdc ?? 0).toLocaleString()})`).join(', ');
     say(`\n  Below ${BREACH_AMOUNT} USDC, so they cannot make the movement: ${names}.`);
     say('  `pnpm agent:fund --name <name>` tops one up.');
+  }
+  if (unread.length > 0) {
+    // Said out loud rather than folded into the list. An unread balance is not
+    // a small one, and the difference decides what a policy costs.
+    say(`\n  Balance unreadable (the RPC did not answer): ${unread.map((a) => a.name).join(', ')}.`);
   }
   if (funded.length > 0) {
     say('\nThe envelope is part of the purchase, not a step after it. Set it in the');
