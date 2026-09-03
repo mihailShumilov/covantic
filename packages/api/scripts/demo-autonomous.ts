@@ -47,6 +47,10 @@ interface ClaimRow {
   policyId: number;
   status: string;
   triggerType: number;
+  /** The transaction the claim was raised for. Returned by /api/claims and read
+   *  here to tell this run's claim from any other open one — so leaving it off
+   *  the type made the comparison below silently always false. */
+  triggerTxSignature?: string | null;
   lossAmount: number | null;
   payoutAmount: number | null;
   payoutTxSignature?: string | null;

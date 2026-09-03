@@ -155,9 +155,12 @@ async function main(): Promise<void> {
   const onChain = (await (
     program.account as unknown as Record<
       string,
-      { fetch: (a: PublicKey) => Promise<{ effectiveAt: BN }> }
+      // Structural, not `BN`: Anchor 1.x is CJS and does not export the name
+      // as a type, so this file referred to one that was never in scope. Only
+      // `toNumber` is read here, so that is what is required.
+      { fetch: (a: PublicKey) => Promise<{ effectiveAt: { toNumber(): number } }> }
     >
-  ).policyGovernanceBaseline!.fetch(baseline)) as { effectiveAt: BN };
+  ).policyGovernanceBaseline!.fetch(baseline)) as { effectiveAt: { toNumber(): number } };
   const effectiveAt = new Date(onChain.effectiveAt.toNumber() * 1000);
   process.stdout.write(
     [

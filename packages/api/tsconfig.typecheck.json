@@ -11,10 +11,14 @@
     "noEmit": true,
     "rootDir": "."
   },
-  "include": ["src/**/*", "tests/**/*"],
-  // `scripts/` and the network-gated e2e suite carry pre-existing type
-  // looseness that predates this config and is not what it was added to catch.
-  // Bringing them in is worth doing; doing it here would mean shipping a gate
-  // that fails on day one, which is the same as not having one.
-  "exclude": ["scripts/**/*", "tests/e2e.test.ts", "dist"]
+  "include": ["src/**/*", "tests/**/*", "scripts/**/*"],
+  // `scripts/` is in now. It was held out on the grounds that its looseness
+  // predated this config, and that debt turned out to include a `memcmp`
+  // filter encoded base64 where the RPC reads base58 — so the staker-position
+  // migration matched nothing and reported having nothing to migrate — a call
+  // to a function that had been deleted, and a claim field read off a type
+  // that never declared it, which made the comparison always false.
+  //
+  // `tests/e2e.test.ts` stays out: it is network-gated and not run here.
+  "exclude": ["tests/e2e.test.ts", "dist"]
 }

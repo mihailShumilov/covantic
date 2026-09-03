@@ -40,7 +40,7 @@ import { config as loadDotenv } from 'dotenv';
 
 loadDotenv({ path: resolve(import.meta.dirname, '../../../.env') });
 
-import { AnchorProvider, Program, Wallet, type Idl } from '@coral-xyz/anchor';
+import { AnchorProvider, Program, Wallet, utils, type Idl } from '@coral-xyz/anchor';
 import { Connection, Keypair, PublicKey, SystemProgram } from '@solana/web3.js';
 import { PDA_SEEDS } from '@covantic/shared';
 import { rpcEndpointName } from '../src/config/rpc-pool.js';
@@ -102,7 +102,7 @@ async function main(): Promise<void> {
 
   if (!dryRun && !vaultAlreadySized) {
     const signature = await program.methods
-      .migrateVault()
+      .migrateVault!()
       .accounts({ payer: payer.publicKey, vault, systemProgram: SystemProgram.programId })
       .rpc();
     const after = await connection.getAccountInfo(vault);
@@ -120,10 +120,16 @@ async function main(): Promise<void> {
     dataSlice: { offset: 9, length: 32 },
     filters: [
       {
+        // base58, which is what `memcmp.bytes` means on this web3.js version.
+        //
+        // It was base64 with an `encoding: 'base64'` beside it — a field the
+        // filter type does not have — so the RPC read the base64 string as
+        // base58 and matched nothing. `getProgramAccounts` answered with an
+        // empty list and the migration printed "staker positions: 0", which
+        // reads exactly like having nothing left to migrate.
         memcmp: {
           offset: 0,
-          bytes: Buffer.from(STAKER_POSITION_DISCRIMINATOR).toString('base64'),
-          encoding: 'base64',
+          bytes: utils.bytes.bs58.encode(Buffer.from(STAKER_POSITION_DISCRIMINATOR)),
         },
       },
     ],
@@ -139,7 +145,7 @@ async function main(): Promise<void> {
     }
     try {
       const signature = await program.methods
-        .migrateStakerPosition()
+        .migrateStakerPosition!()
         .accounts({
           payer: payer.publicKey,
           stakerPosition: pubkey,

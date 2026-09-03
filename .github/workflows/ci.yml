@@ -23,6 +23,21 @@ jobs:
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      # The gate that catches what `pnpm build` cannot.
+      #
+      # Each package's build config sets `rootDir: ./src` so the emitted layout
+      # is right, which leaves `tests/` and `scripts/` outside it — and vitest
+      # strips types with esbuild without checking them. A whole tree of code
+      # compiled nowhere and was verified by nothing. It held a `memcmp` filter
+      # encoded base64 where the RPC reads base58, a call to a function that
+      # had been deleted, and a claim field read off a type that never declared
+      # it.
+      - run: pnpm typecheck
+      # `pnpm format` is `prettier --write`, so this appended a flag to a
+      # *writer*: it reformatted the tree and exited zero, on every push,
+      # having checked nothing. `pnpm format:check` is the real check, and
+      # turning it on needs the 147 files that drifted while nobody was
+      # looking to be reformatted first.
       - run: pnpm format --check
 
   test-api:

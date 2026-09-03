@@ -35,6 +35,7 @@ loadDotenv({ path: resolve(import.meta.dirname, '../../../.env') });
 
 import anchorPkg, { AnchorProvider, Program, Wallet, type Idl } from '@coral-xyz/anchor';
 import {
+  type Commitment,
   Connection,
   Keypair,
   LAMPORTS_PER_SOL,
@@ -301,8 +302,26 @@ async function buyPolicy(
   const holderAta = getAssociatedTokenAddressSync(usdcMint, holder.publicKey);
   const vaultAta = getAssociatedTokenAddressSync(usdcMint, vaultPda, true);
 
-  const signature = await program.methods
-    .createPolicy(new BN(coverageRaw), new BN(durationSeconds), agentPubkey, {
+  // Through a narrowed view of the namespace, as the other scripts do.
+  //
+  // `program` is a `Program<any>`, and Anchor's method builder unfolds its
+  // argument types from the IDL generic — with `any` there the compiler
+  // recurses until it gives up with "type instantiation is excessively deep".
+  // It cannot check this call whatever shape it is written in, so the cast
+  // says so rather than hiding behind a compiler limit.
+  const methods = program.methods as unknown as Record<
+    string,
+    (...args: unknown[]) => {
+      accounts: (a: Record<string, PublicKey>) => {
+        signers: (s: Keypair[]) => {
+          rpc: (opts?: { commitment?: Commitment }) => Promise<string>;
+        };
+      };
+    }
+  >;
+
+  const signature = await methods
+    .createPolicy!(new BN(coverageRaw), new BN(durationSeconds), agentPubkey, {
       maxSingleOutflow: new BN(envelope.maxSingleOutflowRaw),
       maxWindowOutflow: new BN(envelope.maxWindowOutflowRaw),
       windowSeconds: new BN(envelope.windowSeconds),
