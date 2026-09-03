@@ -113,6 +113,12 @@ jobs:
           anchor --version | grep -Eq 'anchor-cli 1\.0\.2'
           surfpool --version
       - run: pnpm install --frozen-lockfile
+      # The integration suite recomputes the mandate commitment with the same
+      # TypeScript the API uses, so that the Rust and TS implementations are
+      # checked against each other rather than each against itself. That makes
+      # `@covantic/shared` a build dependency of this job, exactly as it is for
+      # test-api and test-web.
+      - run: pnpm --filter shared build
       # --ignore-keys because the deploy keypair is not in the repo: a fresh
       # checkout generates a new one, and Anchor then refuses to build over
       # the program ID declared in the source. Syncing instead would rewrite
