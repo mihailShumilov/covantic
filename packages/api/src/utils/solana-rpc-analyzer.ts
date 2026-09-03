@@ -528,10 +528,70 @@ export class SolanaRpcAnalyzer {
   ): AnalyzedTransaction['accountData'] {
     if (!meta) return [];
 
+    // Token balances, paired by account index.
+    //
+    // This used to return an empty array for every account, so the whole shape
+    // described SOL and nothing else. `agent_outflow_events` is built from
+    // these changes, and the envelope a quote derives is drawn from that
+    // history — so an agent could move USDC all day and be underwritten as one
+    // that had never spent anything, which put its cap at its own balance: a
+    // limit nothing can cross.
+    //
+    // A *change*, not a transfer: what the account is left short by is what
+    // the declared caps are measured against, and a transaction that both
+    // credits and debits the same account moves less than its transfers say.
+    const tokenChangesByIndex = new Map<
+      number,
+      Array<{ mint: string; userAccount: string; rawTokenAmount: { tokenAmount: string; decimals: number } }>
+    >();
+
+    const preByIndex = new Map<number, { amount: number; decimals: number }>();
+    for (const pre of meta.preTokenBalances ?? []) {
+      preByIndex.set(pre.accountIndex, {
+        amount: Number(pre.uiTokenAmount?.amount ?? 0),
+        decimals: pre.uiTokenAmount?.decimals ?? 0,
+      });
+    }
+
+    const seen = new Set<number>();
+    for (const post of meta.postTokenBalances ?? []) {
+      seen.add(post.accountIndex);
+      const pre = preByIndex.get(post.accountIndex);
+      const decimals = post.uiTokenAmount?.decimals ?? pre?.decimals ?? 0;
+      const delta = Number(post.uiTokenAmount?.amount ?? 0) - (pre?.amount ?? 0);
+      if (delta === 0 || !post.owner) continue;
+      const list = tokenChangesByIndex.get(post.accountIndex) ?? [];
+      list.push({
+        mint: post.mint,
+        userAccount: post.owner,
+        rawTokenAmount: { tokenAmount: String(delta), decimals },
+      });
+      tokenChangesByIndex.set(post.accountIndex, list);
+    }
+
+    // An account emptied and closed in the same transaction has a pre balance
+    // and no post balance. Dropping it would hide the largest movement there
+    // is — the one that took everything.
+    for (const pre of meta.preTokenBalances ?? []) {
+      if (seen.has(pre.accountIndex)) continue;
+      const amount = Number(pre.uiTokenAmount?.amount ?? 0);
+      if (amount === 0 || !pre.owner) continue;
+      const list = tokenChangesByIndex.get(pre.accountIndex) ?? [];
+      list.push({
+        mint: pre.mint,
+        userAccount: pre.owner,
+        rawTokenAmount: {
+          tokenAmount: String(-amount),
+          decimals: pre.uiTokenAmount?.decimals ?? 0,
+        },
+      });
+      tokenChangesByIndex.set(pre.accountIndex, list);
+    }
+
     return message.accountKeys.map((key, i) => ({
       account: key.pubkey,
       nativeBalanceChange: (meta.postBalances[i] ?? 0) - (meta.preBalances[i] ?? 0),
-      tokenBalanceChanges: [],
+      tokenBalanceChanges: tokenChangesByIndex.get(i) ?? [],
     }));
   }
 }
