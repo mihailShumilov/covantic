@@ -13,6 +13,9 @@
  *   pnpm fleet:bootstrap                    # target size 3 (default)
  *   pnpm fleet:bootstrap --count 5
  *   pnpm fleet:bootstrap --count 5 --coverage 200 --duration 86400
+ *   pnpm fleet:bootstrap --count 6 --fund 700 --cap 650 --coverage 200
+ *              A deliberately tight envelope, for a policy meant to be
+ *              breached. The flat premium is `fund - cap`.
  *
  * Pre-reqs:
  *   - API running at $API_URL (default http://localhost:4099) with risk +
@@ -70,6 +73,37 @@ export const FLEET_ENVELOPE = {
   allowedCounterparties: [] as string[],
   allowedPrograms: [] as string[],
 };
+
+/**
+ * A tighter envelope, for a policy meant to be breached on purpose.
+ *
+ * `--cap` narrows it; `--fund` sets what the agent holds. The two together
+ * decide the price, and the relationship is the whole point of the pricing
+ * change: the flat premium is what the holder could extract at will, which is
+ * `balance - cap`. A 700 USDC agent under a 650 cap costs 50 and can be walked
+ * over for 50. Widen the gap and the policy costs more, in exact step.
+ */
+function envelopeFrom(capUsdc: number | null, floorUsdc: number): typeof FLEET_ENVELOPE {
+  if (capUsdc === null) return FLEET_ENVELOPE;
+  return {
+    maxSingleOutflowRaw: Math.round(capUsdc * 1_000_000),
+    maxWindowOutflowRaw: Math.round(capUsdc * 1_000_000),
+    windowSeconds: 3_600,
+    minRetainedBalanceRaw: Math.round(floorUsdc * 1_000_000),
+    // Declared, not left blank, and the difference is 0.06 of the confidence a
+    // payout needs. A silent allowlist is reported `unevaluated` — correctly,
+    // since silence is not prohibition — and each unevaluated dimension costs
+    // 0.03. Two of them put an otherwise perfect verdict under the review bar.
+    //
+    // These are the destination `agent:trigger` actually sends to and the
+    // program it goes through, so both checks run and both pass.
+    allowedCounterparties: [DEMO_SINK_OWNER],
+    allowedPrograms: [TOKEN_PROGRAM_ID.toBase58()],
+  };
+}
+
+/** Where `agent:trigger` sends by default: the mint authority's own wallet. */
+const DEMO_SINK_OWNER = '8SUV2eNzyrWfyZod1StCSuyBBTk5jruFydaMe8yRyLVC';
 
 const REPO_ROOT = resolve(import.meta.dirname, '../../..');
 const AGENTS_DIR = resolve(REPO_ROOT, 'keys/agents');
@@ -207,6 +241,7 @@ async function fetchRiskAndQuote(
   agentAddress: string,
   coverageRaw: number,
   durationSeconds: number,
+  envelope: typeof FLEET_ENVELOPE,
 ): Promise<QuoteResponse> {
   // 1. Trigger / refresh the risk score.
   const riskRes = await fetch(`${apiUrl}/api/risk/${encodeURIComponent(agentAddress)}`);
@@ -226,7 +261,7 @@ async function fetchRiskAndQuote(
       durationSeconds,
       // The quote prices this envelope and the oracle commits to its hash;
       // `create_policy` refuses a purchase that declares a different one.
-      mandate: FLEET_ENVELOPE,
+      mandate: envelope,
     }),
   });
   if (!quoteRes.ok) {
@@ -250,6 +285,7 @@ async function buyPolicy(
   usdcMint: PublicKey,
   coverageRaw: number,
   durationSeconds: number,
+  envelope: typeof FLEET_ENVELOPE,
 ): Promise<{ policyId: number; signature: string }> {
   const programId = program.programId;
 
@@ -288,12 +324,16 @@ async function buyPolicy(
 
   const signature = await program.methods
     .createPolicy(new BN(coverageRaw), new BN(durationSeconds), agentPubkey, {
-      maxSingleOutflow: new BN(FLEET_ENVELOPE.maxSingleOutflowRaw),
-      maxWindowOutflow: new BN(FLEET_ENVELOPE.maxWindowOutflowRaw),
-      windowSeconds: new BN(FLEET_ENVELOPE.windowSeconds),
-      minRetainedBalance: new BN(FLEET_ENVELOPE.minRetainedBalanceRaw),
-      allowedCounterparties: [],
-      allowedPrograms: [],
+      maxSingleOutflow: new BN(envelope.maxSingleOutflowRaw),
+      maxWindowOutflow: new BN(envelope.maxWindowOutflowRaw),
+      windowSeconds: new BN(envelope.windowSeconds),
+      minRetainedBalance: new BN(envelope.minRetainedBalanceRaw),
+      // From the envelope, not empty. The quote committed to *these* keys, and
+      // `create_policy` recomputes the hash from what it is handed — passing
+      // empty arrays here is the mismatch the check exists to catch, and it
+      // caught it.
+      allowedCounterparties: envelope.allowedCounterparties.map((k) => new PublicKey(k)),
+      allowedPrograms: envelope.allowedPrograms.map((k) => new PublicKey(k)),
       manifestHash: Array.from(new Uint8Array(32)),
     })
     .accounts({
@@ -330,6 +370,14 @@ async function main() {
   }
   const flags = parseFlags(process.argv.slice(2));
   const targetCount = Math.max(1, Math.min(20, Number(flags.count ?? '3')));
+  // `--cap` buys a deliberately tight envelope, for a policy meant to be
+  // breached. `--fund` sets what the agent holds, and the two together decide
+  // the price: the flat premium is `balance - cap`, the amount a holder could
+  // walk the agent over the line for.
+  const capUsdc = flags.cap === undefined ? null : Number(flags.cap);
+  const floorUsdc = Number(flags.floor ?? '0');
+  const envelope = envelopeFrom(capUsdc, floorUsdc);
+  const fundUsdc = Number(flags.fund ?? '5000');
   const coverageUi = Number(flags.coverage ?? '100'); // USDC
   const coverageRaw = Math.round(coverageUi * 10 ** 6);
   const durationSeconds = Number(flags.duration ?? `${3 * 24 * 60 * 60}`); // 3 days
@@ -392,10 +440,12 @@ async function main() {
 
     console.log(`\n→ ${name} (${agentPubkey.toBase58()})`);
 
-    // Fund: 0.1 SOL (fees) + 5000 USDC (activity budget).
+    // Fund: SOL for fees, USDC for activity. The USDC figure is not cosmetic
+    // once an envelope is declared — the flat premium is `balance - cap`, so
+    // funding an agent above its own cap is what the policy charges for.
     await ensureSol(connection, mintAuthority, agentPubkey, 0.1);
-    await ensureUsdc(connection, mintAuthority, usdcMint, agentPubkey, 5_000);
-    console.log(`  funded: 0.1 SOL + 5000 USDC`);
+    await ensureUsdc(connection, mintAuthority, usdcMint, agentPubkey, fundUsdc);
+    console.log(`  funded: 0.1 SOL + ${fundUsdc} USDC`);
 
     // Score + quote (also publishes attestation).
     const quote = await fetchRiskAndQuote(
@@ -403,6 +453,7 @@ async function main() {
       agentPubkey.toBase58(),
       coverageRaw,
       durationSeconds,
+      envelope,
     );
     console.log(
       `  risk:  tier=${quote.riskTier} premium=${quote.premiumAmount} raw (≈ ${(
@@ -419,6 +470,7 @@ async function main() {
       usdcMint,
       coverageRaw,
       durationSeconds,
+      envelope,
     );
     console.log(`  policy #${policyId} bought: ${signature}`);
 
