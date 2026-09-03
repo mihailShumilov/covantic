@@ -406,10 +406,22 @@ async function main() {
   const holder = ensureKeypair(HOLDER_KEYPAIR_PATH);
   console.log(`\nFleet holder: ${holder.publicKey.toBase58()}`);
   await ensureSol(connection, mintAuthority, holder.publicKey, 0.5);
-  // Budget: per-agent premium is bounded by risk tier. LOW at 100 USDC /
-  // 3d ≈ 0.08 USDC; HIGH ≈ 0.4 USDC. Fund 100 USDC / 20 agents = 5 USDC
-  // per agent = comfortable headroom.
-  await ensureUsdc(connection, mintAuthority, usdcMint, holder.publicKey, 100);
+  // Budget: the risk tier is no longer what a premium is made of.
+  //
+  // The tier half is small and bounded — LOW at 100 USDC / 3d is about 0.08,
+  // HIGH about 0.4 — and a flat 100 USDC covered a fleet of twenty. The
+  // envelope half is not bounded by anything so convenient: it is what the
+  // holder could walk the agent over the line for, `balance - cap`, so a
+  // deliberately tight demo envelope costs hundreds and the old budget bought
+  // nothing at all. `insufficient funds` from the token program, from inside
+  // `create_policy`, with the premium transfer as the only clue.
+  //
+  // `ensureUsdc` tops up to a target, so sizing this for the whole fleet costs
+  // one mint of the shortfall.
+  const envelopePremium =
+    capUsdc === null ? 0 : Math.min(coverageUi, Math.max(0, fundUsdc - capUsdc));
+  const holderBudget = targetCount * (envelopePremium + 5) + 100;
+  await ensureUsdc(connection, mintAuthority, usdcMint, holder.publicKey, holderBudget);
   console.log('  SOL + USDC funded for holder.');
 
   // 2. Load existing manifest
@@ -418,11 +430,34 @@ async function main() {
     manifest = { ...manifest, holderKeypairPath: 'keys/fleet-holder.json' };
   }
   const existingCount = manifest.agents.length;
-  const toCreate = Math.max(0, targetCount - existingCount);
-  console.log(`\nExisting fleet: ${existingCount} agents. Creating ${toCreate} new.`);
 
-  if (toCreate === 0) {
+  // Buying cover for an agent that already exists, rather than making another.
+  //
+  // Every failed run used to leave a funded agent behind with no policy on it,
+  // and the fleet is capped at twenty — so a few bad runs filled it with
+  // agents nothing could be bought for, and the next `demo:arm` reported
+  // "already at target size" and stopped. Naming one reuses what is already
+  // funded instead of growing the fleet to work around it.
+  const reuseName = flags.agent;
+  const targets: Array<{ name: string; isNew: boolean }> = reuseName
+    ? [{ name: reuseName, isNew: false }]
+    : Array.from({ length: Math.max(0, targetCount - existingCount) }, (_, i) => ({
+        name: `fleet-${Date.now().toString(36)}-${existingCount + i}`,
+        isNew: true,
+      }));
+
+  if (reuseName) {
+    console.log(`\nExisting fleet: ${existingCount} agents. Buying cover for ${reuseName}.`);
+    if (!existsSync(resolve(AGENTS_DIR, `${reuseName}.json`))) {
+      throw new Error(`No such agent: ${reuseName}. \`pnpm agent:create --name <name>\` first.`);
+    }
+  } else {
+    console.log(`\nExisting fleet: ${existingCount} agents. Creating ${targets.length} new.`);
+  }
+
+  if (targets.length === 0) {
     console.log('Fleet is already at or above the target size.');
+    console.log('Buy cover for one that has none: --agent <name>.');
     saveManifest(manifest);
     return;
   }
@@ -430,10 +465,9 @@ async function main() {
   // 3. Program (holder signs)
   const { program } = makeProgram(connection, holder);
 
-  // 4. Create each new agent
-  for (let i = 0; i < toCreate; i += 1) {
-    const stamp = Date.now().toString(36);
-    const name = `fleet-${stamp}-${existingCount + i}`;
+  // 4. Provision each target
+  for (const target of targets) {
+    const { name } = target;
     const keypairPath = resolve(AGENTS_DIR, `${name}.json`);
     const agent = ensureKeypair(keypairPath);
     const agentPubkey = agent.publicKey;
@@ -484,7 +518,12 @@ async function main() {
       durationSeconds,
       createdAt: new Date().toISOString(),
     };
-    manifest = appendAgent(manifest, row);
+    manifest = target.isNew
+      ? appendAgent(manifest, row)
+      : {
+          ...manifest,
+          agents: manifest.agents.map((a) => (a.name === name ? row : a)),
+        };
     saveManifest(manifest);
   }
 
