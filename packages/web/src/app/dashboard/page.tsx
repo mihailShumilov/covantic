@@ -1298,6 +1298,49 @@ function BuyPolicyForm({
           >
             ${formatUsdc(quote.premiumAmount)} USDC
           </p>
+          {/*
+            What the policy can pay, next to what it costs.
+            
+            These are usually the same number, and the buyer should see that at
+            the moment of the decision rather than in a claim. What an agent
+            can be walked over its own cap for is both what the premium charges
+            and the ceiling on what a breach can recover — so a policy on an
+            agent with a wide gap above its cap is expensive and a policy on one
+            with none is nearly free, and neither fact is guessable from the
+            coverage field alone.
+          */}
+          <div
+            style={{
+              marginTop: 10,
+              paddingTop: 10,
+              borderTop: '1px solid var(--color-border)',
+              fontSize: '0.8125rem',
+              lineHeight: 1.6,
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: 'var(--color-text-muted)' }}>Most this policy can pay</span>
+              <span style={{ fontWeight: 600 }}>${formatUsdc(quote.maxClaimable)} USDC</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: 'var(--color-text-muted)' }}>Agent holds now</span>
+              <span>${formatUsdc(quote.agentCoveredBalance)} USDC</span>
+            </div>
+            {quote.coverageBeyondEnvelope > 0 && (
+              <p
+                style={{
+                  marginTop: 6,
+                  marginBottom: 0,
+                  color: 'var(--color-warning, #b45309)',
+                }}
+              >
+                ${formatUsdc(quote.coverageBeyondEnvelope)} of the coverage you asked for cannot be
+                claimed under this envelope — a payout is the overshoot past your cap, and this
+                agent does not hold enough above it to reach that far. Lower the coverage, or
+                lower the cap.
+              </p>
+            )}
+          </div>
           {quote.envelopeFlatPremium > 0 && (
             <p
               style={{

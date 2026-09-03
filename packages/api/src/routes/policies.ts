@@ -110,7 +110,15 @@ async function priceEnvelopeForAgent(
     // ceiling is the honest answer rather than a guess.
     // No covered mint configured means nothing can be measured, and the
     // safest unmeasurable answer is that the whole coverage is extractable.
-    return { kind: 'priced', flatPremiumRaw: coverageAmountRaw, headroom: null, basis: 'balance' };
+    return {
+      kind: 'priced',
+      flatPremiumRaw: coverageAmountRaw,
+      maxClaimableRaw: coverageAmountRaw,
+      headroomAboveCapRaw: coverageAmountRaw,
+      coveredBalanceRaw: 0,
+      headroom: null,
+      basis: 'balance',
+    };
   }
 
   const baseline = await loadOutflowBaseline(
@@ -642,6 +650,10 @@ export async function policyRoutes(app: FastifyInstance) {
       attestationPda,
       attestationExpiresAt,
       envelopeFlatPremium: pricing.flatPremiumRaw,
+      // The two figures a buyer needs to see the trade they are making.
+      maxClaimable: pricing.maxClaimableRaw,
+      coverageBeyondEnvelope: Math.max(0, body.coverageAmount - pricing.headroomAboveCapRaw),
+      agentCoveredBalance: pricing.coveredBalanceRaw,
       envelopeHeadroom: pricing.headroom,
       backing,
     });
