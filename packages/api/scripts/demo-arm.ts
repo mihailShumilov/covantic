@@ -79,23 +79,6 @@ const DERIVED_CAP = Number(HISTORY_AMOUNT) * 5;
 /** Spaced past one sweep, so each is seen and recorded separately. */
 const HISTORY_GAP_MS = 25_000;
 
-/**
- * How long after the purchase a claim can first be proven.
- *
- * Two clocks, and readiness is the later of them. The mandate matures on the
- * chain's own delay, which the purchase writes and this script reads back.
- * The other is the balance checkpoint: `verify_and_payout_agent_error` proves
- * the loss by comparing the covered account against a checkpoint the sweep
- * writes on its own schedule, and it must predate the movement. Break the
- * envelope before the first one lands and the drop measures zero — the claim
- * verifies, computes the whole overshoot, and then fails on chain with
- * `DropBelowMinimum`, which reads as the protocol refusing to pay.
- *
- * Two sweep intervals plus slack. The interval is the deployment's
- * `EXPLOIT_SWEEP_INTERVAL_MS`, a minute in this one.
- */
-const CHECKPOINT_WAIT_MS = 150_000;
-
 function flag(name: string, fallback: string): string {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 && process.argv[i + 1] ? process.argv[i + 1]! : fallback;
@@ -436,13 +419,19 @@ async function armOne(days: string): Promise<{ policyId: string; agent: string; 
     '--read',
     '--keypair', 'keys/fleet-holder.json',
   ]);
-  const maturesAt = /Usable as proof from (\S+)/.exec(declared)?.[1] ?? '(unknown)';
-  // The later of the two clocks. See `CHECKPOINT_WAIT_MS`.
-  const checkpointedBy = new Date(Date.now() + CHECKPOINT_WAIT_MS).toISOString();
-  const readyAt =
-    maturesAt === '(unknown)' || Date.parse(maturesAt) < Date.parse(checkpointedBy)
-      ? checkpointedBy
-      : maturesAt;
+  // One clock now, and on a policy bought under the current program, none.
+  //
+  // There used to be two waits here. The balance checkpoint arrived on the
+  // sweep's own schedule, so arming had to sit out a couple of intervals or
+  // the breach would beat it and the drop would measure zero; `create_policy`
+  // writes the first reading itself now. And the envelope matured an hour
+  // after it was written; a mandate the purchase wrote is usable at once,
+  // because the oracle derived it and there is nothing in it the holder chose.
+  //
+  // Still read from the chain rather than assumed: a policy bought before that
+  // upgrade has a maturity in its future, and this script has to be right
+  // about those too.
+  const readyAt = /Usable as proof from (\S+)/.exec(declared)?.[1] ?? '(unknown)';
 
   appendLedger({ policyId, agent, readyAt });
   return { policyId, agent, readyAt };
