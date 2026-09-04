@@ -14,7 +14,7 @@
   {
     "slug": "wormhole-2022-02-02-bridge-out-80k",
     "signature": "j3jUDG43di8Dsg7Q3jQhstamtBovu1GLqnDJ7yNvM3r4pnK9e7uqgt9uBobCjT5S1BKhZZFQNQwDxypEYqLknec",
-    "note": "Wormhole, 18:27:10 UTC. 80,000 wETH bridged out — the single largest leg of the theft.",
+    "note": "Wormhole, 18:27:10 UTC. 80,000 wETH bridged out \u2014 the single largest leg of the theft.",
     "source": "https://www.helius.dev/blog/solana-hacks"
   },
   {
@@ -34,5 +34,41 @@
     "signature": "2wor1JjWFLLwgzVgjREXbHDk9HVkPAnY5xjWnVKRK18hvkFtSw9KkmdQyUbWdSQu8KTTMv43x7VWpA1527zQjArH",
     "note": "Wormhole, 18:35:36 UTC. The 18,044,852 USDC leaves the attacker's wallet.",
     "source": "https://www.helius.dev/blog/solana-hacks"
+  },
+  {
+    "slug": "mango-2022-10-11-fund-attack-wallet",
+    "signature": "2p86oBt6jV5QAFzWWCChSbNfd8rdNo3ZggzYS1uytTe1KJCemjMhmZ4qVasuu6FdcYz12PnK7WnyQXEyt74gFUyG",
+    "note": "Mango Markets, 2022-10-11 19:36:47 UTC. 24,838 USDC arrives at the attack wallet from an exchange address, three hours before the manipulation. The wallet's first funding.",
+    "source": "https://www.coindesk.com/markets/2022/10/12/how-market-manipulation-led-to-a-100m-exploit-on-solana-defi-exchange-mango"
+  },
+  {
+    "slug": "mango-2022-10-11-mango-program",
+    "signature": "4MVjZVEDwpZkJVNFMrkmtk2yGnigjv5SfPLvdZSYGU7RwZy1d8vQySYkCv9UuNqMAfW2WDrwsYRy8cJRjsm35qCG",
+    "note": "Mango Markets, 22:08:07 UTC. The attack wallet calls the Mango v3 program (mv3ekLzLbnVPNxjSKvqBpU3ZeZXPQdEC3bp5MDEBG68) while holding 5.5M USDC. Position work, not a transfer.",
+    "source": "https://www.coindesk.com/markets/2022/10/12/how-market-manipulation-led-to-a-100m-exploit-on-solana-defi-exchange-mango"
+  },
+  {
+    "slug": "mango-2022-10-11-mngo-pump-swap",
+    "signature": "3Jt8i61s4wp9iSgcCmNsRqyBZ2BmuMmytxSiHt5WTVo8diFKfZw8No3hHai8FhS8VB1EV4VFTxjhHsZevex4tL1S",
+    "note": "Mango Markets, 22:33:20 UTC. 50,000 USDC swapped through Jupiter for 210,545 MNGO \u2014 one leg of the open-market buying that lifted the oracle-reported MNGO price and created the collateral the borrow was made against.",
+    "source": "https://www.coindesk.com/markets/2022/10/12/how-market-manipulation-led-to-a-100m-exploit-on-solana-defi-exchange-mango"
+  },
+  {
+    "slug": "mango-2022-10-11-otc-inflow",
+    "signature": "CYaqTCd8ExyqfxhN2jiKByEdQEDSYAZ4tgXhZL2SGrfuM1NPHA2LPZvnVtU78M8XCPuzzREo1W24vZ1bd7LZPEA",
+    "note": "Mango Markets, 23:01:24 UTC. 1,049,584 USDC arrives at the attack wallet, which is by now holding 54M \u2014 the borrowed funds are already out of the protocol.",
+    "source": "https://www.coindesk.com/markets/2022/10/12/how-market-manipulation-led-to-a-100m-exploit-on-solana-defi-exchange-mango"
+  },
+  {
+    "slug": "mango-2022-10-11-usdc-out-20m",
+    "signature": "3y76aqtRhDeoxc5eDvCuqwhMMPV6XSkR6BnAxUgeQxWwnnuLbCVcrKQm82tc6LLSNLEppSfxpH5hqs4Jdz9RSe1e",
+    "note": "Mango Markets, 23:17:38 UTC. 20,000,000 USDC leaves the attack wallet in one transfer its owner signed.",
+    "source": "https://www.coindesk.com/markets/2022/10/12/how-market-manipulation-led-to-a-100m-exploit-on-solana-defi-exchange-mango"
+  },
+  {
+    "slug": "mango-2022-10-11-usdc-out-25m",
+    "signature": "4drhmDqfYLmB5KHw3qZ1yoHVcmXzG7Y82ecXmqAPdq6QV24M4TSydKGMgpJhNuDYinvrrcsmcENicANAHbZJ59pC",
+    "note": "Mango Markets, 23:19:17 UTC. 25,000,000 more USDC leaves, again owner-signed. The wallet is left holding 7.5M.",
+    "source": "https://www.coindesk.com/markets/2022/10/12/how-market-manipulation-led-to-a-100m-exploit-on-solana-defi-exchange-mango"
   }
 ]

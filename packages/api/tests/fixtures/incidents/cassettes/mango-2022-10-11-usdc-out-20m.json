@@ -1,0 +1,259 @@
+{
+ "schema": "covantic.backtest.cassette/1",
+ "signature": "3y76aqtRhDeoxc5eDvCuqwhMMPV6XSkR6BnAxUgeQxWwnnuLbCVcrKQm82tc6LLSNLEppSfxpH5hqs4Jdz9RSe1e",
+ "rpc": "https://api.mainnet-beta.solana.com",
+ "fetchedAt": "2026-09-04T17:33:31.633Z",
+ "prices": {
+  "SOL/USD": [
+   {
+    "source": "binance",
+    "value": 30.89,
+    "conf": 0.030000000000001137,
+    "publishTime": 1665530250,
+    "feedId": "SOLUSDT"
+   },
+   {
+    "source": "coinbase",
+    "value": 30.885,
+    "conf": 0.03500000000000014,
+    "publishTime": 1665530250,
+    "feedId": "SOL-USD"
+   },
+   {
+    "source": "okx",
+    "value": 30.884999999999998,
+    "conf": 0.025000000000000355,
+    "publishTime": 1665530250,
+    "feedId": "SOL-USDT"
+   },
+   {
+    "source": "bybit",
+    "value": 30.885,
+    "conf": 0.03500000000000014,
+    "publishTime": 1665530250,
+    "feedId": "SOLUSDT"
+   }
+  ],
+  "BTC/USD": [
+   {
+    "source": "binance",
+    "value": 19044.870000000003,
+    "conf": 4.8700000000008,
+    "publishTime": 1665530250,
+    "feedId": "BTCUSDT"
+   },
+   {
+    "source": "coinbase",
+    "value": 19045.16,
+    "conf": 4.740000000001601,
+    "publishTime": 1665530250,
+    "feedId": "BTC-USD"
+   },
+   {
+    "source": "okx",
+    "value": 19045.25,
+    "conf": 1.25,
+    "publishTime": 1665530250,
+    "feedId": "BTC-USDT"
+   },
+   {
+    "source": "bybit",
+    "value": 19043.975,
+    "conf": 3.024999999999636,
+    "publishTime": 1665530250,
+    "feedId": "BTCUSDT"
+   }
+  ],
+  "ETH/USD": [
+   {
+    "source": "binance",
+    "value": 1279.68,
+    "conf": 0.2799999999999727,
+    "publishTime": 1665530250,
+    "feedId": "ETHUSDT"
+   },
+   {
+    "source": "coinbase",
+    "value": 1279.545,
+    "conf": 0.4350000000000591,
+    "publishTime": 1665530250,
+    "feedId": "ETH-USD"
+   },
+   {
+    "source": "okx",
+    "value": 1279.81,
+    "conf": 0.21000000000003638,
+    "publishTime": 1665530250,
+    "feedId": "ETH-USDT"
+   },
+   {
+    "source": "bybit",
+    "value": 1279.69,
+    "conf": 0.37999999999999545,
+    "publishTime": 1665530250,
+    "feedId": "ETHUSDT"
+   }
+  ],
+  "USDC/USD": [
+   {
+    "source": "okx",
+    "value": 1.0002,
+    "conf": 0,
+    "publishTime": 1665530250,
+    "feedId": "USDC-USDT"
+   },
+   {
+    "source": "bybit",
+    "value": 1.0001,
+    "conf": 0,
+    "publishTime": 1665530250,
+    "feedId": "USDCUSDT"
+   }
+  ],
+  "USDT/USD": [
+   {
+    "source": "coinbase",
+    "value": 0.999895,
+    "conf": 0.000014999999999987246,
+    "publishTime": 1665530250,
+    "feedId": "USDT-USD"
+   }
+  ]
+ },
+ "tx": {
+  "slot": 154868761,
+  "blockTime": 1665530258,
+  "transaction": {
+   "signatures": [
+    "3y76aqtRhDeoxc5eDvCuqwhMMPV6XSkR6BnAxUgeQxWwnnuLbCVcrKQm82tc6LLSNLEppSfxpH5hqs4Jdz9RSe1e"
+   ],
+   "message": {
+    "accountKeys": [
+     {
+      "pubkey": "yUJw9a2PyoqKkH47i4yEGf4WXomSHMiK7Lp29Xs2NqM",
+      "signer": true,
+      "source": "transaction",
+      "writable": true
+     },
+     {
+      "pubkey": "2NTz7Vpxm2DSfS2HBXFZTMMUL2hfsbpuuJ4MfEKpwFNM",
+      "signer": false,
+      "source": "transaction",
+      "writable": true
+     },
+     {
+      "pubkey": "EwufRSs1zc9wUHvvd1C7D549rrfnzXLnjZCfBAbv3tEj",
+      "signer": false,
+      "source": "transaction",
+      "writable": true
+     },
+     {
+      "pubkey": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "signer": false,
+      "source": "transaction",
+      "writable": false
+     },
+     {
+      "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "signer": false,
+      "source": "transaction",
+      "writable": false
+     }
+    ],
+    "instructions": [
+     {
+      "parsed": {
+       "info": {
+        "authority": "yUJw9a2PyoqKkH47i4yEGf4WXomSHMiK7Lp29Xs2NqM",
+        "destination": "2NTz7Vpxm2DSfS2HBXFZTMMUL2hfsbpuuJ4MfEKpwFNM",
+        "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "source": "EwufRSs1zc9wUHvvd1C7D549rrfnzXLnjZCfBAbv3tEj",
+        "tokenAmount": {
+         "amount": "20000000000000",
+         "decimals": 6,
+         "uiAmount": 20000000,
+         "uiAmountString": "20000000"
+        }
+       },
+       "type": "transferChecked"
+      },
+      "program": "spl-token",
+      "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "stackHeight": 1
+     }
+    ]
+   }
+  },
+  "meta": {
+   "err": null,
+   "fee": 5000,
+   "preBalances": [
+    761577935391800,
+    2039280,
+    2039280,
+    178542271068,
+    934087680
+   ],
+   "postBalances": [
+    761577935386800,
+    2039280,
+    2039280,
+    178542271068,
+    934087680
+   ],
+   "preTokenBalances": [
+    {
+     "accountIndex": 1,
+     "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+     "owner": "41zCUJsKk6cMB94DDtm99qWmyMZfp4GkAhhuz4xTwePu",
+     "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "uiTokenAmount": {
+      "amount": "0",
+      "decimals": 6,
+      "uiAmount": null,
+      "uiAmountString": "0"
+     }
+    },
+    {
+     "accountIndex": 2,
+     "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+     "owner": "yUJw9a2PyoqKkH47i4yEGf4WXomSHMiK7Lp29Xs2NqM",
+     "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "uiTokenAmount": {
+      "amount": "52519769626603",
+      "decimals": 6,
+      "uiAmount": 52519769.626603,
+      "uiAmountString": "52519769.626603"
+     }
+    }
+   ],
+   "postTokenBalances": [
+    {
+     "accountIndex": 1,
+     "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+     "owner": "41zCUJsKk6cMB94DDtm99qWmyMZfp4GkAhhuz4xTwePu",
+     "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "uiTokenAmount": {
+      "amount": "20000000000000",
+      "decimals": 6,
+      "uiAmount": 20000000,
+      "uiAmountString": "20000000"
+     }
+    },
+    {
+     "accountIndex": 2,
+     "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+     "owner": "yUJw9a2PyoqKkH47i4yEGf4WXomSHMiK7Lp29Xs2NqM",
+     "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "uiTokenAmount": {
+      "amount": "32519769626603",
+      "decimals": 6,
+      "uiAmount": 32519769.626603,
+      "uiAmountString": "32519769.626603"
+     }
+    }
+   ],
+   "innerInstructions": []
+  }
+ }
+}

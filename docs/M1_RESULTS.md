@@ -12,6 +12,13 @@ event type started from are in `EXPLOIT_DETECTION.md`,
 `ORACLE_MANIPULATION_DETECTION.md`, `AGENT_ERROR_DETECTION.md` and
 `GOVERNANCE_ATTACK_DETECTION.md`.
 
+Revised 2026-09-04. Three things moved since the first edition and all three
+are in the numbers below rather than in a changelog: the suites are larger,
+three of the four on-chain proof paths are live in production and one has
+settled a real policy, and the backtest now replays a second documented
+incident — Mango Markets, which is the one that was actually an oracle
+manipulation.
+
 ---
 
 ## 1. Where the detection module lives
@@ -38,13 +45,19 @@ table is unreferenced code.
 
 | Suite                        | Result                              |
 | ---------------------------- | ----------------------------------- |
-| API unit + corpus + backtest | **465 passed**, 5 skipped, 33 files |
-| Anchor on-chain integration  | **78 passed**, 3 files              |
+| API unit + corpus + backtest | **753 passed**, 5 skipped, 66 files |
+| Anchor on-chain integration  | **81 passed**, 3 files              |
 | `tsc --noEmit`               | clean                               |
 | `eslint src`                 | 0 errors                            |
 
 The Anchor number is new information rather than a new suite. It is reported
 here because until this change it was not being produced at all — see §5.
+
+Both figures are from 2026-09-04. The first edition of this document reported
+465 and 78; the API suite has roughly doubled since, and the Anchor figure is
+read from the CI job rather than a local run — GitHub Actions run
+[33899810278](https://github.com/mihailShumilov/covantic/actions/runs/33899810278)
+on `e75e59a`, which is what makes it checkable by someone who is not us.
 
 ### 2.2 Labelled corpora — constructed shapes
 
@@ -103,10 +116,11 @@ transaction would let the pipeline dismiss cases on a fact the harness handed
 it; with a stranger as the holder, every destination is foreign and each case
 has to be dismissed on its own evidence.
 
-**Documented incident.** The Wormhole bridge exploit of 2022-02-02, replayed
-from mainnet as six transactions: the forged mint of 120,000 unbacked wETH,
-the 10,000 and 80,000 wETH bridge-outs, the two swaps into SOL and USDC, and
-the USDC exit. Every one is expected not to confirm, and does not.
+**Documented incidents.** Two, twelve transactions, all replayed from mainnet.
+
+*Wormhole, 2022-02-02* — six transactions: the forged mint of 120,000 unbacked
+wETH, the 10,000 and 80,000 wETH bridge-outs, the two swaps into SOL and USDC,
+and the USDC exit. Every one is expected not to confirm, and does not.
 
 That expectation deserves stating plainly rather than being buried. The
 Wormhole loss was not the shape this product covers: the bridge's Solana
@@ -118,6 +132,42 @@ harder half — they are among the largest value movements in the chain's
 history, every one authorised by the wallet that made it, and a detector that
 pays out on size, on an unfamiliar program, or on "a large outflow from a
 young wallet" confirms all six.
+
+*Mango Markets, 2022-10-11* — six transactions, added because Wormhole tests
+size and Mango tests the thing this milestone names: the October 2022 exploit
+**was** an oracle manipulation. The attacker bought MNGO on the open market
+until the reported price carried collateral it could not support, then
+borrowed $116M against it.
+
+The attack wallet was read off the chain rather than out of a write-up. It is
+`yUJw9a2PyoqKkH47i4yEGf4WXomSHMiK7Lp29Xs2NqM`, the signer of the 25M USDC
+exit, and its entire history begins at 19:36 UTC on the day of the exploit —
+which is itself the corroboration that it is the right wallet. The six are its
+funding, a call into the Mango v3 program, the Jupiter swap that did the
+pumping, a 1M USDC inflow, and the two exits of 20M and 25M USDC.
+
+| Transaction                                     | Exploit path                    | Oracle path              |
+| ----------------------------------------------- | ------------------------------- | ------------------------ |
+| funding, 24,838 USDC in                         | rejected `no_net_loss`          | rejected `no_dex_interaction` |
+| Mango v3 program call                           | rejected `agent_authorized_movement` | rejected `no_dex_interaction` |
+| **Jupiter swap, 50,000 USDC → 210,545 MNGO**    | review `position_not_valued`    | review `no_price_feed_for_mint` |
+| 1,049,584 USDC in                               | rejected `no_net_loss`          | rejected `no_dex_interaction` |
+| 20,000,000 USDC out                             | rejected `agent_authorized_movement` | rejected `no_dex_interaction` |
+| 25,000,000 USDC out                             | rejected `agent_authorized_movement` | rejected `no_dex_interaction` |
+
+Governance and agent error resolve to review on all six, for the reason they
+do everywhere in this corpus: nothing has been declared for this wallet.
+
+The middle row is the honest one and the reason this table is here rather
+than a sentence saying "Mango passes". The manipulation itself does **not**
+reach the self-inflicted-slippage discriminator: it stops earlier, at
+`no_price_feed_for_mint`, because MNGO is outside the mint registry and none
+of the four exchanges the pricer reads still quotes it. Review is the correct
+answer to an asset that cannot be valued — but it is not a demonstration that
+the discriminator works, and reporting it as one would be the exact failure
+mode §3.1 exists to catch. What the six do establish is that five of the
+largest owner-signed movements of a real oracle attack are dismissed on their
+own evidence, and the sixth is dismissed for a stated reason.
 
 ---
 
@@ -182,7 +232,7 @@ coverage gap and is listed as one in §6.
 | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ----------------------- |
 | Every price lookup anchored to the transaction's block time, not to "now"   | `oracle/price-sources/pyth-hermes.ts`, `oracle/tx-time.ts`                                        | done                    |
 | Guardian-signed Pyth update retained verbatim (`binary.data[0]`)            | `oracle/types.ts` `PricePoint.raw`                                                                | done                    |
-| The **program** verifies that signed update before paying                   | `verify_and_payout_v2.rs` — `Account<'info, PriceUpdateV2>` from `pyth-solana-receiver-sdk` 2.0.0 | code done, not deployed |
+| The **program** verifies that signed update before paying                   | `verify_and_payout_v2.rs` — `Account<'info, PriceUpdateV2>` from `pyth-solana-receiver-sdk` 2.0.0 | deployed, flag off (§6) |
 | Chain record, not indexer payload, decides authorization                    | `exploit/raw-tx.ts` — signer flags and per-side token-account owners                              | done                    |
 | Canonical JSON → `bundleHash`; `verdictHash = sha256(bundleHash ‖ verdict)` | `oracle/hash.ts`                                                                                  | done                    |
 | Same bundle re-derives the same verdict, byte for byte                      | corpus + backtest determinism tests                                                               | done                    |
@@ -207,6 +257,15 @@ required". The host and an optional bearer credential are now configurable
 unavailability error as any other outage: Pyth drops out of the consensus, the
 reason is recorded in the bundle's `missing[]`, and the claim resolves against
 the remaining references one source short rather than silently.
+
+Since that was written Pyth has said what the replacement is. The anonymous
+host was retired on 2026-08-26 in favour of `pyth.dourolabs.app/hermes`, same
+routes and same response shapes, with the credential passed as
+`Authorization: Bearer`. The default now points there, which is what the
+client already sent, so the only outstanding piece is a key from Pyth
+Terminal. Verified against the live host while writing this: no credential
+answers `401`, an invalid one answers `403` — the endpoint is reachable and
+discriminating, not simply gone.
 
 **Kraken contributed nothing to any retrospective lookup.** Its public OHLC
 route ignores a `since` older than the ~720 candles it retains and answers with
@@ -272,10 +331,22 @@ The working toolchain, for anyone reproducing it: Agave 3.1.14,
 Listed because a milestone report that only contains good news is not a
 measurement.
 
-- **Proof paths are built but not deployed.** All four
-  `*_PROOF_ENABLED` flags default to false. The instructions exist in the
-  program and their tests pass, but the deployed devnet program predates them,
-  so turning a flag on before redeploying makes every payout on that path fail.
+- **Three of the four proof paths are live; the fourth waits on a credential.**
+  This has moved since the first edition. The devnet program was redeployed on
+  2026-08-28, and `EXPLOIT_PROOF_ENABLED`, `GOVERNANCE_PROOF_ENABLED` and
+  `AGENT_ERROR_PROOF_ENABLED` are true in production. They are not theoretical:
+  on 2026-09-04 policy #64 settled through `verify_and_payout_agent_error`,
+  100 USDC paid 87.5 seconds after the breach, on a payout the program bounded
+  by a balance drop it measured itself —
+  [`3s83DD9Z…`](https://explorer.solana.com/tx/3s83DD9Z1JKdjLe6mFQ9Vbe7GbJ4SjrRXgd7Mt1TtsWHzQgFmuPgyh8AQss5U25QrYeNF6qGPDcX8mzzCGewhu4J?cluster=devnet).
+
+  `ORACLE_PROOF_ENABLED` is still false, and the blocker is not the program.
+  `verify_and_payout_v2` is deployed and its tests pass; what is missing is the
+  guardian-signed update it verifies, which comes from Hermes, which now needs
+  a paid credential (§4.1). Until a key is set an oracle claim can reach
+  `confirmed` on the four exchange references but never the auto-pay lane —
+  it goes to review, which is the designed behaviour for evidence the chain
+  cannot re-derive, not a fallback to paying on our word.
 - **Order-book venues route to review.** §3.2. Serum, OpenBook and Phoenix
   fills cannot be reconstructed from balance deltas; doing it properly needs
   the market's fill records.
@@ -284,6 +355,13 @@ measurement.
   exploit-path outcomes in the backtest. Those go to review. Widening the
   registry is mechanical but each entry must be verified on chain first — a
   wrong `decimals` mis-scales a loss by orders of magnitude.
+
+  The Mango replay puts a price on that limit. The one transaction in this
+  corpus that *is* an oracle manipulation resolves to review rather than to a
+  verdict, because MNGO is outside the registry and none of the four exchanges
+  still quotes it — checked while adding the case, not assumed. Adding a mint
+  nobody trades any more would mean inventing a reference, so the case stays
+  as it is and says so.
 - **The backtest corpus spans 2022-03 to 2024-11.** The sampler reached its
   320-transaction cap before the 2025 and 2026 blocks in its era list. Raising
   `--max-negatives` extends it.
@@ -293,10 +371,13 @@ measurement.
   that widens with the corpus, not a recall measurement — and it could not be
   one, because its selection rule overlaps the authorization test the exploit
   verifier applies.
-- **One documented incident is replayed, not several.** Attacker addresses are
-  what make an incident locatable on chain, and they are published far less
-  often than the incidents themselves. `incidents.json` takes one line per
-  signature; the fetcher and the expectations do not change.
+- **Two documented incidents are replayed, not a dozen.** Attacker addresses
+  are what make an incident locatable on chain, and they are published far less
+  often than the incidents themselves — Mango was reachable because one exit
+  transaction is cited publicly, and everything else came from following that
+  wallet. `incidents.json` takes one line per signature; the fetcher and the
+  expectations do not change, so the next one is an afternoon's work rather
+  than a redesign.
 - **`victim_cohort` needs a database lookup wired into the keeper** before it
   fires in production. It reports as unevaluated until then, never as absent.
 

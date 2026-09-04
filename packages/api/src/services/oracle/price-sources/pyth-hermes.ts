@@ -12,19 +12,28 @@ const HTTP_TIMEOUT_MS = 5_000;
 /**
  * Pyth Hermes REST endpoint.
  *
- * The public host no longer serves anonymous requests — as of this writing
- * `hermes.pyth.network` answers `401 unauthorized` to every route, including
- * `/v2/updates/price/latest`. So both the host and a credential are
- * configurable: point `PYTH_HERMES_URL` at a self-hosted Hermes or a
- * provider's endpoint, and set `PYTH_HERMES_API_KEY` if it wants one.
+ * Pyth retired the anonymous host on 2026-08-26: `hermes.pyth.network` now
+ * answers `401 unauthorized` on every route, and the replacement is
+ * `pyth.dourolabs.app/hermes` with a bearer credential from Pyth Terminal.
+ * The routes and response shapes did not change, so the default points at
+ * the new host and the only missing piece is `PYTH_HERMES_API_KEY`.
+ * `PYTH_HERMES_URL` stays configurable for a self-hosted Hermes.
  *
- * Leaving the default in place is not a silent failure. A 401 raises
- * {@link PriceSourceUnavailableError} like any other outage, which excludes
- * Pyth from the consensus and records the reason in the bundle's `missing[]`
- * — the claim still resolves against the exchange references, one source
- * short, and the shortfall is visible to whoever reads the evidence.
+ * Running without the credential is degraded, not broken, and not silent. A
+ * 401 raises {@link PriceSourceUnavailableError} like any other outage, which
+ * excludes Pyth from the consensus and records the reason in the bundle's
+ * `missing[]` — the claim still resolves against the four exchange
+ * references, one source short, and the shortfall is visible to whoever
+ * reads the evidence.
+ *
+ * What the credential *does* gate is the proof path. `verify_and_payout_v2`
+ * pays only against a guardian-signed update the program verifies for itself,
+ * and that update comes from here. Until a key is set, an oracle claim can
+ * reach `confirmed` on exchange evidence but never the auto-pay lane — which
+ * is why `ORACLE_PROOF_ENABLED` is the one proof flag still off in
+ * production. See `docs/M1_RESULTS.md` §4.
  */
-const PYTH_HERMES_URL = process.env.PYTH_HERMES_URL ?? 'https://hermes.pyth.network';
+const PYTH_HERMES_URL = process.env.PYTH_HERMES_URL ?? 'https://pyth.dourolabs.app/hermes';
 
 /** Optional bearer credential for the configured Hermes host. */
 const PYTH_HERMES_API_KEY = process.env.PYTH_HERMES_API_KEY ?? '';
