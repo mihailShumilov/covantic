@@ -182,6 +182,29 @@ pub(crate) fn validate_mandate(mandate: &AgentMandate, covered_balance: u64) -> 
 /// Returns nothing the caller has to interpret: maturity, the predecessor
 /// fields and the event are all part of declaring, and splitting them across
 /// call sites is how the `prev_*` seeding bug described above gets reintroduced.
+/// How soon a written mandate can be proven against.
+pub(crate) enum MandateMaturity {
+    /// After `MANDATE_DECLARATION_DELAY`. For a mandate the *holder* writes.
+    Delayed,
+    /// Immediately. For a mandate written by `create_policy`.
+    ///
+    /// The delay exists against one thing: a holder declaring an envelope
+    /// *after* watching a loss, drawn tight around what already happened. A
+    /// mandate written by the purchase cannot be that. Its shape is fixed by
+    /// the oracle — `create_policy` refuses a purchase whose envelope does not
+    /// match the hash in the signed attestation — and the attestation's
+    /// envelope is derived from outflow history that predates the quote. There
+    /// is nothing left for the holder to choose, so there is nothing to
+    /// backdate.
+    ///
+    /// The loss itself is still bounded to the coverage window by a different
+    /// mechanism: the payout measures the drop against a balance checkpoint,
+    /// and the checkpoint must be at or after `policy.start_time`. A loss that
+    /// predates the policy is already inside the baseline, so the drop it
+    /// produces is zero.
+    Immediate,
+}
+
 pub(crate) fn write_mandate(
     record: &mut PolicyAgentMandate,
     mandate: &AgentMandate,
@@ -189,6 +212,7 @@ pub(crate) fn write_mandate(
     holder: Pubkey,
     now: i64,
     bump: u8,
+    maturity: MandateMaturity,
 ) -> Result<()> {
     let is_new = record.policy_id == 0 && record.effective_at == 0;
     let prev_max_single_outflow = if is_new { 0 } else { record.max_single_outflow };
@@ -216,9 +240,12 @@ pub(crate) fn write_mandate(
 
     record.manifest_hash = mandate.manifest_hash;
     record.declared_at = now;
-    record.effective_at = now
-        .checked_add(MANDATE_DECLARATION_DELAY)
-        .ok_or(CovanticError::MathOverflow)?;
+    record.effective_at = match maturity {
+        MandateMaturity::Immediate => now,
+        MandateMaturity::Delayed => now
+            .checked_add(MANDATE_DECLARATION_DELAY)
+            .ok_or(CovanticError::MathOverflow)?,
+    };
     record.prev_max_single_outflow = prev_max_single_outflow;
     record.prev_min_retained_balance = prev_min_retained_balance;
     record.prev_effective_at = prev_effective_at;
@@ -277,7 +304,16 @@ pub fn declare_agent_mandate_handler(
     let policy_id = ctx.accounts.policy.policy_id;
     let holder = ctx.accounts.policy.holder;
     let bump = ctx.bumps.mandate;
-    write_mandate(&mut ctx.accounts.mandate, &mandate, policy_id, holder, now, bump)?;
+    write_mandate(
+        &mut ctx.accounts.mandate,
+        &mandate,
+        policy_id,
+        holder,
+        now,
+        bump,
+        // The holder is writing this one, so it waits.
+        MandateMaturity::Delayed,
+    )?;
 
     Ok(())
 }

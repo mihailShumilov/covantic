@@ -228,6 +228,21 @@ export const MAX_AUTHORITY_CHECKPOINT_AGE_SECONDS = 2 * 3600;
 export const MANDATE_DECLARATION_DELAY_SECONDS = 3600;
 
 /**
+ * It applies to a declaration the *holder* writes, and to nothing else.
+ *
+ * A mandate written by `create_policy` is usable immediately. The delay exists
+ * against one thing — a holder declaring an envelope after watching a loss,
+ * drawn tight around what already happened — and the purchase envelope is not
+ * theirs to draw: the program refuses a purchase whose envelope does not match
+ * the hash in the oracle's signed attestation, and the oracle derives it from
+ * outflow history that predates the quote.
+ *
+ * A later declaration may only widen, so it can never manufacture a claim
+ * either; the delay stays on it because a widening that lands late costs
+ * nobody anything.
+ */
+
+/**
  * How many destinations and programs a holder may declare. Keep in sync with
  * `MAX_MANDATE_COUNTERPARTIES` / `MAX_MANDATE_PROGRAMS` in the Anchor program.
  *

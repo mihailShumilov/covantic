@@ -92,6 +92,21 @@ export function deriveAgentMandatePda(policy: PublicKey): PublicKey {
   )[0];
 }
 
+/**
+ * The balance checkpoint, written by the purchase itself.
+ *
+ * Every payout proves its loss by comparing the covered account against this,
+ * and it has to predate the movement — so the policy writes the first reading
+ * rather than waiting for the sweep. That is what lets cover be bought
+ * immediately before the transaction it is meant to cover.
+ */
+export function deriveBalanceCheckpointPda(policy: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('covantic_checkpoint'), policy.toBuffer()],
+    getProgramId(),
+  )[0];
+}
+
 export function deriveAttestationPda(agent: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync(
     [ATTESTATION_SEED, agent.toBuffer()],

@@ -344,6 +344,12 @@ async function buyPolicy(
         [Buffer.from(PDA_SEEDS.AGENT_MANDATE), policyPda.toBuffer()],
         program.programId,
       )[0],
+      // Written by the purchase, so the agent can move in the very next slot
+      // and the loss still has a baseline to be measured against.
+      checkpoint: PublicKey.findProgramAddressSync(
+        [Buffer.from(PDA_SEEDS.CHECKPOINT), policyPda.toBuffer()],
+        program.programId,
+      )[0],
       coveredTokenAccount: getAssociatedTokenAddressSync(usdcMint, agentPubkey),
       usdcMint,
       holderTokenAccount: holderAta,

@@ -2229,17 +2229,79 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       await expect(payout(policy, agent.publicKey, new BN(500_000)).rpc()).rejects.toThrow();
     });
 
-    it('refuses a mandate that had not matured when the claim was filed', async () => {
-      // Without this a holder declares a convenient envelope after the fact
-      // and claims against it in the next instruction.
+    it('is provable the moment it is bought — no wait, no separate checkpoint', async () => {
+      // The shape an agent platform can offer: buy cover, make the risky move,
+      // be paid if it goes wrong. It did not work, twice over.
+      //
+      // The envelope used to mature an hour after it was written, because a
+      // holder could otherwise declare one *after* watching a loss, drawn
+      // tight around what already happened. That cannot be done to an envelope
+      // the oracle derived from history predating the quote, so a mandate
+      // written by `create_policy` is usable at once.
+      //
+      // And the payout proves its loss against a balance checkpoint, which
+      // arrived on the sweep's own schedule. A loss inside that window
+      // measured a drop of zero. The purchase writes the first reading itself.
+      //
+      // Note what this case does *not* call: no `declareMandate`, no
+      // `balanceCheckpoint`, and no clock advance for maturity.
       const { policy, agent, agentAta } = await setupMandatedPolicy(usdc(100));
-      await declareMandate(policy);
-      await balanceCheckpoint(policy, agent.publicKey);
       await spend(agent, agentAta, usdc(60));
-      await fileClaim(policy); // filed before effective_at
+      await fileClaim(policy);
+      await advanceClockBySeconds(context, 21_601); // the lock, and only the lock
+
+      await payout(policy, agent.publicKey, usdc(50)).rpc();
+
+      const pol: any = await (program.account as any).insurancePolicy.fetch(policy);
+      expect(pol.state).toBe(2); // ClaimPaid
+    });
+
+    it('takes its baseline from the purchase, so a loss before it cannot be claimed', async () => {
+      // What replaced the maturity delay, and the reason removing it is safe.
+      //
+      // The checkpoint is written at purchase and the payout subtracts the
+      // current balance from it, so value that left *before* the policy is
+      // already inside the baseline. There is no drop to measure and nothing
+      // to pay — the coverage window is enforced by arithmetic rather than by
+      // asking when a declaration was made.
+      const { policy, agent } = await setupMandatedPolicy(usdc(100));
+
+      const [checkpoint] = PublicKey.findProgramAddressSync(
+        [Buffer.from('covantic_checkpoint'), policy.toBuffer()],
+        program.programId,
+      );
+      const written: any = await (program.account as any).policyBalanceCheckpoint.fetch(
+        checkpoint,
+      );
+      // Both readings are the balance at purchase. A zero `prevAmount` would
+      // measure the agent's first ordinary payment as a total loss.
+      expect(written.amount.toString()).toBe(usdc(100).toString());
+      expect(written.prevAmount.toString()).toBe(usdc(100).toString());
+
+      // Nothing has moved since the purchase, so nothing can be proven.
+      await fileClaim(policy);
+      await advanceClockBySeconds(context, 21_601);
+      await expect(payout(policy, agent.publicKey, usdc(50)).rpc()).rejects.toThrow();
+    });
+
+    it('keeps the envelope that was paid for until a wider one matures', async () => {
+      // A later declaration may only widen, and widening waits out the delay.
+      // Until it lands, the payout is computed against the envelope the
+      // premium actually bought — the tighter one — so the gap cannot be used
+      // to enlarge a claim either.
+      const { policy, agent, agentAta } = await setupMandatedPolicy(usdc(100));
+      await declareMandate(policy, { maxSingleOutflow: usdc(50) }); // wider than CAP
+      await spend(agent, agentAta, usdc(60));
+      await fileClaim(policy);
       await advanceClockBySeconds(context, 21_601);
 
-      await expect(payout(policy, agent.publicKey, usdc(50)).rpc()).rejects.toThrow();
+      await payout(policy, agent.publicKey, usdc(50)).rpc();
+
+      const record: any = await (program.account as any).agentErrorEvidenceRecord.fetch(
+        agentErrorEvidencePda(policy)[0],
+      );
+      // Measured against the purchase cap, not the wider one just declared.
+      expect(record.declaredMaxSingleOutflow.toString()).toBe(CAP.toString());
     });
 
     it('refuses before the lock period has elapsed', async () => {
