@@ -74,9 +74,34 @@ function requestedTs(url: string): number {
   return Number(url.match(/\/v2\/updates\/price\/(\d+)/)![1]);
 }
 
+/**
+ * Hermes wants a credential since August 2026, and a source without one
+ * answers `not_configured` before it reaches the network — which is its own
+ * test at the end of this block. Everything that exercises HTTP behaviour has
+ * to be configured, or it would be testing the guard instead.
+ */
+const configured = () => new PythHermesSource(undefined, 'test-key');
+
 describe('PythHermesSource', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it('reports not_configured without spending a request when no key is set', async () => {
+    const fetchSpy = mockFetch(() => ({ status: 200, body: {} }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const source = new PythHermesSource(undefined, '');
+
+    // Unavailable, so the claim goes to the indeterminate lane and the reason
+    // reaches the bundle's `missing[]` — being switched off must not read as
+    // "there was nothing to report".
+    await expect(source.getPriceAt('SOL/USD', 1_700_000_000)).rejects.toMatchObject({
+      source: 'pyth',
+      retryAfterSec: 3600,
+    });
+    await expect(source.getPriceAt('SOL/USD', 1_700_000_000)).rejects.toThrow(/not_configured/);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it('anchors the window on the requested block time', async () => {
@@ -85,7 +110,7 @@ describe('PythHermesSource', () => {
       mockFetch((url) => ({ status: 200, body: hermesBody(requestedTs(url)) })),
     );
 
-    const source = new PythHermesSource();
+    const source = configured();
     const window = await source.getPriceWindow('SOL/USD', 1_700_000_000);
 
     expect(window).not.toBeNull();
@@ -109,7 +134,7 @@ describe('PythHermesSource', () => {
       }),
     );
 
-    const source = new PythHermesSource();
+    const source = configured();
     const window = await source.getPriceWindow('SOL/USD', 1_700_000_000, 2);
 
     expect(window!.after?.publishTime).toBe(1_700_000_001);
@@ -121,7 +146,7 @@ describe('PythHermesSource', () => {
 
   it('treats 404 as "no data for this feed", not an outage', async () => {
     vi.stubGlobal('fetch', mockFetch(() => ({ status: 404 })));
-    const source = new PythHermesSource();
+    const source = configured();
     await expect(source.getPriceAt('SOL/USD', 1_700_000_000)).resolves.toBeNull();
   });
 
@@ -130,7 +155,7 @@ describe('PythHermesSource', () => {
       'fetch',
       mockFetch(() => ({ status: 429, headers: { 'retry-after': '17' } })),
     );
-    const source = new PythHermesSource();
+    const source = configured();
 
     // Must throw rather than resolve null: a 429 says nothing about the
     // price, and collapsing it into "no data" is what used to close valid
@@ -151,7 +176,7 @@ describe('PythHermesSource', () => {
         throw new Error('ECONNRESET');
       }),
     );
-    const source = new PythHermesSource();
+    const source = configured();
     await expect(source.getPriceAt('SOL/USD', 1_700_000_000)).rejects.toBeInstanceOf(
       PriceSourceUnavailableError,
     );
@@ -161,7 +186,7 @@ describe('PythHermesSource', () => {
     const fetchMock = mockFetch((url) => ({ status: 200, body: hermesBody(requestedTs(url)) }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const source = new PythHermesSource();
+    const source = configured();
     await source.getPriceAt('SOL/USD', 1_700_000_000);
     await source.getPriceAt('SOL/USD', 1_700_000_000);
 
@@ -173,7 +198,7 @@ describe('PythHermesSource', () => {
       'fetch',
       mockFetch((url) => ({ status: 200, body: hermesBody(requestedTs(url)) })),
     );
-    const source = new PythHermesSource();
+    const source = configured();
     const point = await source.getPriceAt(SOL_FEED, 1_700_000_000);
     expect(point?.feedId).toBe(SOL_FEED);
   });
@@ -181,7 +206,7 @@ describe('PythHermesSource', () => {
   it('returns null for an unknown feed key without calling the network', async () => {
     const fetchMock = mockFetch(() => ({ status: 200, body: hermesBody(1) }));
     vi.stubGlobal('fetch', fetchMock);
-    const source = new PythHermesSource();
+    const source = configured();
     expect(await source.getPriceAt('NOPE/USD', 1_700_000_000)).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
   });

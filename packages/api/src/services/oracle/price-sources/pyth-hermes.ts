@@ -12,19 +12,29 @@ const HTTP_TIMEOUT_MS = 5_000;
 /**
  * Pyth Hermes REST endpoint.
  *
- * The public host no longer serves anonymous requests — as of this writing
- * `hermes.pyth.network` answers `401 unauthorized` to every route, including
- * `/v2/updates/price/latest`. So both the host and a credential are
- * configurable: point `PYTH_HERMES_URL` at a self-hosted Hermes or a
- * provider's endpoint, and set `PYTH_HERMES_API_KEY` if it wants one.
+ * Pyth retired the anonymous host on 2026-08-26: `hermes.pyth.network` now
+ * answers `401 unauthorized` on every route, and the replacement is
+ * `pyth.dourolabs.app/hermes` with a bearer credential from Pyth Terminal.
+ * The routes and response shapes did not change, so the default points at
+ * the new host and the only missing piece is `PYTH_HERMES_API_KEY`.
+ * `PYTH_HERMES_URL` stays configurable for a self-hosted Hermes.
  *
- * Leaving the default in place is not a silent failure. A 401 raises
- * {@link PriceSourceUnavailableError} like any other outage, which excludes
- * Pyth from the consensus and records the reason in the bundle's `missing[]`
- * — the claim still resolves against the exchange references, one source
- * short, and the shortfall is visible to whoever reads the evidence.
+ * **With no key, this source is off rather than failing.** It reports
+ * `not_configured` without making a request, because the request cannot
+ * succeed and every claim would otherwise spend a round trip and a five
+ * second timeout discovering that again. Off is not silent: the reason still
+ * lands in the bundle's `missing[]` next to any real outage, so the evidence
+ * says a reference was absent by configuration and does not quietly become a
+ * four-source consensus that looks like a five-source one.
+ *
+ * What the credential gates is the proof path. `verify_and_payout_v2` pays
+ * only against a guardian-signed update the program verifies for itself, and
+ * that update comes from here. Without a key an oracle claim can reach
+ * `confirmed` on the exchange references but never the auto-pay lane — which
+ * is why `ORACLE_PROOF_ENABLED` is the one proof flag off in production. See
+ * `docs/M1_RESULTS.md` §4.
  */
-const PYTH_HERMES_URL = process.env.PYTH_HERMES_URL ?? 'https://hermes.pyth.network';
+const PYTH_HERMES_URL = process.env.PYTH_HERMES_URL ?? 'https://pyth.dourolabs.app/hermes';
 
 /** Optional bearer credential for the configured Hermes host. */
 const PYTH_HERMES_API_KEY = process.env.PYTH_HERMES_API_KEY ?? '';
@@ -152,6 +162,16 @@ export class PythHermesSource implements PriceSource {
     const cacheKey = `${feedId}:${ts}`;
     const cached = this.cache.get(cacheKey);
     if (cached !== undefined) return cached;
+
+    // Unconfigured is a decision, not an outage, so it is answered here rather
+    // than by the host. Retry an hour out: nothing about this changes until
+    // someone sets an environment variable, and a 60-second retry would put a
+    // guaranteed 401 in front of every claim the keeper touches.
+    if (!this.apiKey) {
+      throw new PriceSourceUnavailableError('pyth', 'not_configured: PYTH_HERMES_API_KEY unset', {
+        retryAfterSec: 3600,
+      });
+    }
 
     const url =
       `${this.baseUrl}/v2/updates/price/${ts}` + `?ids[]=${feedId}&parsed=true&binary=true`;
