@@ -121,6 +121,72 @@ what it is rather than waiting through it: the window in which a compromised
 oracle key can still be stopped before money moves. It is six hours in
 production.
 
+## When the policy was bought before the record
+
+The scenario above builds the record first, and that order is what sizes the
+cap. Buy first and the envelope is whatever the agent's record justified at
+that moment — written into the mandate by `create_policy` and fixed there for
+the life of the policy. Nothing re-cuts it afterwards: `declare_agent_mandate`
+writes a *new* mandate that matures on a delay, and the wallet that would have
+to sign it is the buyer's, not the CLI's.
+
+It comes out one of two shapes, and an agent left alone crosses neither.
+
+- **No record at all** — the cap is the balance. Policy #63 was bought against
+  an agent holding 1,999 USDC and got a cap of exactly 1,999, which nothing can
+  cross, since an agent cannot move more than it holds.
+- **A spent agent** — the cap is five times a p95 that already contains a large
+  movement. Policy #64 was bought against an agent holding 800 USDC and got a
+  cap of **3,350**: an earlier policy on that agent had been paid, so its p95
+  sits at 670. The quote allows the purchase — 100 USDC of cover is well within
+  what the agent holds — it is the *breach* that has become unreachable.
+
+`demo:status` lists neither. It reads the ledger `demo:arm` writes, and a
+policy bought from the UI was never in it.
+
+### Triggering one anyway
+
+Mock USDC is minted by the oracle key, so the balance is the part that can
+still be changed. Refresh the baseline, fund past the cap, and cross both
+declared bounds with one movement:
+
+```bash
+pnpm agent:trigger --name <agent> --amount 20 --kind transfer   # six times, ~25s apart
+pnpm agent:fund    --name <agent> --usdc 10500
+pnpm demo:autonomous --policy 64 --agent <agent> --amount 10600
+```
+
+Each number is doing separate work, and the confidence arithmetic is why.
+**10,600** clears the single-outflow cap of 3,350 *and* the 10,050 window cap,
+which is two dimensions rather than one and worth 0.05. The **six transfers**
+cost two minutes and buy 0.08: they clear the 0.03 penalty for a stale
+baseline, and a movement ten times the agent's ordinary 20 earns 0.05 of
+corroboration. Skip them and the same movement scores 0.74 against a review bar
+of exactly 0.75 — it parks in `review` instead of paying, which from the
+audience looks like a refusal. **10,500** funds the movement while leaving the
+balance afterwards *below* the checkpoint, so the drop is provable whether or
+not the sweep has written a fresh one.
+
+Verified on 2026-09-04: policy #64, bought from the dashboard for **0.0068
+USDC** of premium on 100 of cover, paid **100 USDC** —
+[`3s83DD9Z…`](https://explorer.solana.com/tx/3s83DD9Z1JKdjLe6mFQ9Vbe7GbJ4SjrRXgd7Mt1TtsWHzQgFmuPgyh8AQss5U25QrYeNF6qGPDcX8mzzCGewhu4J?cluster=devnet).
+The overshoot was 7,250 and the coverage bounds it.
+
+```
+17:08:05  agent moves 10,600 USDC against a declared cap of 3,350
+17:08:52  claim confirmed — confidence 0.82, single_outflow + window_outflow
+17:09:32  paid — 100 USDC
+```
+
+87.5 seconds from the breach to the payout confirming, with one lock deferral
+in the middle.
+
+What this path does not show is the ratio. 100 paid against 0.0068 is the
+coverage that was bought, not what the pool provides; the cap here is 3,350
+because the agent was spent, so the deductible dwarfs the cover. Build the
+record first and the cap comes out at 100 — which is the scenario above, and
+the one to run on stage.
+
 ## Preparing ahead
 
 Two things are spent by every run, and neither comes back.
@@ -140,7 +206,9 @@ armed policy will pay.
 
 - `confidence_below_review_bar` — the evidence is thin. Almost always a missing
   history (step 1), which is also what the counterparty allowlist costs: it is
-  not derivable, so it is left silent, and silence is 0.03.
+  not derivable, so it is left silent, and silence is 0.03. A UI-bought policy
+  reaches the bar on a single dimension and lands at 0.74; see *When the policy
+  was bought before the record*.
 - `ENVELOPE_NOT_INSURABLE` at the quote — this agent has already made the demo
   movement, so its ordinary behaviour now sits above the cap any envelope would
   give it. Use another agent.
