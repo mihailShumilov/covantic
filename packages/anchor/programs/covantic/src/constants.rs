@@ -391,6 +391,26 @@ mod tests {
         }
     }
 
+    /// And a production build leaves an hour of it.
+    ///
+    /// "Greater than zero" is the floor for a demo build and far too low for a
+    /// real one: a release that shortened the exploit lock to a single minute
+    /// passed the assertion above without complaint. The window has to be long
+    /// enough for `paused` or the payout breaker to actually be reached, which
+    /// is a duration, not a sign.
+    #[cfg(not(feature = "devnet-fast-lock"))]
+    #[test]
+    fn a_production_build_leaves_an_hour_to_intervene() {
+        for (name, lock) in [
+            ("exploit", LOCK_EXPLOIT),
+            ("oracle", LOCK_ORACLE_MANIPULATION),
+            ("agent_error", LOCK_AGENT_ERROR),
+            ("governance", LOCK_GOVERNANCE_ATTACK),
+        ] {
+            assert!(lock >= 3600, "{name} lock must leave an hour, got {lock}");
+        }
+    }
+
     /// Mainnet keeps the hour. This is the assertion that matters, and the one
     /// a careless `--features devnet-fast-lock` in a release pipeline trips.
     #[cfg(not(feature = "devnet-fast-lock"))]
