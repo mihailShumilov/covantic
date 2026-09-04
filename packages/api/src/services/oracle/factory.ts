@@ -17,13 +17,19 @@ import { PythHermesSource } from './price-sources/pyth-hermes.js';
  *
  * Two of the six answer far less often than the list suggests, and both
  * shortfalls are recorded in every bundle's `missing[]` rather than implied.
- * Hermes now requires a credential and returns 401 without one. Kraken's
+ * Pyth is one of them and is currently off by decision: Hermes began charging
+ * for access in August 2026, no key is configured, and the source reports
+ * `not_configured` without spending a request on a certain 401. Kraken's
  * public OHLC route only retains a recent window and silently answers with
  * the latest candles for any older `since`, so it contributes nothing to a
  * retrospective lookup — which is every lookup this pipeline makes. OKX and
  * Bybit were added because of that: they serve minute candles years back, and
  * without them the retrospective consensus was two sources under a
  * three-source bar.
+ *
+ * Pyth stays in the list while it is off. Removing it would take the entry
+ * out of `missing[]` too, and an evidence bundle that never mentions a
+ * reference reads as though it was never meant to have one.
  *
  * Sources are cheap to construct and cache internally by (feed, timestamp),
  * so a fresh pricer per process is fine — but do not build one per request.

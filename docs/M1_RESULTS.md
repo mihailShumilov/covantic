@@ -231,7 +231,7 @@ coverage gap and is listed as one in §6.
 | Property                                                                    | Where                                                                                             | Status                  |
 | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ----------------------- |
 | Every price lookup anchored to the transaction's block time, not to "now"   | `oracle/price-sources/pyth-hermes.ts`, `oracle/tx-time.ts`                                        | done                    |
-| Guardian-signed Pyth update retained verbatim (`binary.data[0]`)            | `oracle/types.ts` `PricePoint.raw`                                                                | done                    |
+| Guardian-signed Pyth update retained verbatim (`binary.data[0]`)            | `oracle/types.ts` `PricePoint.raw`                                                                | done, source off (§4.1) |
 | The **program** verifies that signed update before paying                   | `verify_and_payout_v2.rs` — `Account<'info, PriceUpdateV2>` from `pyth-solana-receiver-sdk` 2.0.0 | deployed, flag off (§6) |
 | Chain record, not indexer payload, decides authorization                    | `exploit/raw-tx.ts` — signer flags and per-side token-account owners                              | done                    |
 | Canonical JSON → `bundleHash`; `verdictHash = sha256(bundleHash ‖ verdict)` | `oracle/hash.ts`                                                                                  | done                    |
@@ -266,6 +266,26 @@ client already sent, so the only outstanding piece is a key from Pyth
 Terminal. Verified against the live host while writing this: no credential
 answers `401`, an invalid one answers `403` — the endpoint is reachable and
 discriminating, not simply gone.
+
+**And the key has not been bought, so Pyth is off.** That is a decision about
+cost, not a defect, and it is recorded here rather than left for a reader to
+infer from a log. With no key the source answers `not_configured` without
+making a request — a certain 401 in front of every claim is a round trip and a
+five-second timeout spent learning nothing — and the reason still lands in the
+bundle's `missing[]` beside any real outage. Pyth stays in the source list
+while it is off, because dropping it would take the entry out of `missing[]`
+too, and evidence that never mentions a reference reads as though none was
+intended.
+
+What this costs the milestone should be stated plainly. Price *consensus* is
+unaffected in kind: it was already four retrospective exchange references
+deep, above the three-source bar, and Pyth had contributed nothing since the
+host closed. What is not exercised in production is the Pyth half of
+*deterministic verification* — the guardian-signed update and the program's
+own check of it. That path is written, deployed and tested (`verify_and_payout_v2`,
+`Account<'info, PriceUpdateV2>`, and its Anchor cases), and it is one
+environment variable away from running. Until that variable is set, treat the
+Pyth leg of this milestone as code-complete and unexercised rather than live.
 
 **Kraken contributed nothing to any retrospective lookup.** Its public OHLC
 route ignores a `since` older than the ~720 candles it retains and answers with
@@ -343,10 +363,14 @@ measurement.
   `ORACLE_PROOF_ENABLED` is still false, and the blocker is not the program.
   `verify_and_payout_v2` is deployed and its tests pass; what is missing is the
   guardian-signed update it verifies, which comes from Hermes, which now needs
-  a paid credential (§4.1). Until a key is set an oracle claim can reach
-  `confirmed` on the four exchange references but never the auto-pay lane —
-  it goes to review, which is the designed behaviour for evidence the chain
-  cannot re-derive, not a fallback to paying on our word.
+  a paid credential nobody has bought (§4.1). Until a key is set an oracle
+  claim can reach `confirmed` on the four exchange references but never the
+  auto-pay lane — it goes to review, which is the designed behaviour for
+  evidence the chain cannot re-derive, not a fallback to paying on our word.
+
+  Said the other way, so it cannot be read as more than it is: three of the
+  four covered events settle autonomously in production today, and the fourth
+  reaches a verdict but stops short of releasing funds without a human.
 - **Order-book venues route to review.** §3.2. Serum, OpenBook and Phoenix
   fills cannot be reconstructed from balance deltas; doing it properly needs
   the market's fill records.
