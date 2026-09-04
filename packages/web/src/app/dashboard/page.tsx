@@ -1145,10 +1145,10 @@ function BuyPolicyForm({
             }}
           >
             {overMax ? 'Above the maximum — ' : 'Maximum '}
-            ${maxCoverageUi.toLocaleString()} USDC.{' '}
+            ${maxCoverageUi.toLocaleString()} USDC —{' '}
             {quote?.maxCoverageBound === 'vault_capacity'
-              ? 'That is what the vault’s stake currently supports.'
-              : 'That is what this agent holds — cover above it would pay for a loss it cannot suffer.'}
+              ? 'what the vault’s stake supports.'
+              : 'what this agent holds.'}
           </p>
         )}
       </div>
@@ -1188,29 +1188,19 @@ function BuyPolicyForm({
         same however much they happen to hold.
       */}
       {quote && !quoteExpired && (
-        <div style={{ gridColumn: '1 / -1', marginTop: '0.25rem' }}>
-          <div style={{ fontSize: '0.8125rem', fontWeight: 600, marginBottom: 2 }}>
-            Operating envelope
-          </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', lineHeight: 1.55 }}>
-            {quote.envelopeBasis === 'history' ? (
-              <>
-                Set from this agent&rsquo;s own record: it ordinarily moves $
-                {formatUsdc(quote.ordinaryOutflow ?? 0)}, so a single transfer over{' '}
-                <strong>${formatUsdc(quote.mandate.maxSingleOutflowRaw)}</strong> — five times
-                that — is treated as a covered error. A loss inside the envelope is not covered;
-                that first slice is the deductible.
-              </>
-            ) : (
-              <>
-                This agent has no spending history yet, so the cap is set at what it holds — $
-                {formatUsdc(quote.mandate.maxSingleOutflowRaw)}, which nothing can cross, since an
-                agent cannot move more than it has. The other three triggers cover it from the
-                first minute; agent-error cover begins once it has been observed.
-              </>
-            )}
-          </div>
-        </div>
+        <p
+          style={{
+            gridColumn: '1 / -1',
+            margin: 0,
+            fontSize: '0.75rem',
+            color: 'var(--color-text-muted)',
+          }}
+        >
+          Envelope <strong>${formatUsdc(quote.mandate.maxSingleOutflowRaw)}</strong>
+          {quote.envelopeBasis === 'history'
+            ? ` — 5× its usual $${formatUsdc(quote.ordinaryOutflow ?? 0)}; above that is a covered error.`
+            : ' — all this agent holds; agent-error cover starts once it has a record.'}
+        </p>
       )}
 
       {quote && !quoteExpired && (
@@ -1280,9 +1270,8 @@ function BuyPolicyForm({
               <span style={{ fontWeight: 600 }}>${formatUsdc(quote.coverageAmount)} USDC</span>
             </div>
             <p style={{ margin: '6px 0 0', color: 'var(--color-text-muted)' }}>
-              In full, on any of the four triggers. On an agent error the payout is what the
-              movement exceeded the cap by — the first ${formatUsdc(quote.mandate.maxSingleOutflowRaw)}{' '}
-              is the deductible.
+              In full on any trigger; on an agent error, the excess over $
+              {formatUsdc(quote.mandate.maxSingleOutflowRaw)}.
             </p>
             <div
               style={{
