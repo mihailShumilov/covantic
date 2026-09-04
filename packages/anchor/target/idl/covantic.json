@@ -1077,6 +1077,58 @@
           }
         },
         {
+          "name": "checkpoint",
+          "docs": [
+            "The first balance reading, taken by the purchase itself.",
+            "",
+            "Every payout proves its loss by comparing the covered account against a",
+            "checkpoint, and the checkpoint has to predate the movement. Writing the",
+            "first one here is what lets cover be bought immediately before the",
+            "transaction it is meant to cover: without it the baseline arrives on",
+            "the sweep's own schedule, and a loss inside that window measures a drop",
+            "of zero — the claim verifies, computes the whole overshoot, and then",
+            "fails on chain with `DropBelowMinimum`.",
+            "",
+            "`init_if_needed` rather than `init`: a policy PDA can be reused once an",
+            "earlier policy for the same holder and counter has settled, and its",
+            "checkpoint outlives it. Reinitialising is handled below by writing",
+            "every field."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  99,
+                  104,
+                  101,
+                  99,
+                  107,
+                  112,
+                  111,
+                  105,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy"
+              }
+            ]
+          }
+        },
+        {
           "name": "covered_token_account",
           "docs": [
             "The agent's covered account, read only to bound the retention floor.",

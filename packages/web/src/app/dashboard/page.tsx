@@ -44,6 +44,7 @@ import {
   derivePolicyPda,
   deriveAttestationPda,
   deriveAgentMandatePda,
+  deriveBalanceCheckpointPda,
 } from '@/hooks/useCovanticProgram';
 
 const SOLANA_ADDRESS_RE = SOLANA_ADDRESS_REGEX;
@@ -997,6 +998,7 @@ function BuyPolicyForm({
           attestation: attestationPda,
           policy: policyPda,
           mandate: deriveAgentMandatePda(policyPda),
+          checkpoint: deriveBalanceCheckpointPda(policyPda),
           // The agent's covered account. `create_policy` reads it to check the
           // retention floor is one the holder currently satisfies, so an agent
           // with no USDC account cannot be insured — and the purchase fails

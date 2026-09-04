@@ -5,10 +5,11 @@ use crate::constants::*;
 use crate::errors::CovanticError;
 use crate::events::PolicyCreated;
 use crate::instructions::declare_agent_mandate::{
-    validate_mandate, write_mandate, AgentMandate,
+    validate_mandate, write_mandate, AgentMandate, MandateMaturity,
 };
 use crate::state::{
-    InsurancePolicy, InsuranceVault, PolicyAgentMandate, ProtocolConfig, RiskAttestation,
+    InsurancePolicy, InsuranceVault, PolicyAgentMandate, PolicyBalanceCheckpoint, ProtocolConfig,
+    RiskAttestation,
 };
 
 /// Create a new insurance policy.
@@ -67,7 +68,8 @@ pub fn create_policy_handler(
     // Enforce attestation freshness. The PDA seeds already bind the
     // attestation to `agent_address`, but we still assert the stored field
     // matches as defense-in-depth against future seed changes.
-    let now = Clock::get()?.unix_timestamp;
+    let clock = Clock::get()?;
+    let now = clock.unix_timestamp;
     require!(
         attestation.agent == agent_address,
         CovanticError::AttestationAgentMismatch
@@ -231,8 +233,15 @@ pub fn create_policy_handler(
     policy.trigger_tx_signature = vec![];
     policy.payout_amount = 0;
     policy.bump = ctx.bumps.policy;
-    // Declared with the purchase, so its maturity clock starts here and the
-    // premium just paid is the price of this envelope and no other.
+    // Written by the purchase, and usable from this instant.
+    //
+    // The premium just paid is the price of this envelope and no other — the
+    // hash in the oracle's attestation is compared above — and because the
+    // oracle derived it from history that predates the quote, there is nothing
+    // here the holder chose and nothing to backdate. See `MandateMaturity`.
+    //
+    // This is what lets cover be bought immediately before the transaction it
+    // is meant to cover, which is the only shape an agent platform can offer.
     let mandate_bump = ctx.bumps.mandate;
     let holder_key = ctx.accounts.holder.key();
     write_mandate(
@@ -242,7 +251,29 @@ pub fn create_policy_handler(
         holder_key,
         now,
         mandate_bump,
+        MandateMaturity::Immediate,
     )?;
+
+    // The first balance reading, and it is a reading rather than a claim: the
+    // amount comes from the covered account this instruction already loaded,
+    // derived by Anchor from `agent_address`, never accepted from the caller.
+    //
+    // `prev_*` is set to the same reading rather than to zero. It is the
+    // pre-drop watermark every payout subtracts from, and a zero there would
+    // measure the first movement as a loss of everything the agent holds.
+    // `checkpoint_balance` does exactly this for a checkpoint it creates; the
+    // difference is only that the purchase no longer waits for it.
+    let checkpoint = &mut ctx.accounts.checkpoint;
+    let covered_amount = ctx.accounts.covered_token_account.amount;
+    checkpoint.policy_id = policy_id;
+    checkpoint.covered_account = ctx.accounts.covered_token_account.key();
+    checkpoint.prev_amount = covered_amount;
+    checkpoint.prev_slot = clock.slot;
+    checkpoint.prev_unix_timestamp = now;
+    checkpoint.amount = covered_amount;
+    checkpoint.slot = clock.slot;
+    checkpoint.unix_timestamp = now;
+    checkpoint.bump = ctx.bumps.checkpoint;
 
 
     emit!(PolicyCreated {
@@ -314,6 +345,29 @@ pub struct CreatePolicy<'info> {
         bump,
     )]
     pub mandate: Box<Account<'info, PolicyAgentMandate>>,
+
+    /// The first balance reading, taken by the purchase itself.
+    ///
+    /// Every payout proves its loss by comparing the covered account against a
+    /// checkpoint, and the checkpoint has to predate the movement. Writing the
+    /// first one here is what lets cover be bought immediately before the
+    /// transaction it is meant to cover: without it the baseline arrives on
+    /// the sweep's own schedule, and a loss inside that window measures a drop
+    /// of zero — the claim verifies, computes the whole overshoot, and then
+    /// fails on chain with `DropBelowMinimum`.
+    ///
+    /// `init_if_needed` rather than `init`: a policy PDA can be reused once an
+    /// earlier policy for the same holder and counter has settled, and its
+    /// checkpoint outlives it. Reinitialising is handled below by writing
+    /// every field.
+    #[account(
+        init_if_needed,
+        payer = holder,
+        space = PolicyBalanceCheckpoint::LEN,
+        seeds = [CHECKPOINT_SEED, policy.key().as_ref()],
+        bump,
+    )]
+    pub checkpoint: Box<Account<'info, PolicyBalanceCheckpoint>>,
 
     /// The agent's covered account, read only to bound the retention floor.
     ///
