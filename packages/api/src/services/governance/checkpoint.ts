@@ -4,6 +4,7 @@ import { PDA_SEEDS, policyIdToBytes } from '@covantic/shared';
 import { logger } from '../../utils/logger.js';
 import type { CovanticProgram } from '../../utils/program.js';
 import { fetchAnchorAccount } from '../../utils/anchor-reader.js';
+import { readProtocolConfig } from '../../utils/protocol-config.js';
 import { isUndersizedAccount } from '../attestation-publisher.js';
 import type { SolanaReader } from '../../utils/solana-reader.js';
 import type { GovernanceBaselineView } from './types.js';
@@ -92,12 +93,7 @@ export class AuthorityCheckpointWriter {
       // Protocol config over the pool: it names the covered mint and is
       // effectively immutable, so no endpoint's lag can change the answer,
       // while the write below still goes out on the provider's connection.
-      const cfg = await fetchAnchorAccount<{ usdcMint: PublicKey }>(
-        this.ctx,
-        this.reader,
-        'protocolConfig',
-        config.toBase58(),
-      );
+      const cfg = await readProtocolConfig(this.ctx, this.reader, config.toBase58());
       if (!cfg) throw new Error('authority checkpoint: protocol config account not found');
       const coveredTokenAccount = getAssociatedTokenAddressSync(
         cfg.usdcMint,

@@ -11,7 +11,7 @@ import { PDA_SEEDS } from '@covantic/shared';
 import { logger } from '../../utils/logger.js';
 import type { CovanticProgram } from '../../utils/program.js';
 import type { ProofInputs } from '../verifiers/oracle-manipulation.js';
-import { fetchAnchorAccount } from '../../utils/anchor-reader.js';
+import { readProtocolConfig } from '../../utils/protocol-config.js';
 import type { SolanaReader } from '../../utils/solana-reader.js';
 
 const { BN } = anchorPkg;
@@ -86,12 +86,7 @@ export class ProofPoster {
     // the payout below still goes out on the provider's own connection. Left
     // on that connection, a quota outage stalled settlement on every proven
     // path — the exact failure the pool exists to remove.
-    const cfg = await fetchAnchorAccount<{ usdcMint: PublicKey }>(
-      this.ctx,
-      this.reader,
-      'protocolConfig',
-      config.toBase58(),
-    );
+    const cfg = await readProtocolConfig(this.ctx, this.reader, config.toBase58());
     if (!cfg) throw new Error('proof-poster: protocol config account not found');
     const vaultAta = getAssociatedTokenAddressSync(cfg.usdcMint, vault, true);
     const holderAta = getAssociatedTokenAddressSync(cfg.usdcMint, holder);

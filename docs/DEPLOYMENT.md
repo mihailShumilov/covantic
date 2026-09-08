@@ -96,6 +96,24 @@ The oracle keypair signs `upsert_attestation`, `oracle_submit_claim`, the four p
 payout instructions, and the on-chain `expire_policy` crank — it must be funded with SOL on the
 target network.
 
+### Running on the public cluster endpoint
+
+When every keyed RPC provider in the pool has spent its quota, the stack can run on
+`https://api.devnet.solana.com` alone, but that endpoint throttles per second per IP and every
+container shares the IP. What kept it working:
+
+- `SOLANA_RPC_URL=https://api.devnet.solana.com` with the keyed providers in
+  `SOLANA_RPC_FALLBACK_URLS` (writes are pinned to the primary; reads fail over).
+- `RPC_RATE_LIMIT_EJECTION_MS=15000`: a public 429 clears in seconds, so a five-minute ejection
+  would take every read down for five minutes at a time.
+- `EXPLOIT_SWEEP_AGENT_PAUSE_MS=2000` and `EXPLOIT_SWEEP_INTERVAL_MS=120000`, so one sweep is a
+  trickle rather than a burst.
+- `API_WORKERS_ENABLED=false` (the compose default): only the monitor container runs the workers.
+- Stop the `fleet` container: synthetic agent traffic consumes the same per-IP budget the claim
+  pipeline needs, and it is the one process that is optional.
+
+Revert the pauses and restart the fleet once a keyed provider is back.
+
 ### Release build checklist
 
 The program has a build-time `devnet-fast-lock` feature that shortens every payout lock to
