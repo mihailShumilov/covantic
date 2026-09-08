@@ -12,7 +12,7 @@ Covantic is the first parametric insurance protocol for AI agents on Solana. Age
 2. **Attest** — The oracle signs an on-chain `RiskAttestation` PDA for the agent; `create_policy` reads the tier from it so buyers cannot self-select a cheaper tier
 3. **Insure** — Holder buys a policy on-chain; premium auto-calculated from the attested tier
 4. **Monitor** — Helius webhooks detect anomalies on insured agent addresses; the claim-keeper drives submit + payout
-5. **Payout** — Trigger fires → `oracle_submit_claim` → lock period → `verify_and_payout` → USDC transferred to holder's ATA
+5. **Payout** — Trigger fires → `oracle_submit_claim` → lock period → the trigger's proof instruction (`verify_and_payout_v2`, `_exploit`, `_governance` or `_agent_error`) re-derives the bound on chain → USDC transferred to holder's ATA
 
 ## Quick Start
 
@@ -51,7 +51,7 @@ Solana (Anchor 1.1.2) · Next.js 16 · Fastify 5 · PostgreSQL 18 · Helius · P
 
 | Trigger                | Condition                                                       | Lock Period |
 | ---------------------- | --------------------------------------------------------------- | ----------- |
-| Smart Contract Exploit | Balance drop >50% in single slot                                | 0 hours     |
+| Smart Contract Exploit | Balance drop >50% in single slot                                | 1 hour      |
 | Oracle Manipulation    | Price deviation >5% from TWAP                                   | 1 hour      |
 | Critical Agent Error   | Movement outside the holder's declared mandate                  | 6 hours     |
 | Governance Attack      | Control of the agent leaves the holder's declared authority set | 2 hours     |

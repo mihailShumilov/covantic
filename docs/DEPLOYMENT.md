@@ -92,8 +92,25 @@ mkdir -p docker/keys
 scp keys/oracle-keypair.json root@SERVER_IP:~/covantic/docker/keys/
 ```
 
-The oracle keypair signs `upsert_attestation`, `oracle_submit_claim`, `verify_and_payout`, and the
-on-chain `expire_policy` crank — it must be funded with SOL on the target network.
+The oracle keypair signs `upsert_attestation`, `oracle_submit_claim`, the four proof-verifying
+payout instructions, and the on-chain `expire_policy` crank — it must be funded with SOL on the
+target network.
+
+### Release build checklist
+
+The program has a build-time `devnet-fast-lock` feature that shortens every payout lock to
+30 seconds for demonstrations. It must never reach a network where real value is at stake:
+
+1. Build with `anchor build --no-idl --ignore-keys` and no `--features` flag. `scripts/deploy-devnet.sh`
+   only passes the feature when invoked with `--fast-lock`, and refuses to when the CLI is pointed
+   at mainnet.
+2. Run `cargo test -p covantic --lib` on the same checkout; the `constants::tests` module asserts
+   the production lock and maturity values under the default feature set.
+3. Before `solana program deploy` on mainnet, produce a verifiable build and compare its hash with
+   the artifact about to be deployed. A hash that differs from the reviewed source is not a
+   release.
+4. After upgrading a program whose accounts grew, run `pnpm gov:migrate` so every governance
+   baseline and authority checkpoint written before the upgrade is readable again.
 
 ### 3. Build & Start
 

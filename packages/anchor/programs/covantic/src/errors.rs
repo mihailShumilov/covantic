@@ -44,7 +44,7 @@ pub enum CovanticError {
     #[msg("Trigger transaction signature is required")]
     TriggerTxRequired,
 
-    #[msg("Trigger transaction signature length exceeds the on-chain buffer")]
+    #[msg("Trigger transaction signature must be the Base58 encoding of one 64-byte signature")]
     InvalidTriggerTxSignature,
 
     #[msg("Lock period has not elapsed")]
@@ -207,4 +207,43 @@ pub enum CovanticError {
 
     #[msg("Payout amount must be greater than zero")]
     ZeroPayout,
+
+    // -- Added by the V12 remediation. Appended, never inserted: Anchor
+    // numbers errors by enum position, and every consumer that matches by
+    // code would silently migrate onto a different failure otherwise. --
+    #[msg("Price update was not verified by the full guardian quorum")]
+    PriceEvidenceNotFullyVerified,
+
+    #[msg("Evidence bundle hash must be a real commitment, not zero")]
+    EvidenceBundleHashMissing,
+
+    #[msg("Policy account schema version is not supported by this program")]
+    UnsupportedPolicyVersion,
+
+    #[msg("Policy account carries an out-of-range state or trigger byte")]
+    InvalidPolicyState,
+
+    #[msg("Governance baseline declares a role this program cannot observe or settle")]
+    UnsupportedGovernanceRole,
+
+    #[msg("Covered account is not inside the declared set at declaration time")]
+    GovernanceBaselineNotBoundToAccount,
+
+    #[msg("No checkpointed reading shows control inside the declared set before the claim")]
+    AuthorityTransitionUnproven,
+
+    #[msg("Pre-incident authority checkpoint is older than the governance drain window")]
+    AuthorityCheckpointOutsideDrainWindow,
+
+    #[msg("No price terms were fixed for this policy at purchase")]
+    PolicyPriceTermsMissing,
+
+    #[msg("Price evidence names a feed or asset the policy does not insure")]
+    PriceEvidenceFeedMismatch,
+
+    #[msg("Subject quantity exceeds what the policy's price terms allow")]
+    SubjectQuantityExceedsPolicy,
+
+    #[msg("Attested price terms are malformed")]
+    InvalidPriceTerms,
 }

@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 
 /// Global protocol configuration.
-/// PDA: seeds = [b"config"]
+/// PDA: seeds = [CONFIG_SEED], where `CONFIG_SEED` is `b"covantic_config"` (see `constants.rs`).
 /// Created ONCE during initialization.
 #[account]
 #[derive(InitSpace)]
@@ -9,7 +9,8 @@ pub struct ProtocolConfig {
     /// Protocol administrator (can modify parameters)
     pub admin: Pubkey,
 
-    /// Oracle authority — only account allowed to call verify_and_payout
+    /// Oracle authority — the only signer allowed to file claims on behalf of
+    /// holders and to call the proof-verifying payout instructions
     pub oracle_authority: Pubkey,
 
     /// USDC mint address

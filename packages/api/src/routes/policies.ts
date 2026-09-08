@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { emptyPriceTerms, loadPriceTerms } from '../services/price-terms.js';
 import { eq, and, desc, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { agents, claims, policies, riskAssessments, vaultSnapshots } from '../db/schema.js';
@@ -607,6 +608,20 @@ export async function policyRoutes(app: FastifyInstance) {
     let attestationPda: string | null = null;
     let attestationExpiresAt: string | null = null;
     try {
+      // The asset an oracle-manipulation claim on this policy may be priced
+      // against, read off the agent's own record. Derived like the envelope,
+      // and for the same reason: a party who chooses the terms chooses the
+      // claim. Empty when the agent has no priced habit, in which case such a
+      // claim goes to a reviewer rather than to the proof instruction.
+      const priceTerms = await loadPriceTerms(
+        app.db,
+        body.agentAddress,
+        new Date(),
+        ENVELOPE_PRICING_WINDOW_SECONDS,
+      ).catch((err: unknown) => {
+        app.log.warn({ err, agent: body.agentAddress }, 'price terms unavailable; attesting none');
+        return emptyPriceTerms();
+      });
       const att = await app.attestationPublisher.ensureFresh(
         body.agentAddress,
         tier,
@@ -614,6 +629,7 @@ export async function policyRoutes(app: FastifyInstance) {
         // Zero: the envelope is derived, not chosen, so there is no extraction
         // capacity to charge for beyond what the payout cap already denies.
         0,
+        priceTerms,
       );
       attestationPda = att.attestationPda;
       attestationExpiresAt = att.expiresAt.toISOString();

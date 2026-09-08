@@ -5,9 +5,10 @@ use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
 use crate::constants::*;
 use crate::errors::CovanticError;
 use crate::events::{ClaimPaid, GovernanceProofVerified};
+use crate::instructions::checkpoint_authority::observe;
 use crate::state::{
-    GovernanceBaseline, GovernanceEvidenceRecord, InsurancePolicy, InsuranceVault,
-    PolicyAuthorityCheckpoint, ProtocolConfig,
+    AuthorityReading, BaselineView, GovernanceBaseline, GovernanceEvidenceRecord, InsurancePolicy,
+    InsuranceVault, PolicyAuthorityCheckpoint, ProtocolConfig,
 };
 
 /// What the oracle commits to when claiming a governance loss.
@@ -24,40 +25,34 @@ pub struct GovernancePayoutEvidence {
     pub bundle_hash: [u8; 32],
 }
 
-
 /// Verify a governance claim against a departure the program observes, and
 /// execute payout.
 ///
-/// **This is the strongest of the three proof paths, and it is worth being
-/// precise about why.**
+/// The only path where the chain establishes the covered *event* rather than
+/// merely bounding its size. It rests on three things the program holds and
+/// the oracle asserts none of:
 ///
-/// `verify_and_payout_v2` checks a guardian-signed price, but the swap it is
-/// pricing is asserted by the oracle — the chain cannot read a historical
-/// fill. `verify_and_payout_exploit` measures a balance drop for itself, but
-/// it cannot see *why* the money left; a self-drain and a theft subtract
-/// identically. In both, the covered *event* remains an off-chain claim and
-/// only its magnitude is constrained.
+///   - **A declaration.** The holder said, in advance and under their own
+///     signature, who may control the agent. The declaration in force is the
+///     one that had matured when the claim was filed — a refresh that landed
+///     later describes the aftermath, and the one it replaced is consulted
+///     instead.
+///   - **A reading from before.** A checkpoint the program wrote itself,
+///     taken at or before the claim, showing control *inside* the declared
+///     set. Without one there is no transition to prove: an account that was
+///     already under an outside key when the first reading was taken is not
+///     something this instruction witnessed changing hands, and a holder who
+///     arranged that state themselves must not be able to present it as a
+///     takeover. The reading must also be recent — no older than
+///     `GOVERNANCE_DRAIN_WINDOW` when the claim was filed — and the
+///     declaration must have matured before it was taken, so the reading
+///     really does describe a state the holder had already consented to.
+///   - **The account as it is now.** Read live, derived from the policy's own
+///     agent rather than accepted from the caller.
 ///
-/// Here the covered event is on-chain state. Who controls a token account is
-/// a field on that account, readable now and recorded earlier by a
-/// permissionless crank — and, uniquely, the holder has already said under
-/// their own signature who is allowed to hold it. So the program does not
-/// take the oracle's word for the takeover; it performs the comparison:
-///
-///   1. the holder's declaration, matured before the claim was filed;
-///   2. the authority the program itself recorded before the incident;
-///   3. the authority the program reads right now.
-///
-/// A payout requires (3) to sit outside (1). The oracle chooses nothing.
-///
-/// **What remains trusted, stated plainly.** The chain can see that control
-/// left the declared set and that it did not land on the holder or the agent.
-/// It cannot see whether the new controller is a *second wallet the holder
-/// also owns*. That residual is the same one the exploit path carries with
-/// destination control, and it is bounded the same way — the committed
-/// bundle, the two-hour lock, the payout circuit breaker — plus one thing
-/// neither other path has: the holder had to pre-commit to a manifest an hour
-/// before the incident and then depart from it, on chain, in public.
+/// A departure is the pair: control inside the declared set before, outside
+/// it now. The payout is bounded by what the program can see was lost or
+/// seized between those two readings.
 ///
 /// **A note on what cannot be proven here.** If the covered account was
 /// *closed* rather than seized, it no longer exists and this instruction
@@ -83,6 +78,7 @@ pub fn verify_and_payout_governance_handler(
         ctx.accounts.oracle.key() == config.oracle_authority,
         CovanticError::UnauthorizedOracle
     );
+    policy.assert_readable()?;
     require!(
         policy.state == InsurancePolicy::STATE_CLAIM_PENDING,
         CovanticError::PolicyNotClaimPending
@@ -104,11 +100,20 @@ pub fn verify_and_payout_governance_handler(
     // Nothing legitimate submits one.
     require!(payout_amount > 0, CovanticError::ZeroPayout);
 
+    // The record this instruction leaves behind is only worth something if
+    // the hash in it commits to a bundle somebody can go and check.
+    require!(
+        evidence.bundle_hash != [0u8; 32],
+        CovanticError::EvidenceBundleHashMissing
+    );
+
     let lock_expires_at = policy
         .claim_submitted_at
         .checked_add(LOCK_GOVERNANCE_ATTACK)
         .ok_or(CovanticError::MathOverflow)?;
     require!(now >= lock_expires_at, CovanticError::LockPeriodNotElapsed);
+
+    let claim_at = policy.claim_submitted_at;
 
     // ---- the holder's own declaration --------------------------------------
     require!(
@@ -116,82 +121,78 @@ pub fn verify_and_payout_governance_handler(
         CovanticError::GovernanceBaselineMissing
     );
     require!(
-        baseline.effective_at > 0,
+        baseline.effective_at > 0 || baseline.prev_effective_at > 0,
         CovanticError::GovernanceBaselineMissing
     );
-    // Matured *before the incident*, not merely before now. A declaration
-    // written after the claim was filed describes the aftermath, and one
-    // written in the same breath as the claim proves nothing at all.
-    require!(
-        baseline.effective_at <= policy.claim_submitted_at,
-        CovanticError::GovernanceBaselineNotMatured
-    );
+    // The declaration that was in force when the claim was filed: the current
+    // one if it had matured by then, otherwise the whole predecessor it
+    // replaced. A refresh landing between the incident and the claim must
+    // not make the declaration that governed the incident disappear.
+    let declared = baseline
+        .view_at(claim_at)
+        .ok_or(CovanticError::GovernanceBaselineNotMatured)?;
 
     // ---- what the program recorded before ----------------------------------
-    require!(checkpoint.slot > 0, CovanticError::AuthorityCheckpointMissing);
+    require!(
+        checkpoint.slot > 0,
+        CovanticError::AuthorityCheckpointMissing
+    );
     require!(
         checkpoint.covered_account == ctx.accounts.covered_token_account.key(),
         CovanticError::InvalidCoveredAccount
     );
 
-    // A checkpoint written after the claim describes the aftermath. When the
-    // crank happens to tick between the takeover and the claim, the reading
-    // it replaced is the one that still predates the incident — which is
-    // exactly why `prev_*` is retained.
-    let (baseline_amount, baseline_slot, baseline_time) =
-        if checkpoint.unix_timestamp <= policy.claim_submitted_at {
-            (checkpoint.amount, checkpoint.slot, checkpoint.unix_timestamp)
-        } else {
-            (
-                checkpoint.prev_amount,
-                checkpoint.prev_slot,
-                checkpoint.prev_unix_timestamp,
-            )
-        };
+    // The "before" is the latest reading, taken at or before the claim, in
+    // which control sat inside the declared set. The current reading is
+    // preferred; when the crank ticked between the takeover and the claim it
+    // already shows the aftermath, and the predecessor it pinned — the
+    // reading immediately before control changed — is the one that still
+    // describes the state consented to. A first reading with no predecessor,
+    // or two readings both outside the set, prove no transition at all.
+    let before = select_before(checkpoint, &declared, policy, claim_at)?;
 
     require!(
-        baseline_time > 0 && baseline_time <= policy.claim_submitted_at,
-        CovanticError::AuthorityCheckpointOutOfWindow
-    );
-    require!(
-        baseline_time >= policy.start_time,
+        before.unix_timestamp >= policy.start_time,
         CovanticError::AuthorityCheckpointOutOfWindow
     );
     // Staleness is measured against the *claim*, not against now, and the
     // distinction is not cosmetic — it is the difference between this bound
-    // working and being unsatisfiable.
-    //
-    // The question the bound is asking is "did this reading describe the
-    // situation just before the incident?", which is answered by how old it
-    // was when the claim was filed. Measuring against `now` instead folds the
-    // lock period into the answer, and this trigger's lock is two hours —
-    // exactly the staleness allowance — so a checkpoint taken moments before
-    // a takeover would always be judged too old by the time it could be
-    // settled. Every governance payout would fail.
-    let staleness = policy
-        .claim_submitted_at
-        .checked_sub(baseline_time)
+    // working and being unsatisfiable: this trigger's lock is two hours, and
+    // measuring against `now` would fold it into every allowance below.
+    let staleness = claim_at
+        .checked_sub(before.unix_timestamp)
         .ok_or(CovanticError::MathOverflow)?;
     require!(
         staleness <= MAX_AUTHORITY_CHECKPOINT_AGE,
         CovanticError::AuthorityCheckpointOutOfWindow
     );
+    // The window the coverage table has advertised since launch, enforced.
+    // A reading older than this cannot establish that the takeover the claim
+    // describes is the one that caused the loss measured below; a claim that
+    // far from its last permitted reading goes to a reviewer.
+    require!(
+        staleness <= GOVERNANCE_DRAIN_WINDOW,
+        CovanticError::AuthorityCheckpointOutsideDrainWindow
+    );
+    // The declaration must have been usable as proof when the permitted
+    // reading was taken. Binding maturity to the claim alone let a holder
+    // install the outside key, declare afterwards, wait for maturity, and
+    // file — the declaration then postdated the takeover it was judging.
+    require!(
+        declared.effective_at <= before.unix_timestamp,
+        CovanticError::GovernanceBaselineNotMatured
+    );
 
     // ---- what the program reads now ----------------------------------------
     let covered = &ctx.accounts.covered_token_account;
-    let observed_owner = covered.owner;
-    let observed_frozen = covered.is_frozen();
-    let observed_delegate: Option<Pubkey> = covered.delegate.into();
-    let observed_close_authority: Option<Pubkey> = covered.close_authority.into();
+    let observed = observe(covered, &clock);
 
     let (departure_kind, departed_to) = classify_departure(
-        baseline,
+        &declared,
         policy,
-        observed_owner,
-        observed_frozen,
-        observed_delegate,
-        observed_close_authority,
-        checkpoint,
+        &before,
+        &observed,
+        checkpoint.covered_account,
     )?;
 
     // ---- bound the payout ---------------------------------------------------
@@ -201,8 +202,8 @@ pub fn verify_and_payout_governance_handler(
     // complementary: value that left is no longer sitting there, and value
     // sitting there did not leave. Adding them would count the same dollars
     // twice in the one case that matters most, a seizure followed by a drain.
-    let current_amount = covered.amount;
-    let observed_drop = baseline_amount.saturating_sub(current_amount);
+    let current_amount = observed.amount;
+    let observed_drop = before.amount.saturating_sub(current_amount);
     // Only value the agent can no longer *reach* counts as seized, and that
     // is a narrower set than "a departure happened".
     //
@@ -280,14 +281,14 @@ pub fn verify_and_payout_governance_handler(
     record.policy_id = policy.policy_id;
     record.holder = policy.holder;
     record.covered_account = covered.key();
-    record.declared_owner = baseline.token_owner;
-    record.observed_owner = observed_owner;
-    record.observed_frozen = observed_frozen;
+    record.declared_owner = declared.token_owner;
+    record.observed_owner = observed.owner;
+    record.observed_frozen = observed.frozen;
     record.departure_kind = departure_kind;
     record.departed_to = departed_to;
-    record.checkpoint_amount = baseline_amount;
-    record.checkpoint_slot = baseline_slot;
-    record.checkpoint_unix_timestamp = baseline_time;
+    record.checkpoint_amount = before.amount;
+    record.checkpoint_slot = before.slot;
+    record.checkpoint_unix_timestamp = before.unix_timestamp;
     record.current_amount = current_amount;
     record.observed_drop = observed_drop;
     record.seized_amount = seized_amount;
@@ -301,8 +302,8 @@ pub fn verify_and_payout_governance_handler(
         policy_id: policy.policy_id,
         covered_account: record.covered_account,
         declared_owner: record.declared_owner,
-        observed_owner,
-        observed_frozen,
+        observed_owner: observed.owner,
+        observed_frozen: observed.frozen,
         departure_kind,
         departed_to,
         observed_drop,
@@ -323,24 +324,52 @@ pub fn verify_and_payout_governance_handler(
     Ok(())
 }
 
+/// The latest checkpointed reading, at or before the claim, in which control
+/// sat inside the declared set.
+fn select_before(
+    checkpoint: &PolicyAuthorityCheckpoint,
+    declared: &BaselineView,
+    policy: &InsurancePolicy,
+    claim_at: i64,
+) -> Result<AuthorityReading> {
+    let inside = |reading: &AuthorityReading| -> bool {
+        reading.unix_timestamp > 0
+            && reading.unix_timestamp <= claim_at
+            && declared.covers(reading, &policy.holder, &policy.agent_address)
+    };
+
+    let current = checkpoint.current();
+    if inside(&current) {
+        return Ok(current);
+    }
+    if let Some(prev) = checkpoint.predecessor() {
+        if inside(&prev) {
+            return Ok(prev);
+        }
+    }
+    err!(CovanticError::AuthorityTransitionUnproven)
+}
+
 /// Establish that control actually left the declared set, and say how.
 ///
 /// Errors rather than returning a "no departure" variant: there is no payout
 /// to make without one, and the caller must not be able to proceed past this
 /// with a default.
 ///
+/// `before` is a reading the caller has already established sits inside the
+/// declared set, so each branch below is a transition — permitted then, not
+/// permitted now — rather than a bare observation of the present.
+///
 /// The holder and the agent are folded into the permitted set here. Control
 /// that moved between them never left the family, whatever the manifest says
 /// about the specific address — a holder who rotates their agent's account to
 /// their own wallet has not been attacked.
 fn classify_departure(
-    baseline: &GovernanceBaseline,
+    declared: &BaselineView,
     policy: &InsurancePolicy,
-    observed_owner: Pubkey,
-    observed_frozen: bool,
-    observed_delegate: Option<Pubkey>,
-    observed_close_authority: Option<Pubkey>,
-    checkpoint: &PolicyAuthorityCheckpoint,
+    before: &AuthorityReading,
+    observed: &AuthorityReading,
+    covered_account: Pubkey,
 ) -> Result<(u8, Pubkey)> {
     // Role-keyed: a key the holder declared as a *delegate* is not thereby
     // permitted to become the account's *owner*. Asking the flat question let
@@ -349,29 +378,29 @@ fn classify_departure(
     let permitted = |candidate: &Pubkey, role: u8| -> bool {
         candidate == &policy.holder
             || candidate == &policy.agent_address
-            || baseline.permits_role(candidate, role)
+            || declared.permits_role(candidate, role)
     };
 
     // Ordered by how completely each one removes the agent's control. An
     // owner change is total; a delegate is partial and might be routine.
-    if !permitted(&observed_owner, DEPARTURE_OWNER) {
-        return Ok((DEPARTURE_OWNER, observed_owner));
+    if !permitted(&observed.owner, DEPARTURE_OWNER) {
+        return Ok((DEPARTURE_OWNER, observed.owner));
     }
 
-    if observed_frozen && !checkpoint.prev_frozen {
+    if observed.frozen && !before.frozen {
         // A freeze has no "new authority" on the account itself — the mint's
         // freeze authority did it, and the account records only the fact. The
         // account is named as the subject so the record is not left blank.
-        return Ok((DEPARTURE_FROZEN, checkpoint.covered_account));
+        return Ok((DEPARTURE_FROZEN, covered_account));
     }
 
-    if let Some(close_authority) = observed_close_authority {
+    if let Some(close_authority) = observed.close_authority {
         if !permitted(&close_authority, DEPARTURE_CLOSE_AUTHORITY) {
             return Ok((DEPARTURE_CLOSE_AUTHORITY, close_authority));
         }
     }
 
-    if let Some(delegate) = observed_delegate {
+    if let Some(delegate) = observed.delegate {
         if !permitted(&delegate, DEPARTURE_DELEGATE) {
             return Ok((DEPARTURE_DELEGATE, delegate));
         }

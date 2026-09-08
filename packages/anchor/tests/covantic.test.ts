@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { AnchorProvider, BN, Program, type Idl } from '@coral-xyz/anchor';
+import { AnchorProvider, BN, Program, utils, type Idl } from '@coral-xyz/anchor';
 import { agentMandateCommitment } from '@covantic/shared';
 import {
   Keypair,
@@ -55,6 +55,26 @@ const AGENT_ERROR_EVIDENCE_SEED = Buffer.from('covantic_agent_error_evidence');
 
 const USDC_DECIMALS = 6;
 const usdc = (amount: number) => new BN(amount * 10 ** USDC_DECIMALS);
+
+/**
+ * A trigger transaction identity the program accepts: the Base58 text of one
+ * 64-byte signature, as UTF-8 bytes. Both claim entrypoints decode it and
+ * refuse anything else — raw bytes, the wrong alphabet, the wrong length —
+ * so a claim can never park a policy behind an identity nothing downstream
+ * can resolve.
+ */
+const triggerSig = (seed: number): Buffer =>
+  Buffer.from(utils.bytes.bs58.encode(Buffer.alloc(64, seed)), 'utf8');
+
+/** What the oracle attests when an agent has no priced habit: no feed, no
+ *  subject, no bound. Policies bought against it cannot settle an
+ *  oracle-manipulation claim on the proof path — they go to review. */
+const noPriceTerms = () => ({
+  feedId: Array.from(new Uint8Array(32)),
+  subjectMint: PublicKey.default,
+  subjectDecimals: 0,
+  maxSubjectQuantity: new BN(0),
+});
 
 const IDL_PATH = resolve(__dirname, '../target/idl/covantic.json');
 const hasIdl = existsSync(IDL_PATH);
@@ -372,7 +392,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
   ): Promise<void> {
     const [config] = configPda();
     await program.methods
-      .upsertAttestation(agent, tier, new BN(3600), mandateHash, flatPremium)
+      .upsertAttestation(agent, tier, new BN(3600), mandateHash, flatPremium, noPriceTerms())
       .accountsPartial({
         oracle: oracle.publicKey,
         config,
@@ -528,10 +548,10 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
   // -------------------------------------------------------------------------
   it('submits a claim and transitions to ClaimPending', async () => {
     const [policy] = policyPda(holder.publicKey, firstPolicyId);
-    const sig = Array.from({ length: 64 }, (_, i) => (i + 1) % 256);
+    const sig = triggerSig(1);
 
     await program.methods
-      .submitClaim(1, Buffer.from(sig))
+      .submitClaim(1, sig)
       .accountsPartial({ holder: holder.publicKey, policy } as any)
       .signers([holder])
       .rpc();
@@ -543,12 +563,59 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
   });
 
   // -------------------------------------------------------------------------
-  // 1.5 Verify and payout — also exercises loss cascade
+  // 1.5 Verify and payout on the proven exploit path — also exercises the
+  // loss cascade
   // -------------------------------------------------------------------------
-  it('verifies a claim, pays out, and cascades loss across treasury/reserve/stakers', async () => {
+  it('pays a proven exploit claim and cascades loss across treasury/reserve/stakers', async () => {
     const [config] = configPda();
     const [vault] = vaultPda();
     const [policy] = policyPda(holder.publicKey, firstPolicyId);
+    const agentAta = getAssociatedTokenAddressSync(usdcMint.publicKey, agentWallet.publicKey);
+
+    // There is no unverified instruction any more: a payout needs a drop the
+    // program measured for itself. So fund the covered account, checkpoint
+    // it, and then drain it.
+    const fundTx = new Transaction().add(
+      createMintToInstruction(
+        usdcMint.publicKey,
+        agentAta,
+        admin.publicKey,
+        100n * 10n ** BigInt(USDC_DECIMALS),
+      ),
+    );
+    fundTx.recentBlockhash = (await banks.getLatestBlockhash())[0];
+    fundTx.feePayer = admin.publicKey;
+    fundTx.sign(admin);
+    await banks.processTransaction(fundTx);
+
+    await program.methods
+      .checkpointBalance()
+      .accountsPartial({
+        cranker: admin.publicKey,
+        config,
+        policy,
+        coveredTokenAccount: agentAta,
+        usdcMint: usdcMint.publicKey,
+        checkpoint: checkpointPda(policy)[0],
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      } as any)
+      .signers([admin])
+      .rpc();
+
+    const drainTx = new Transaction().add(
+      createTransferInstruction(
+        agentAta,
+        staker2Ata,
+        agentWallet.publicKey,
+        90n * 10n ** BigInt(USDC_DECIMALS),
+      ),
+    );
+    drainTx.recentBlockhash = (await banks.getLatestBlockhash())[0];
+    drainTx.feePayer = admin.publicKey;
+    drainTx.sign(admin, agentWallet);
+    await banks.processTransaction(drainTx);
 
     const vaultBefore: any = await (program.account as any).insuranceVault.fetch(vault);
     const holderBefore = await getAccount(provider.connection as any, holderAta);
@@ -559,7 +626,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
     await advanceClockBySeconds(context, 3_601);
 
     await program.methods
-      .verifyAndPayout(payout)
+      .verifyAndPayoutExploit(payout, { bundleHash: Array.from(Buffer.alloc(32, 9)) })
       .accountsPartial({
         oracle: oracle.publicKey,
         config,
@@ -567,7 +634,13 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
         vault,
         vaultTokenAccount: vaultAta,
         holderTokenAccount: holderAta,
+        coveredTokenAccount: agentAta,
+        usdcMint: usdcMint.publicKey,
+        checkpoint: checkpointPda(policy)[0],
+        evidenceRecord: exploitEvidencePda(policy)[0],
         tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
       } as any)
       .signers([oracle])
       .rpc();
@@ -926,7 +999,14 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       // moved to the oracle's own publish path.
       await expect(
         program.methods
-          .upsertAttestation(agentWallet.publicKey, 5, new BN(3600), testMandateHash(), new BN(0))
+          .upsertAttestation(
+            agentWallet.publicKey,
+            5,
+            new BN(3600),
+            testMandateHash(),
+            new BN(0),
+            noPriceTerms(),
+          )
           .accountsPartial({
             oracle: oracle.publicKey,
             config: configPda()[0],
@@ -938,20 +1018,21 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       ).rejects.toThrow();
     });
 
-    it('rejects non-oracle verify_and_payout', async () => {
+    it('rejects a non-oracle settlement and an amount above the proven drop, then pays', async () => {
       // Create + submit a claim to have a pending one
       const [config] = configPda();
       const [vault] = vaultPda();
       const cfg: any = await (program.account as any).protocolConfig.fetch(config);
       const policyId = cfg.policyCounter as BN;
       const [policy] = policyPda(holder.publicKey, policyId);
+      const agentAta = getAssociatedTokenAddressSync(usdcMint.publicKey, agentWallet.publicKey);
 
       await ensureAttestation(agentWallet.publicKey);
       await program.methods
         .createPolicy(usdc(50), new BN(86400), agentWallet.publicKey, testMandate() as any)
         .accountsPartial({
           usdcMint: usdcMint.publicKey,
-          coveredTokenAccount: getAssociatedTokenAddressSync(usdcMint.publicKey, agentWallet.publicKey),
+          coveredTokenAccount: agentAta,
           holder: holder.publicKey,
           config,
           vault,
@@ -964,66 +1045,90 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
         .signers([holder])
         .rpc();
 
-      const sig = Array.from({ length: 64 }, () => 1);
+      // A drop the program can measure: fund, checkpoint, drain.
+      const fundTx = new Transaction().add(
+        createMintToInstruction(
+          usdcMint.publicKey,
+          agentAta,
+          admin.publicKey,
+          100n * 10n ** BigInt(USDC_DECIMALS),
+        ),
+      );
+      fundTx.recentBlockhash = (await banks.getLatestBlockhash())[0];
+      fundTx.feePayer = admin.publicKey;
+      fundTx.sign(admin);
+      await banks.processTransaction(fundTx);
       await program.methods
-        .submitClaim(1, Buffer.from(sig))
+        .checkpointBalance()
+        .accountsPartial({
+          cranker: admin.publicKey,
+          config,
+          policy,
+          coveredTokenAccount: agentAta,
+          usdcMint: usdcMint.publicKey,
+          checkpoint: checkpointPda(policy)[0],
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        } as any)
+        .signers([admin])
+        .rpc();
+
+      const sig = triggerSig(1);
+      await program.methods
+        .submitClaim(1, sig)
         .accountsPartial({ holder: holder.publicKey, policy } as any)
         .signers([holder])
         .rpc();
 
-      await expect(
+      const drainTx = new Transaction().add(
+        createTransferInstruction(
+          agentAta,
+          staker2Ata,
+          agentWallet.publicKey,
+          100n * 10n ** BigInt(USDC_DECIMALS),
+        ),
+      );
+      drainTx.recentBlockhash = (await banks.getLatestBlockhash())[0];
+      drainTx.feePayer = admin.publicKey;
+      drainTx.sign(admin, agentWallet);
+      await banks.processTransaction(drainTx);
+
+      const settle = (signer: Keypair, amount: BN) =>
         program.methods
-          .verifyAndPayout(usdc(10))
+          .verifyAndPayoutExploit(amount, { bundleHash: Array.from(Buffer.alloc(32, 9)) })
           .accountsPartial({
-            oracle: strangerOracle.publicKey,
+            oracle: signer.publicKey,
             config,
             policy,
             vault,
             vaultTokenAccount: vaultAta,
             holderTokenAccount: holderAta,
+            coveredTokenAccount: agentAta,
+            usdcMint: usdcMint.publicKey,
+            checkpoint: checkpointPda(policy)[0],
+            evidenceRecord: exploitEvidencePda(policy)[0],
             tokenProgram: TOKEN_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
           } as any)
-          .signers([strangerOracle])
-          .rpc(),
-      ).rejects.toThrow();
+          .signers([signer]);
 
-      // Rejects payout > coverage using the real oracle
-      await expect(
-        program.methods
-          .verifyAndPayout(usdc(500))
-          .accountsPartial({
-            oracle: oracle.publicKey,
-            config,
-            policy,
-            vault,
-            vaultTokenAccount: vaultAta,
-            holderTokenAccount: holderAta,
-            tokenProgram: TOKEN_PROGRAM_ID,
-          } as any)
-          .signers([oracle])
-          .rpc(),
-      ).rejects.toThrow();
-
-      // Complete a real payout, once the trigger's lock has elapsed.
       await advanceClockBySeconds(context, 3_601);
-      await program.methods
-        .verifyAndPayout(usdc(10))
-        .accountsPartial({
-          oracle: oracle.publicKey,
-          config,
-          policy,
-          vault,
-          vaultTokenAccount: vaultAta,
-          holderTokenAccount: holderAta,
-          tokenProgram: TOKEN_PROGRAM_ID,
-        } as any)
-        .signers([oracle])
-        .rpc();
+
+      // Only the configured oracle may settle.
+      await expect(settle(strangerOracle, usdc(10)).rpc()).rejects.toThrow();
+
+      // Rejects payout > coverage using the real oracle.
+      await expect(settle(oracle, usdc(500)).rpc()).rejects.toThrow();
+
+      // Complete a real payout, bounded by the measured drop.
+      await settle(oracle, usdc(10)).rpc();
 
       // Second submit_claim on the same (paid) policy must fail
       await expect(
         program.methods
-          .submitClaim(1, Buffer.from(sig))
+          .submitClaim(1, sig)
           .accountsPartial({ holder: holder.publicKey, policy } as any)
           .signers([holder])
           .rpc(),
@@ -1061,14 +1166,14 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       return { policy, policyId };
     }
 
-    const trigSig = Array.from({ length: 64 }, (_, i) => (i + 7) % 256);
+    const trigSig = triggerSig(7);
 
     it('lets the oracle submit a claim without holder signature', async () => {
       const { policy } = await createFreshPolicy();
       const [config] = configPda();
 
       await program.methods
-        .oracleSubmitClaim(2, Buffer.from(trigSig))
+        .oracleSubmitClaim(2, trigSig)
         .accountsPartial({ oracle: oracle.publicKey, config, policy } as any)
         .signers([oracle])
         .rpc();
@@ -1087,7 +1192,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       // the tx rejects and that state is unchanged.
       await expect(
         program.methods
-          .oracleSubmitClaim(1, Buffer.from(trigSig))
+          .oracleSubmitClaim(1, trigSig)
           .accountsPartial({ oracle: strangerOracle.publicKey, config, policy } as any)
           .signers([strangerOracle])
           .rpc(),
@@ -1103,7 +1208,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
 
       // First oracle submit succeeds and moves to ClaimPending
       await program.methods
-        .oracleSubmitClaim(3, Buffer.from(trigSig))
+        .oracleSubmitClaim(3, trigSig)
         .accountsPartial({ oracle: oracle.publicKey, config, policy } as any)
         .signers([oracle])
         .rpc();
@@ -1114,7 +1219,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       // Second submit must fail because state != Active; state should stay ClaimPending.
       await expect(
         program.methods
-          .oracleSubmitClaim(3, Buffer.from(trigSig))
+          .oracleSubmitClaim(3, trigSig)
           .accountsPartial({ oracle: oracle.publicKey, config, policy } as any)
           .signers([oracle])
           .rpc(),
@@ -1228,7 +1333,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
     async function fileExploitClaim(policy: PublicKey): Promise<void> {
       const [config] = configPda();
       await program.methods
-        .oracleSubmitClaim(1, Buffer.from(Array.from({ length: 64 }, (_, i) => (i + 3) % 256)))
+        .oracleSubmitClaim(1, triggerSig(3))
         .accountsPartial({ oracle: oracle.publicKey, config, policy } as any)
         .signers([oracle])
         .rpc();
@@ -1342,7 +1447,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
 
       const [config] = configPda();
       await program.methods
-        .oracleSubmitClaim(2, Buffer.from(Array.from({ length: 64 }, () => 5)))
+        .oracleSubmitClaim(2, triggerSig(5))
         .accountsPartial({ oracle: oracle.publicKey, config, policy } as any)
         .signers([oracle])
         .rpc();
@@ -1547,7 +1652,12 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
         .declareGovernanceBaseline(manifest(agent, extra) as any)
         .accountsPartial({
           holder: holder.publicKey,
+          config: configPda()[0],
           policy,
+          // Read while declaring: the account has to satisfy the declaration
+          // as it stands, or the declaration is refused.
+          coveredTokenAccount: getAssociatedTokenAddressSync(usdcMint.publicKey, agent),
+          usdcMint: usdcMint.publicKey,
           baseline: governanceBaselinePda(policy)[0],
           systemProgram: SystemProgram.programId,
         } as any)
@@ -1600,10 +1710,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
     async function fileGovernanceClaim(policy: PublicKey, trigger = 4) {
       const [config] = configPda();
       await program.methods
-        .oracleSubmitClaim(
-          trigger,
-          Buffer.from(Array.from({ length: 64 }, (_, i) => (i + 11) % 256)),
-        )
+        .oracleSubmitClaim(trigger, triggerSig(11))
         .accountsPartial({ oracle: oracle.publicKey, config, policy } as any)
         .signers([oracle])
         .rpc();
@@ -1697,6 +1804,9 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       await declare(policy, agent.publicKey);
       await authorityCheckpoint(policy, agent.publicKey);
       await advanceClockBySeconds(context, 3_601); // baseline matures
+      // A permitted reading inside the drain window: the "before" the
+      // departure is proven against.
+      await authorityCheckpoint(policy, agent.publicKey);
       await seize(agent, agentAta, ATTACKER.publicKey);
       await fileGovernanceClaim(policy);
       await advanceClockBySeconds(context, 7_201); // governance lock
@@ -1722,6 +1832,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       await declare(policy, agent.publicKey);
       await authorityCheckpoint(policy, agent.publicKey);
       await advanceClockBySeconds(context, 3_601);
+      await authorityCheckpoint(policy, agent.publicKey); // fresh permitted reading
       await freeze(agentAta);
       await fileGovernanceClaim(policy);
       await advanceClockBySeconds(context, 7_201);
@@ -1743,6 +1854,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       await declare(policy, agent.publicKey, [staker2.publicKey]);
       await authorityCheckpoint(policy, agent.publicKey);
       await advanceClockBySeconds(context, 3_601);
+      await authorityCheckpoint(policy, agent.publicKey); // fresh permitted reading
       await seize(agent, agentAta, staker2.publicKey); // a declared operator
       await fileGovernanceClaim(policy);
       await advanceClockBySeconds(context, 7_201);
@@ -1755,6 +1867,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       await declare(policy, agent.publicKey);
       await authorityCheckpoint(policy, agent.publicKey);
       await advanceClockBySeconds(context, 3_601);
+      await authorityCheckpoint(policy, agent.publicKey); // fresh permitted reading
       await seize(agent, agentAta, holder.publicKey);
       await fileGovernanceClaim(policy);
       await advanceClockBySeconds(context, 7_201);
@@ -1780,6 +1893,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       await declare(policy, agent.publicKey);
       await authorityCheckpoint(policy, agent.publicKey);
       await advanceClockBySeconds(context, 3_601);
+      await authorityCheckpoint(policy, agent.publicKey); // fresh permitted reading
       await seize(agent, agentAta, ATTACKER.publicKey);
       await fileGovernanceClaim(policy);
       await advanceClockBySeconds(context, 7_201);
@@ -1794,6 +1908,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       await declare(policy, agent.publicKey);
       await authorityCheckpoint(policy, agent.publicKey);
       await advanceClockBySeconds(context, 3_601);
+      await authorityCheckpoint(policy, agent.publicKey); // fresh permitted reading
       await seize(agent, agentAta, ATTACKER.publicKey);
       await fileGovernanceClaim(policy);
 
@@ -1805,6 +1920,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       await declare(policy, agent.publicKey);
       await authorityCheckpoint(policy, agent.publicKey);
       await advanceClockBySeconds(context, 3_601);
+      await authorityCheckpoint(policy, agent.publicKey); // fresh permitted reading
       await seize(agent, agentAta, ATTACKER.publicKey);
       await fileGovernanceClaim(policy, 1); // exploit
       await advanceClockBySeconds(context, 7_201);
@@ -1843,7 +1959,10 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
           .declareGovernanceBaseline(manifest(agent.publicKey) as any)
           .accountsPartial({
             holder: oracle.publicKey,
+            config: configPda()[0],
             policy,
+            coveredTokenAccount: getAssociatedTokenAddressSync(usdcMint.publicKey, agent.publicKey),
+            usdcMint: usdcMint.publicKey,
             baseline: governanceBaselinePda(policy)[0],
             systemProgram: SystemProgram.programId,
           } as any)
@@ -1857,6 +1976,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
       await declare(policy, agent.publicKey);
       await authorityCheckpoint(policy, agent.publicKey);
       await advanceClockBySeconds(context, 3_601);
+      await authorityCheckpoint(policy, agent.publicKey); // fresh permitted reading
       await seize(agent, agentAta, ATTACKER.publicKey);
       await fileGovernanceClaim(policy);
       await advanceClockBySeconds(context, 7_201);
@@ -2031,10 +2151,7 @@ describe.skipIf(!hasIdl)('Covantic — Anchor integration', () => {
     async function fileClaim(policy: PublicKey, trigger = 3) {
       const [config] = configPda();
       await program.methods
-        .oracleSubmitClaim(
-          trigger,
-          Buffer.from(Array.from({ length: 64 }, (_, i) => (i + 23) % 256)),
-        )
+        .oracleSubmitClaim(trigger, triggerSig(23))
         .accountsPartial({ oracle: oracle.publicKey, config, policy } as any)
         .signers([oracle])
         .rpc();

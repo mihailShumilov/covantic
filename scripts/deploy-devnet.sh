@@ -1,6 +1,7 @@
 #!/bin/bash
 # Deploy AgentGuard to Solana devnet
-# Usage: bash scripts/deploy-devnet.sh
+# Usage: bash scripts/deploy-devnet.sh [--fast-lock]
+#   --fast-lock  build with the devnet-fast-lock feature (30 s payout locks) for a demo
 
 set -euo pipefail
 
@@ -29,9 +30,26 @@ if (( $(echo "$BALANCE < 2" | bc -l) )); then
 fi
 
 # 2. Build program
-echo -e "\n${YELLOW}[2/6] Building Anchor program...${NC}"
+#
+# Production timings by default. `devnet-fast-lock` shortens every payout lock
+# to 30 seconds for a demonstration and is a build-time feature precisely so
+# no configuration can reach it; it is passed only when this script is invoked
+# with `--fast-lock`, and never when the CLI is pointed at mainnet.
+FEATURES=""
+for arg in "$@"; do
+  case "$arg" in
+    --fast-lock) FEATURES="-- --features devnet-fast-lock" ;;
+  esac
+done
+CLUSTER_URL=$(solana config get json_rpc_url 2>/dev/null | awk '{print $NF}')
+if [ -n "$FEATURES" ] && echo "$CLUSTER_URL" | grep -qi mainnet; then
+  echo -e "${RED}Refusing to build devnet-fast-lock for a mainnet cluster (${CLUSTER_URL})${NC}"
+  exit 1
+fi
+echo -e "\n${YELLOW}[2/6] Building Anchor program (${FEATURES:-production timings})...${NC}"
 cd packages/anchor
-anchor build
+# shellcheck disable=SC2086
+anchor build --ignore-keys $FEATURES
 echo -e "${GREEN}Program built${NC}"
 
 # 3. Deploy program

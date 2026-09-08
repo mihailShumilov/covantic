@@ -29,6 +29,13 @@
       "when": 1787037482961,
       "tag": "0003_agent_outflow_history",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788883341283,
+      "tag": "0004_claim_proof_kind",
+      "breakpoints": true
     }
   ]
 }

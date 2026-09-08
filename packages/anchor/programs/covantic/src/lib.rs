@@ -7,6 +7,7 @@ pub mod instructions;
 pub mod state;
 
 use instructions::*;
+use state::AttestedPriceTerms;
 
 declare_id!("HrLqdNdxUJq4pgsL4NsUqzfYrGxR7Hy9PHGEeHnj3skL");
 
@@ -33,7 +34,13 @@ pub mod covantic {
         agent_address: Pubkey,
         mandate: AgentMandate,
     ) -> Result<()> {
-        create_policy_handler(ctx, coverage_amount, duration_seconds, agent_address, mandate)
+        create_policy_handler(
+            ctx,
+            coverage_amount,
+            duration_seconds,
+            agent_address,
+            mandate,
+        )
     }
 
     /// Publish (or refresh) a risk attestation for an agent. Only the oracle
@@ -45,6 +52,7 @@ pub mod covantic {
         valid_for_seconds: i64,
         mandate_hash: [u8; 32],
         envelope_flat_premium: u64,
+        price_terms: AttestedPriceTerms,
     ) -> Result<()> {
         upsert_attestation_handler(
             ctx,
@@ -53,6 +61,7 @@ pub mod covantic {
             valid_for_seconds,
             mandate_hash,
             envelope_flat_premium,
+            price_terms,
         )
     }
 
@@ -81,17 +90,13 @@ pub mod covantic {
         oracle_submit_claim_handler(ctx, trigger_type, trigger_tx_signature)
     }
 
-    /// Verify a claim and execute payout (oracle only).
-    pub fn verify_and_payout(ctx: Context<VerifyAndPayout>, payout_amount: u64) -> Result<()> {
-        verify_and_payout_handler(ctx, payout_amount)
-    }
-
     /// Verify an oracle-manipulation claim against a guardian-signed Pyth
     /// price and execute payout.
     ///
-    /// Prefer this over `verify_and_payout` for TRIGGER_ORACLE_MANIPULATION.
-    /// The program checks the reference price itself instead of trusting the
-    /// oracle's word for it, and records what it verified in a
+    /// The only settlement path for TRIGGER_ORACLE_MANIPULATION. The program
+    /// checks the reference price itself instead of trusting the oracle's
+    /// word for it, requires the feed and asset to be the ones fixed for the
+    /// policy at purchase, and records what it verified in a
     /// `ClaimEvidenceRecord` PDA so the payout stays auditable afterwards.
     pub fn verify_and_payout_v2(
         ctx: Context<VerifyAndPayoutV2>,
@@ -114,7 +119,7 @@ pub mod covantic {
     /// Verify an exploit claim against a balance drop the program measures
     /// for itself, and execute payout.
     ///
-    /// Prefer this over `verify_and_payout` for TRIGGER_EXPLOIT. The program
+    /// The only settlement path for TRIGGER_EXPLOIT. The program
     /// re-reads the covered token account and refuses to pay more than the
     /// difference from its own earlier checkpoint, so the oracle cannot
     /// assert a loss that did not happen. What it still asserts — that the
@@ -184,7 +189,7 @@ pub mod covantic {
     /// Verify an agent-error claim against the holder's declared mandate and
     /// a balance drop the program measures, and execute payout.
     ///
-    /// Prefer this over `verify_and_payout` for TRIGGER_AGENT_ERROR. The
+    /// The only settlement path for TRIGGER_AGENT_ERROR. The
     /// program re-reads the covered token account, compares the drop against
     /// an envelope the holder signed for before the claim was filed, and
     /// refuses to pay more than the overshoot. It settles only breaches it
@@ -199,7 +204,10 @@ pub mod covantic {
         verify_and_payout_agent_error_handler(ctx, payout_amount, evidence)
     }
 
-    /// Mark expired policies (permissionless crank).
+    /// Mark expired policies (permissionless crank). Also closes a policy
+    /// whose claim was filed and never settled, once its lock and the
+    /// resolution grace have both elapsed, so a pending claim cannot reserve
+    /// coverage forever.
     pub fn expire_policy(ctx: Context<ExpirePolicy>) -> Result<()> {
         expire_policy_handler(ctx)
     }
@@ -270,6 +278,19 @@ pub mod covantic {
     /// overwrite.
     pub fn migrate_attestation(ctx: Context<MigrateAttestation>) -> Result<()> {
         migrate_attestation_handler(ctx)
+    }
+
+    /// Grow a governance baseline to the current layout, so the whole
+    /// predecessor declaration can be retained. Permissionless and idempotent;
+    /// required once per baseline declared before this change.
+    pub fn migrate_governance_baseline(ctx: Context<MigrateGovernanceBaseline>) -> Result<()> {
+        migrate_governance_baseline_handler(ctx)
+    }
+
+    /// Grow an authority checkpoint to the current layout. Permissionless and
+    /// idempotent; required once per checkpoint written before this change.
+    pub fn migrate_authority_checkpoint(ctx: Context<MigrateAuthorityCheckpoint>) -> Result<()> {
+        migrate_authority_checkpoint_handler(ctx)
     }
 
     /// Withdraw a pending admin transfer.

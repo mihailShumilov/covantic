@@ -10,10 +10,7 @@ use crate::state::{InsuranceVault, ProtocolConfig, StakerPosition};
 /// Compute the pending reward delta for a staker based on the global
 /// reward-per-stake accumulator. Returns 0 when the staker has no
 /// position or the accumulator has not advanced past the snapshot.
-pub fn pending_reward_delta(
-    position: &StakerPosition,
-    vault: &InsuranceVault,
-) -> Result<u64> {
+pub fn pending_reward_delta(position: &StakerPosition, vault: &InsuranceVault) -> Result<u64> {
     if position.amount_staked == 0 {
         return Ok(0);
     }
@@ -68,10 +65,7 @@ pub fn settle_losses(position: &mut StakerPosition, vault: &InsuranceVault) -> R
 
 /// Crystallize outstanding rewards for a staker into rewards_pending
 /// and advance their snapshot to the current accumulator.
-pub fn crystallize_rewards(
-    position: &mut StakerPosition,
-    vault: &InsuranceVault,
-) -> Result<()> {
+pub fn crystallize_rewards(position: &mut StakerPosition, vault: &InsuranceVault) -> Result<()> {
     let delta = pending_reward_delta(position, vault)?;
     if delta > 0 {
         position.rewards_pending = position
@@ -166,7 +160,6 @@ pub fn stake_handler(ctx: Context<Stake>, amount: u64) -> Result<()> {
 
     Ok(())
 }
-
 
 #[derive(Accounts)]
 pub struct Stake<'info> {

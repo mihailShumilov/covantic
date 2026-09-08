@@ -1,14 +1,14 @@
 import { Queue, Worker } from 'bullmq';
 import type Redis from 'ioredis';
-import { and, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { PublicKey } from '@solana/web3.js';
-import { PolicyState } from '@covantic/shared';
+import { PDA_SEEDS, PolicyState, ProofKind } from '@covantic/shared';
 import type { Database } from '../config/database.js';
 import type { AppConfig } from '../config/env.js';
 import { claims, policies } from '../db/schema.js';
 import { logger } from '../utils/logger.js';
 import { createCovanticProgram, type CovanticProgram } from '../utils/program.js';
-import { fetchAllAnchorAccounts } from '../utils/anchor-reader.js';
+import { fetchAllAnchorAccounts, fetchAnchorAccount } from '../utils/anchor-reader.js';
 import { getSolanaReader, type SolanaReader } from '../utils/solana-reader.js';
 
 const QUEUE_NAME = 'policy-indexer';
@@ -239,9 +239,101 @@ async function reconcilePolicies(
       logger.info({ policyId }, 'policy-indexer: mirrored on-chain ClaimPending into claims');
     }
 
-    // Also reconcile ClaimPaid: if the chain says ClaimPaid but the DB claim
-    // is still approved/paying, catch up so the UI doesn't block a retry.
   }
 
+  await labelProofKinds(db, ctx, reader, accounts as Array<{ account: any; publicKey: string }>);
+
   logger.debug({ count: accounts.length }, 'Policy indexer reconcile complete');
+}
+
+/** How many paid claims to label per tick — each costs up to four reads. */
+const PROOF_LABEL_BATCH = 25;
+
+/** Evidence account, per proof kind, that the settlement instruction creates. */
+const EVIDENCE_ACCOUNTS: ReadonlyArray<{ kind: ProofKind; seed: string; account: string }> = [
+  { kind: ProofKind.Price, seed: PDA_SEEDS.CLAIM_EVIDENCE, account: 'claimEvidenceRecord' },
+  { kind: ProofKind.Balance, seed: PDA_SEEDS.EXPLOIT_EVIDENCE, account: 'exploitEvidenceRecord' },
+  {
+    kind: ProofKind.Authority,
+    seed: PDA_SEEDS.GOVERNANCE_EVIDENCE,
+    account: 'governanceEvidenceRecord',
+  },
+  {
+    kind: ProofKind.Mandate,
+    seed: PDA_SEEDS.AGENT_ERROR_EVIDENCE,
+    account: 'agentErrorEvidenceRecord',
+  },
+];
+
+/**
+ * Say which proof settled each paid claim, from the account the proof
+ * instruction created — never from transaction logs.
+ *
+ * A proof event in a transaction's logs is emitted by whichever program ran
+ * in it, so a forged one beside a real `ClaimPaid` proves nothing, and a
+ * truncated log hides a proof that did run. The evidence PDA is the one
+ * artefact only this program can have written at that address: it exists or
+ * it does not. A `ClaimPaid` policy with no evidence account at all was paid
+ * by the unverified instruction before it was removed, and is labelled
+ * `unproven` so nothing downstream presents it as chain-checked.
+ */
+async function labelProofKinds(
+  db: Database,
+  ctx: CovanticProgram,
+  reader: SolanaReader,
+  accounts: Array<{ account: any; publicKey: string }>,
+): Promise<void> {
+  const paidPolicies = new Map<number, string>();
+  for (const { account, publicKey } of accounts) {
+    if ((account.state as number) === PolicyState.ClaimPaid) {
+      paidPolicies.set(bnToNumber(account.policyId), publicKey);
+    }
+  }
+  if (paidPolicies.size === 0) return;
+
+  const unlabelled = await db
+    .select({ id: claims.id, policyId: claims.policyId })
+    .from(claims)
+    .where(
+      and(
+        inArray(claims.policyId, [...paidPolicies.keys()]),
+        inArray(claims.status, ['paid', 'approved', 'paying'] as string[]),
+        isNull(claims.proofKind),
+      ),
+    )
+    .limit(PROOF_LABEL_BATCH);
+
+  for (const row of unlabelled) {
+    const policyPda = paidPolicies.get(row.policyId);
+    if (!policyPda) continue;
+    let kind: ProofKind | null = null;
+    try {
+      kind = await resolveProofKind(ctx, reader, new PublicKey(policyPda));
+    } catch (err) {
+      // An outage is not evidence of anything; try again next tick.
+      logger.warn({ err, policyId: row.policyId }, 'policy-indexer: proof kind unreadable');
+      continue;
+    }
+    await db
+      .update(claims)
+      .set({ proofKind: kind, updatedAt: new Date() })
+      .where(eq(claims.id, row.id));
+    logger.info({ policyId: row.policyId, proofKind: kind }, 'policy-indexer: labelled proof kind');
+  }
+}
+
+async function resolveProofKind(
+  ctx: CovanticProgram,
+  reader: SolanaReader,
+  policyPda: PublicKey,
+): Promise<ProofKind> {
+  for (const candidate of EVIDENCE_ACCOUNTS) {
+    const [address] = PublicKey.findProgramAddressSync(
+      [Buffer.from(candidate.seed), policyPda.toBuffer()],
+      ctx.programId,
+    );
+    const record = await fetchAnchorAccount(ctx, reader, candidate.account, address.toBase58());
+    if (record) return candidate.kind;
+  }
+  return ProofKind.Unproven;
 }

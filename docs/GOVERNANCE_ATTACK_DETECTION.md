@@ -258,7 +258,9 @@ the verifier would answer the wrong question.
   confidence to ≥ 0.95, `decideLane` returns `{ lane: 'pay', requiresChainProof: false }`
   and settlement falls through to `verify_and_payout` — the legacy instruction
   with no bound on the amount beyond coverage. The only thing preventing that
-  today is a number in a verifier.
+  today is a number in a verifier. _Closed:_ the legacy instruction has since
+  been removed from the program, and `planProvenSettlement` has no plan that
+  settles without a proof.
 
 - **D13 — the demo path is the only way it pays.** `syntheticVerification`
   returns confidence 1.0 and 80% of coverage for trigger 4, which clears the

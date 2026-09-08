@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { AnchorProvider, BN, Program, type Idl } from '@coral-xyz/anchor';
+import { AnchorProvider, BN, Program, utils, type Idl } from '@coral-xyz/anchor';
 import { agentMandateCommitment } from '@covantic/shared';
 import {
   Keypair,
@@ -16,6 +16,7 @@ import {
   createAssociatedTokenAccountInstruction,
   createInitializeMint2Instruction,
   createMintToInstruction,
+  createTransferInstruction,
   getAssociatedTokenAddressSync,
   getAccount,
   MINT_SIZE,
@@ -55,6 +56,9 @@ const ATTESTATION_SEED = Buffer.from('covantic_attestation');
 
 const USDC_DECIMALS = 6;
 const usdc = (n: number) => new BN(n * 10 ** USDC_DECIMALS);
+/** The Base58 text of a 64-byte signature, which is what a claim must carry. */
+const triggerSig = (seed: number): Buffer =>
+  Buffer.from(utils.bytes.bs58.encode(Buffer.alloc(64, seed)), 'utf8');
 /** `SOLVENCY_CRITICAL` — the same 5000 bps `create_policy` gates issuance on. */
 const SOLVENCY_CRITICAL = 5000n;
 
@@ -269,7 +273,12 @@ describe.skipIf(!hasIdl)('loss socialisation across stakers', () => {
     }
 
     await program.methods
-      .upsertAttestation(agent.publicKey, 0, new BN(3600), wideMandateHash(), new BN(0))
+      .upsertAttestation(agent.publicKey, 0, new BN(3600), wideMandateHash(), new BN(0), {
+        feedId: Array.from(new Uint8Array(32)),
+        subjectMint: PublicKey.default,
+        subjectDecimals: 0,
+        maxSubjectQuantity: new BN(0),
+      })
       .accountsPartial({
         oracle: oracle.publicKey,
         config,
@@ -341,18 +350,67 @@ describe.skipIf(!hasIdl)('loss socialisation across stakers', () => {
     const [vault] = vaultPda();
     const policy = policyPda(holder.publicKey, policyId)[0];
 
+    const agentAta = getAssociatedTokenAddressSync(usdcMint.publicKey, agent.publicKey);
+    const [checkpoint] = PublicKey.findProgramAddressSync(
+      [Buffer.from('covantic_checkpoint'), policy.toBuffer()],
+      PROGRAM_ID,
+    );
+    const [evidenceRecord] = PublicKey.findProgramAddressSync(
+      [Buffer.from('covantic_exploit_evidence'), policy.toBuffer()],
+      PROGRAM_ID,
+    );
+
+    // The unverified instruction is gone, so the loss has to be one the
+    // program measures: fund the covered account, checkpoint it, drain it.
+    const fundTx = new Transaction().add(
+      createMintToInstruction(
+        usdcMint.publicKey,
+        agentAta,
+        admin.publicKey,
+        BigInt(usdc(COVERAGE).toString()),
+      ),
+    );
+    fundTx.recentBlockhash = (await banks.getLatestBlockhash())[0];
+    fundTx.feePayer = admin.publicKey;
+    fundTx.sign(admin);
+    await banks.processTransaction(fundTx);
+
     await program.methods
-      .oracleSubmitClaim(1, Buffer.alloc(64, 7)) // TRIGGER_EXPLOIT
+      .checkpointBalance()
+      .accountsPartial({
+        cranker: admin.publicKey,
+        config,
+        policy,
+        coveredTokenAccount: agentAta,
+        usdcMint: usdcMint.publicKey,
+        checkpoint,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      } as any)
+      .signers([admin])
+      .rpc();
+
+    await program.methods
+      .oracleSubmitClaim(1, triggerSig(7)) // TRIGGER_EXPLOIT
       .accountsPartial({ oracle: oracle.publicKey, config, policy } as any)
       .signers([oracle])
       .rpc();
+
+    const drainTx = new Transaction().add(
+      createTransferInstruction(agentAta, aAta, agent.publicKey, BigInt(usdc(PAYOUT).toString())),
+    );
+    drainTx.recentBlockhash = (await banks.getLatestBlockhash())[0];
+    drainTx.feePayer = admin.publicKey;
+    drainTx.sign(admin, agent);
+    await banks.processTransaction(drainTx);
 
     // Past the exploit lock period.
     await advanceClockBySeconds(context, 3601);
 
     const before = await fetchVault();
     await program.methods
-      .verifyAndPayout(usdc(PAYOUT))
+      .verifyAndPayoutExploit(usdc(PAYOUT), { bundleHash: Array.from(Buffer.alloc(32, 9)) })
       .accountsPartial({
         oracle: oracle.publicKey,
         config,
@@ -360,9 +418,13 @@ describe.skipIf(!hasIdl)('loss socialisation across stakers', () => {
         vault,
         vaultTokenAccount: vaultAta,
         usdcMint: usdcMint.publicKey,
-        coveredTokenAccount: getAssociatedTokenAddressSync(usdcMint.publicKey, agent.publicKey),
+        coveredTokenAccount: agentAta,
         holderTokenAccount: holderAta,
+        checkpoint,
+        evidenceRecord,
         tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
       } as any)
       .signers([oracle])
       .rpc();

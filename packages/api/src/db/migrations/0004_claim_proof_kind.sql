@@ -1,0 +1,1 @@
+ALTER TABLE "claims" ADD COLUMN "proof_kind" varchar(16);

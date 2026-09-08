@@ -10,9 +10,9 @@ use crate::state::{
     PolicyBalanceCheckpoint, ProtocolConfig,
 };
 
-/// Breach kinds, recorded so a reader knows which declared bound was crossed.
-pub const BREACH_OUTFLOW_CAP: u8 = 1;
-pub const BREACH_RETAINED_FLOOR: u8 = 2;
+// `BREACH_OUTFLOW_CAP` and `BREACH_RETAINED_FLOOR` live in `constants.rs`,
+// beside the governance departure taxonomy, so the public event and evidence
+// record that carry them have a value-to-meaning mapping outside this module.
 
 /// What the oracle commits to when claiming an agent-error loss.
 ///
@@ -89,6 +89,7 @@ pub fn verify_and_payout_agent_error_handler(
         ctx.accounts.oracle.key() == config.oracle_authority,
         CovanticError::UnauthorizedOracle
     );
+    policy.assert_readable()?;
     require!(
         policy.state == InsurancePolicy::STATE_CLAIM_PENDING,
         CovanticError::PolicyNotClaimPending
@@ -100,6 +101,14 @@ pub fn verify_and_payout_agent_error_handler(
     require!(
         policy.trigger_type == TRIGGER_AGENT_ERROR,
         CovanticError::InvalidTriggerType
+    );
+
+    // The record this instruction leaves behind is only worth something if
+    // the hash in it commits to a bundle somebody can go and check. A zero is
+    // not a commitment; it is the field left blank.
+    require!(
+        evidence.bundle_hash != [0u8; 32],
+        CovanticError::EvidenceBundleHashMissing
     );
 
     require!(
@@ -187,7 +196,11 @@ pub fn verify_and_payout_agent_error_handler(
 
     let (baseline_amount, baseline_slot, baseline_time) =
         if checkpoint.unix_timestamp <= policy.claim_submitted_at && !pin_usable {
-            (checkpoint.amount, checkpoint.slot, checkpoint.unix_timestamp)
+            (
+                checkpoint.amount,
+                checkpoint.slot,
+                checkpoint.unix_timestamp,
+            )
         } else {
             (
                 checkpoint.prev_amount,

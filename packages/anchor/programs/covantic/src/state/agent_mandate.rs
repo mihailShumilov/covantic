@@ -198,7 +198,7 @@ pub struct AgentErrorEvidenceRecord {
     /// settled claim: this is the bound.
     pub breach_excess: u64,
     /// Which declared bound was crossed. See `BREACH_OUTFLOW_CAP` /
-    /// `BREACH_RETAINED_FLOOR` in the instruction module.
+    /// `BREACH_RETAINED_FLOOR` in `constants.rs`.
     pub breach_kind: u8,
 
     pub max_provable_loss: u64,

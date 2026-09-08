@@ -10,9 +10,11 @@ use crate::state::{InsurancePolicy, ProtocolConfig};
 /// Only the configured oracle authority can call this. The oracle's job is to
 /// move a policy from Active -> ClaimPending whenever its off-chain monitors
 /// (Helius webhooks, Pyth feeds) detect a trigger event. The actual payout
-/// still goes through the existing `verify_and_payout` instruction, so the
-/// oracle never has unilateral access to vault funds without the state
-/// transition being persisted on-chain first.
+/// goes through the trigger's proof instruction — `verify_and_payout_v2`,
+/// `verify_and_payout_exploit`, `verify_and_payout_governance` or
+/// `verify_and_payout_agent_error` — each of which re-derives the bound on
+/// the amount from state the program reads itself. Filing a claim therefore
+/// gives the oracle no access to vault funds on its own.
 ///
 /// Coexists with holder-signed `submit_claim` — the holder path is preserved
 /// so an agent (via SDK) can still file its own claim.
@@ -29,6 +31,7 @@ pub fn oracle_submit_claim_handler(
     // Emergency pause blocks oracle-driven claim submissions
     require!(!config.paused, CovanticError::ProtocolPaused);
 
+    policy.assert_readable()?;
     require!(
         policy.state == InsurancePolicy::STATE_ACTIVE,
         CovanticError::PolicyNotActive
@@ -41,11 +44,9 @@ pub fn oracle_submit_claim_handler(
         CovanticError::InvalidTriggerType
     );
 
-    require!(!trigger_tx_signature.is_empty(), CovanticError::TriggerTxRequired);
-    require!(
-        trigger_tx_signature.len() <= MAX_TRIGGER_TX_SIG_LEN,
-        CovanticError::InvalidTriggerTxSignature
-    );
+    // Same rule as the holder path, enforced here too: a rule checked on one
+    // entrypoint is a rule the other entrypoint skips.
+    InsurancePolicy::validate_trigger_signature(&trigger_tx_signature)?;
 
     policy.state = InsurancePolicy::STATE_CLAIM_PENDING;
     policy.trigger_type = trigger_type;

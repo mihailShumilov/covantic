@@ -20,16 +20,22 @@ type ClaimRow = typeof claims.$inferSelect;
  * `proven_mandate` — the chain measures the drop and checks how far it landed
  *                    outside an operating envelope the holder declared and
  *                    which matured before the claim was filed (agent error).
- * `legacy`         — the pre-proof instruction; the chain trusts the amount.
  * `unprovable`     — proof is required for this trigger but an input is
- *                    missing. Fails closed, to review.
+ *                    missing, the trigger's proof path is switched off, or
+ *                    the claim is a simulation with nothing on chain to
+ *                    read. Fails closed, to review.
+ *
+ * There is no `legacy` plan any more. The instruction it named —
+ * `verify_and_payout`, which trusted the oracle's amount after a lock — has
+ * been removed from the program, so a claim that cannot be proven has
+ * nowhere to fall back to. That is the point: an attacker who can stop a
+ * proof from being built must not get the unverified behaviour back.
  */
 export type SettlementPlan =
   | { kind: 'proven_price'; proof: ProofInputs; triggerBlockTime: number; bundleHash: string }
   | { kind: 'proven_balance'; bundleHash: string }
   | { kind: 'proven_authority'; bundleHash: string }
   | { kind: 'proven_mandate'; bundleHash: string }
-  | { kind: 'legacy' }
   | { kind: 'unprovable'; reason: string };
 
 /**
@@ -72,13 +78,16 @@ export function planProvenSettlement(
     breachProvable?: boolean;
   };
   // The demo path never touches a real transaction, so there is nothing on
-  // chain for either proof instruction to read.
-  if (data.simulated === true) return { kind: 'legacy' };
+  // chain for any proof instruction to read — and nothing else to settle
+  // through either.
+  if (data.simulated === true) {
+    return { kind: 'unprovable', reason: 'simulated_claim_has_no_chain_evidence' };
+  }
 
   const hash = data.bundleHash;
 
   if (claim.triggerType === TriggerType.OracleManipulation) {
-    if (!config.ORACLE_PROOF_ENABLED) return { kind: 'legacy' };
+    if (!config.ORACLE_PROOF_ENABLED) return { kind: 'unprovable', reason: 'proof_path_disabled' };
     if (!data.proof?.signedUpdateHex) {
       return { kind: 'unprovable', reason: 'no_signed_price_evidence' };
     }
@@ -95,7 +104,7 @@ export function planProvenSettlement(
   }
 
   if (claim.triggerType === TriggerType.Exploit) {
-    if (!config.EXPLOIT_PROOF_ENABLED) return { kind: 'legacy' };
+    if (!config.EXPLOIT_PROOF_ENABLED) return { kind: 'unprovable', reason: 'proof_path_disabled' };
     // Nothing else is needed from the backend. The program derives the
     // covered account itself and measures the drop against its own
     // checkpoint, so the only thing to carry across is the commitment to the
@@ -106,7 +115,8 @@ export function planProvenSettlement(
   }
 
   if (claim.triggerType === TriggerType.GovernanceAttack) {
-    if (!config.GOVERNANCE_PROOF_ENABLED) return { kind: 'legacy' };
+    if (!config.GOVERNANCE_PROOF_ENABLED)
+      return { kind: 'unprovable', reason: 'proof_path_disabled' };
     // Nothing else is needed from the backend. The program reads the
     // baseline, the authority checkpoint and the covered account itself, and
     // decides whether control left the declared set. The only thing to carry
@@ -117,7 +127,8 @@ export function planProvenSettlement(
   }
 
   if (claim.triggerType === TriggerType.AgentError) {
-    if (!config.AGENT_ERROR_PROOF_ENABLED) return { kind: 'legacy' };
+    if (!config.AGENT_ERROR_PROOF_ENABLED)
+      return { kind: 'unprovable', reason: 'proof_path_disabled' };
     if (!hash) return { kind: 'unprovable', reason: 'no_bundle_hash' };
     // The dimension check the other three paths do not need.
     //
@@ -138,5 +149,5 @@ export function planProvenSettlement(
     return { kind: 'proven_mandate', bundleHash: hash };
   }
 
-  return { kind: 'legacy' };
+  return { kind: 'unprovable', reason: 'no_proof_path_for_trigger' };
 }

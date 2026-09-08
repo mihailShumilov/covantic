@@ -8,12 +8,27 @@ export enum PolicyState {
   Cancelled = 4,
 }
 
-/** Risk tier levels */
+/**
+ * Risk tier levels, as the assessment produces them.
+ *
+ * `EXTREME` is an assessment outcome, not a policy state: the oracle refuses
+ * to attest it, so no attestation and no `create_policy` can produce a policy
+ * at tier 3. Anything persisted on chain is an {@link InsurableTier}.
+ */
 export enum RiskTier {
   LOW = 0,
   MEDIUM = 1,
   HIGH = 2,
   EXTREME = 3,
+}
+
+/** The tiers a policy can actually carry — what the program stores and
+ *  prices. Keep in sync with `RISK_TIER_LOW..RISK_TIER_HIGH`. */
+export type InsurableTier = RiskTier.LOW | RiskTier.MEDIUM | RiskTier.HIGH;
+
+/** Narrow a raw tier byte read from chain or the API to the insurable range. */
+export function isInsurableTierValue(value: number): value is InsurableTier {
+  return value === RiskTier.LOW || value === RiskTier.MEDIUM || value === RiskTier.HIGH;
 }
 
 /** Trigger types for insurance claims */
@@ -32,7 +47,8 @@ export interface Policy {
   agentAddress: string;
   coverageAmount: number;
   premiumPaid: number;
-  riskTier: RiskTier;
+  /** Never `EXTREME`: the chain cannot hold a policy at that tier. */
+  riskTier: InsurableTier;
   startTime: Date;
   expiryTime: Date;
   claimSubmittedAt: Date | null;

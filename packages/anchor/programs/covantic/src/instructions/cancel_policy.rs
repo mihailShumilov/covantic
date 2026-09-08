@@ -14,6 +14,8 @@ pub fn cancel_policy_handler(ctx: Context<CancelPolicy>) -> Result<()> {
     let clock = Clock::get()?;
     let now = clock.unix_timestamp;
 
+    policy.assert_readable()?;
+
     // Must be active
     require!(
         policy.state == InsurancePolicy::STATE_ACTIVE,

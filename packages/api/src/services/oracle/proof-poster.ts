@@ -58,6 +58,15 @@ export class ProofPoster {
     )[0];
   }
 
+  /** The feed, decimals and quantity bound fixed for the policy at purchase.
+   *  The instruction refuses evidence that names anything else. */
+  derivePriceTermsPda(policyPda: PublicKey): PublicKey {
+    return PublicKey.findProgramAddressSync(
+      [Buffer.from(PDA_SEEDS.POLICY_PRICE_TERMS), policyPda.toBuffer()],
+      this.ctx.programId,
+    )[0];
+  }
+
   /**
    * Post the signed price and execute the proven payout.
    *
@@ -87,6 +96,7 @@ export class ProofPoster {
     const vaultAta = getAssociatedTokenAddressSync(cfg.usdcMint, vault, true);
     const holderAta = getAssociatedTokenAddressSync(cfg.usdcMint, holder);
     const evidenceRecord = this.deriveEvidencePda(policy);
+    const priceTerms = this.derivePriceTermsPda(policy);
 
     const receiver = await this.getReceiver();
     const builder = receiver.newTransactionBuilder({
@@ -124,6 +134,7 @@ export class ProofPoster {
           vaultTokenAccount: vaultAta,
           holderTokenAccount: holderAta,
           priceUpdate,
+          priceTerms,
           evidenceRecord,
           tokenProgram: TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,

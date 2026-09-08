@@ -17,6 +17,7 @@ pub fn submit_claim_handler(
     let now = clock.unix_timestamp;
 
     // Must be active
+    policy.assert_readable()?;
     require!(
         policy.state == InsurancePolicy::STATE_ACTIVE,
         CovanticError::PolicyNotActive
@@ -31,12 +32,10 @@ pub fn submit_claim_handler(
         CovanticError::InvalidTriggerType
     );
 
-    // Trigger tx signature is required and must fit the on-chain buffer
-    require!(!trigger_tx_signature.is_empty(), CovanticError::TriggerTxRequired);
-    require!(
-        trigger_tx_signature.len() <= MAX_TRIGGER_TX_SIG_LEN,
-        CovanticError::InvalidTriggerTxSignature
-    );
+    // The trigger transaction must be a resolvable identity, not just bytes
+    // that fit. A value nothing downstream can decode parks the policy in
+    // `ClaimPending` with a claim no verifier can look up.
+    InsurancePolicy::validate_trigger_signature(&trigger_tx_signature)?;
 
     // Update policy
     policy.state = InsurancePolicy::STATE_CLAIM_PENDING;

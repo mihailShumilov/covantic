@@ -1,3 +1,4 @@
+import type { ProofKind } from './events.js';
 import { TriggerType } from './policy.js';
 
 /** Claim verification status */
@@ -173,8 +174,15 @@ export interface Claim {
   paidAt: Date | null;
   /** On-chain tx signature for the oracle's oracle_submit_claim call. */
   submitTxSignature: string | null;
-  /** On-chain tx signature for verify_and_payout (USDC transfer to holder). */
+  /** On-chain tx signature for the proof instruction that paid the claim
+   *  (USDC transfer to holder). */
   payoutTxSignature: string | null;
+  /**
+   * Which on-chain proof settled the claim, read from the evidence account
+   * the proof instruction created. `null` while unpaid; `unproven` for a claim
+   * paid before the unverified instruction was removed.
+   */
+  proofKind: ProofKind | null;
   lockExpiresAt: Date | null;
   createdAt: Date;
 }

@@ -362,13 +362,35 @@ pub const DEPARTURE_OWNER: u8 = 1;
 pub const DEPARTURE_FROZEN: u8 = 2;
 pub const DEPARTURE_DELEGATE: u8 = 3;
 pub const DEPARTURE_CLOSE_AUTHORITY: u8 = 4;
-/// Declared roles with no departure branch of their own today. They exist so
-/// `permits_role` is total over the declaration's fields: a caller asking
-/// about an upgrade authority or a multisig controller must not fall through
-/// to the wildcard arm and be told "not permitted" for a reason that is really
-/// "not implemented".
+/// Declared roles the program cannot observe. The checkpoint reads an SPL
+/// token account, so a program's upgrade authority and a multisig's config are
+/// invisible to it; `declare_governance_baseline` refuses a manifest that
+/// names either, rather than presenting coverage the settlement path cannot
+/// adjudicate. The codes stay reserved so a future observer can settle them
+/// without renumbering the evidence records already written.
 pub const DEPARTURE_UPGRADE_AUTHORITY: u8 = 5;
 pub const DEPARTURE_CONTROLLER: u8 = 6;
+
+/// Which declared bound an agent-error payout rested on. Public here, next to
+/// the departure taxonomy, because `AgentErrorProofVerified.breach_kind` and
+/// `AgentErrorEvidenceRecord.breach_kind` carry these values and an indexer
+/// must not have to read a private instruction module to decode them.
+pub const BREACH_OUTFLOW_CAP: u8 = 1;
+pub const BREACH_RETAINED_FLOOR: u8 = 2;
+
+/// Seed for the PolicyPriceTerms PDA — one per policy.
+pub const POLICY_PRICE_TERMS_SEED: &[u8] = b"covantic_price_terms";
+
+/// How long a pending claim may stay unresolved past its lock before the
+/// permissionless expiry crank may close the policy and release its coverage.
+///
+/// A claim filed just before expiry used to reserve the coverage forever:
+/// `expire_policy` and `cancel_policy` both required `Active`, so a policy
+/// parked in `ClaimPending` had no terminal transition at all. A week is long
+/// enough for a claim that landed in human review to be settled, and short
+/// enough that a holder cannot jam the vault's capacity by filing and walking
+/// away.
+pub const CLAIM_RESOLUTION_GRACE: i64 = 7 * 24 * 3600;
 
 #[cfg(test)]
 mod tests {

@@ -29,6 +29,59 @@ export enum ClaimEvent {
   ClaimPaid = 'claim_paid',
 }
 
+/**
+ * Which declared bound an agent-error payout rested on.
+ *
+ * Carried as a `u8` by the on-chain `AgentErrorProofVerified` event and the
+ * `AgentErrorEvidenceRecord` account. Must stay in sync with
+ * `BREACH_OUTFLOW_CAP` / `BREACH_RETAINED_FLOOR` in the program's
+ * `constants.rs`; an indexer must not have to read a private instruction
+ * module to decode the value, and must not fold an unknown value into one of
+ * these — see {@link breachKindFromChain}.
+ */
+export enum AgentErrorBreachKind {
+  /** The measured drop exceeded the declared single-outflow cap. */
+  OutflowCap = 1,
+  /** The account ended below the declared retention floor. */
+  RetainedFloor = 2,
+}
+
+/** Decode an on-chain `breach_kind`, refusing to guess at a value the
+ *  vocabulary does not name. */
+export function breachKindFromChain(value: number): AgentErrorBreachKind | null {
+  switch (value) {
+    case AgentErrorBreachKind.OutflowCap:
+      return AgentErrorBreachKind.OutflowCap;
+    case AgentErrorBreachKind.RetainedFloor:
+      return AgentErrorBreachKind.RetainedFloor;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Which on-chain proof a paid claim was settled through.
+ *
+ * Derived from the *evidence account* the settlement instruction created —
+ * `ClaimEvidenceRecord`, `ExploitEvidenceRecord`, `GovernanceEvidenceRecord`
+ * or `AgentErrorEvidenceRecord` — never from transaction logs. Logs are
+ * emitted by whichever program ran in the transaction, so a proof event next
+ * to a `ClaimPaid` proves nothing about who emitted it, and a truncated log
+ * hides a proof that did run. An account owned by the program at the seed the
+ * program derives is the one artefact nobody else can write.
+ *
+ * `unproven` exists for policies paid before the unverified instruction was
+ * removed from the program: they are `ClaimPaid` with no evidence account,
+ * and an indexer must say so rather than present them as chain-checked.
+ */
+export enum ProofKind {
+  Price = 'price',
+  Balance = 'balance',
+  Authority = 'authority',
+  Mandate = 'mandate',
+  Unproven = 'unproven',
+}
+
 /** Vault stats events */
 export enum VaultEvent {
   StatsUpdated = 'stats_updated',

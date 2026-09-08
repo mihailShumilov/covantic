@@ -4,6 +4,7 @@ import { PDA_SEEDS, policyIdToBytes } from '@covantic/shared';
 import { logger } from '../../utils/logger.js';
 import type { CovanticProgram } from '../../utils/program.js';
 import { fetchAnchorAccount } from '../../utils/anchor-reader.js';
+import { isUndersizedAccount } from '../attestation-publisher.js';
 import type { SolanaReader } from '../../utils/solana-reader.js';
 import type { GovernanceBaselineView } from './types.js';
 
@@ -108,18 +109,35 @@ export class AuthorityCheckpointWriter {
         () => { accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> } }
       >;
 
-      return await methods.checkpointAuthority!()
-        .accounts({
-          cranker: signer.publicKey,
-          config,
-          policy,
-          coveredTokenAccount,
-          usdcMint: cfg.usdcMint,
-          checkpoint: this.deriveAuthorityCheckpointPda(policy),
-          tokenProgram: TOKEN_PROGRAM_ID,
-          systemProgram: SystemProgram.programId,
-        })
-        .rpc();
+      const send = () =>
+        methods.checkpointAuthority!()
+          .accounts({
+            cranker: signer.publicKey,
+            config,
+            policy,
+            coveredTokenAccount,
+            usdcMint: cfg.usdcMint,
+            checkpoint: this.deriveAuthorityCheckpointPda(policy),
+            tokenProgram: TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+          })
+          .rpc();
+      try {
+        return await send();
+      } catch (err) {
+        // A checkpoint written before the predecessor's close authority was
+        // retained is 33 bytes short, and `init_if_needed` deserialises the
+        // existing account before any constraint could resize it. Growing it
+        // is permissionless and leaves a `None`, which is the right value;
+        // the write that follows records a fresh reading.
+        if (!isUndersizedAccount(err)) throw err;
+        logger.warn(
+          { policyId: policyId.toString() },
+          'authority checkpoint predates the current layout — growing it before writing',
+        );
+        await this.migrateCheckpoint(policy, signer.publicKey);
+        return await send();
+      }
     } catch (err) {
       logger.warn(
         {
@@ -131,6 +149,38 @@ export class AuthorityCheckpointWriter {
       );
       return null;
     }
+  }
+
+  /** Grow an authority checkpoint written under an older layout. */
+  async migrateCheckpoint(policy: PublicKey, payer: PublicKey): Promise<string> {
+    const methods = this.ctx.program.methods as unknown as Record<
+      string,
+      () => { accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> } }
+    >;
+    return await methods.migrateAuthorityCheckpoint!()
+      .accounts({
+        payer,
+        checkpoint: this.deriveAuthorityCheckpointPda(policy),
+        policy,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+  }
+
+  /** Grow a governance baseline written under an older layout. */
+  async migrateBaseline(policy: PublicKey, payer: PublicKey): Promise<string> {
+    const methods = this.ctx.program.methods as unknown as Record<
+      string,
+      () => { accounts: (a: Record<string, PublicKey>) => { rpc: () => Promise<string> } }
+    >;
+    return await methods.migrateGovernanceBaseline!()
+      .accounts({
+        payer,
+        baseline: this.deriveBaselinePda(policy),
+        policy,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
   }
 
   /**

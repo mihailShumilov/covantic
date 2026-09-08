@@ -11,7 +11,7 @@ On-chain smart contract managing:
 - Protocol configuration and vault state
 - Oracle-signed **RiskAttestation** PDAs (one per agent)
 - Insurance policy lifecycle (create, cancel, expire)
-- Claim submission (`oracle_submit_claim`) + verified payout (`verify_and_payout`)
+- Claim submission (`oracle_submit_claim`) + proven payout (`verify_and_payout_v2`, `verify_and_payout_exploit`, `verify_and_payout_governance`, `verify_and_payout_agent_error`)
 - USDC staking pool with per-stake reward accumulator
 
 ### 2. Backend API (Fastify)
@@ -76,7 +76,7 @@ Helius webhook → /api/monitoring/webhook → TransactionMonitor
 claim-keeper → oracle_submit_claim (on-chain)
           |           (lock period per trigger type)
           v
-claim-keeper → verify_and_payout (on-chain)
+claim-keeper → verify_and_payout_{v2,exploit,governance,agent_error} (on-chain proof)
           |           (USDC → holder ATA, policy.state = ClaimPaid)
           v
 policy-indexer mirrors new state → /claims WebSocket feed → UI
@@ -144,8 +144,10 @@ the `accountAddresses` set).
 ## Security Model
 
 - **Oracle Authority**: Single designated keypair signs `upsert_attestation`, `oracle_submit_claim`,
-  and `verify_and_payout`. `create_policy` reads the tier from the oracle-signed `RiskAttestation`
-  PDA, so buyers cannot self-select a cheaper tier.
+  and the four proof-verifying payout instructions, each of which re-derives the payout bound from
+  state the program reads for itself. There is no instruction that pays on the oracle's word alone.
+  `create_policy` reads the tier from the oracle-signed `RiskAttestation` PDA, so buyers cannot
+  self-select a cheaper tier.
 - **Admin Authority**: Protocol parameter management via `update_config` (paused flag, oracle
   rotation).
 - **Signed internal alert bus**: `monitoring:alerts` on Redis carries an HMAC-SHA256 envelope

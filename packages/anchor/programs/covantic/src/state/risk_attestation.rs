@@ -64,4 +64,21 @@ pub struct RiskAttestation {
 
     /// PDA bump
     pub bump: u8,
+
+    // ---- appended after `bump`, on purpose ------------------------------
+    // Accounts written before these fields existed end at `bump`. Borsh reads
+    // fields in order, so anything inserted above would shift `bump` onto the
+    // wrong bytes for every existing attestation; appended, an account grown
+    // by `migrate_attestation` reads them as zero, which is the "no terms"
+    // value `create_policy` and `verify_and_payout_v2` both know how to
+    // refuse.
+    /// The asset an oracle-manipulation claim on a policy bought against this
+    /// attestation may be priced with. All zero when the oracle priced no
+    /// such cover. Copied into `PolicyPriceTerms` at purchase; see that
+    /// account for why the terms are fixed here rather than chosen by the
+    /// oracle at settlement.
+    pub insured_feed_id: [u8; 32],
+    pub subject_mint: Pubkey,
+    pub subject_decimals: u8,
+    pub max_subject_quantity: u64,
 }

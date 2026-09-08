@@ -4,7 +4,8 @@
  * Usage:
  *   pnpm gov:declare --policy <id> --keypair keys/holder.json
  *   pnpm gov:declare --policy 7 --operator <pubkey> --operator <pubkey>
- *   pnpm gov:declare --policy 7 --upgrade-authority <pubkey> --controller <pubkey>
+ *   pnpm gov:declare --policy 7 --delegate <pubkey> --close-authority <pubkey>
+ *   pnpm gov:declare --policy 7 --extension-hash <64 hex chars>
  *
  * Why this is a holder-signed CLI and not something the oracle does for you:
  * the whole value of the declaration is that the *policyholder* made it. A
@@ -17,20 +18,30 @@
  * it — which is deliberate, and is what forces an attacker holding a stolen
  * holder key to pre-commit on chain, in public, well before the incident.
  *
- * Refreshing keeps the previous declaration in `prev_*`, so rotating an
+ * The program reads the covered account while declaring and refuses a
+ * declaration the account does not currently satisfy: the owner, any
+ * delegate and any close authority must all be inside the declared set. A
+ * declaration is a statement about the account as it stands, not a story.
+ *
+ * Refreshing keeps the whole previous declaration in `prev_*`, so rotating an
  * operator does not erase the record of what was legitimate yesterday.
+ *
+ * Program upgrade authorities and multisig controllers are not accepted: the
+ * checkpoint reads a token account and cannot observe either, so the program
+ * refuses to present them as covered. `--upgrade-authority`,
+ * `--controller` and `--min-threshold` exit with an explanation.
  */
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { createHash } from 'node:crypto';
 import { config as loadDotenv } from 'dotenv';
 
 loadDotenv({ path: resolve(import.meta.dirname, '../../../.env') });
 
 import { AnchorProvider, Program, Wallet, type Idl } from '@coral-xyz/anchor';
 import { Connection, Keypair, PublicKey, SystemProgram } from '@solana/web3.js';
-import { GOVERNANCE_BASELINE_DELAY_SECONDS, PDA_SEEDS, policyIdToBytes } from '@covantic/shared';
+import { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from '@solana/spl-token';
+import { governanceManifestCommitment, PDA_SEEDS, policyIdToBytes } from '@covantic/shared';
 
 const REPO_ROOT = resolve(import.meta.dirname, '../../..');
 
@@ -71,6 +82,16 @@ async function main(): Promise<void> {
   const policyId = args.get('policy')?.at(-1);
   if (!policyId) throw new Error('--policy <id> is required');
 
+  for (const unsupported of ['upgrade-authority', 'controller', 'min-threshold']) {
+    if (args.has(unsupported)) {
+      throw new Error(
+        `--${unsupported} is not accepted: the program cannot observe a program's upgrade ` +
+          'authority or a multisig config from the covered token account, and refuses to ' +
+          'record coverage it cannot settle.',
+      );
+    }
+  }
+
   const keypairPath = args.get('keypair')?.at(-1) ?? requireEnv('ORACLE_KEYPAIR_PATH');
   const holder = loadKeypair(keypairPath);
 
@@ -83,6 +104,10 @@ async function main(): Promise<void> {
   ) as Idl;
   const program = new Program(idl, provider);
 
+  const [config] = PublicKey.findProgramAddressSync(
+    [Buffer.from(PDA_SEEDS.CONFIG)],
+    program.programId,
+  );
   const [policy] = PublicKey.findProgramAddressSync(
     [
       Buffer.from(PDA_SEEDS.POLICY),
@@ -96,40 +121,60 @@ async function main(): Promise<void> {
     program.programId,
   );
 
-  const onChainPolicy = (await (
-    program.account as unknown as Record<string, { fetch: (a: PublicKey) => Promise<unknown> }>
-  ).insurancePolicy!.fetch(policy)) as { agentAddress: PublicKey };
+  const accounts = program.account as unknown as Record<
+    string,
+    { fetch: (a: PublicKey) => Promise<unknown> }
+  >;
+  const onChainPolicy = (await accounts.insurancePolicy!.fetch(policy)) as {
+    agentAddress: PublicKey;
+  };
+  const onChainConfig = (await accounts.protocolConfig!.fetch(config)) as { usdcMint: PublicKey };
+  const coveredTokenAccount = getAssociatedTokenAddressSync(
+    onChainConfig.usdcMint,
+    onChainPolicy.agentAddress,
+  );
 
   // Defaults to the agent itself, which is the ordinary case: the agent owns
   // its own token accounts and nobody else may.
   const tokenOwner = optionalKey(args, 'token-owner') ?? onChainPolicy.agentAddress;
+  const expectedDelegate = optionalKey(args, 'delegate');
+  const expectedCloseAuthority = optionalKey(args, 'close-authority');
   const extraAuthorities = (args.get('operator') ?? []).map((k) => new PublicKey(k));
   if (extraAuthorities.length > 4) {
     throw new Error('At most 4 --operator addresses (MAX_GOVERNANCE_EXTRA_AUTHORITIES)');
   }
+  const extensionHex = args.get('extension-hash')?.at(-1);
+  const extensionHash = extensionHex
+    ? Uint8Array.from(Buffer.from(extensionHex, 'hex'))
+    : undefined;
+  if (extensionHash && extensionHash.length !== 32) {
+    throw new Error('--extension-hash must be 32 bytes of hex');
+  }
+
+  // Commits to the declaration as written — every field of it — plus the
+  // digest of any richer off-chain document. The program cannot decode a
+  // Squads config or an allowed-signer list, so the richer statement lives
+  // off chain and this hash is what makes it permanently falsifiable.
+  const manifestHash = governanceManifestCommitment({
+    tokenOwner: tokenOwner.toBytes(),
+    expectedDelegate: expectedDelegate?.toBytes() ?? null,
+    expectedCloseAuthority: expectedCloseAuthority?.toBytes() ?? null,
+    programUpgradeAuthority: null,
+    controller: null,
+    controllerMinThreshold: 0,
+    extraAuthorities: extraAuthorities.map((k) => k.toBytes()),
+    extensionHash,
+  });
 
   const manifest = {
     tokenOwner,
-    expectedDelegate: optionalKey(args, 'delegate'),
-    expectedCloseAuthority: optionalKey(args, 'close-authority'),
-    programUpgradeAuthority: optionalKey(args, 'upgrade-authority'),
-    controller: optionalKey(args, 'controller'),
-    controllerMinThreshold: Number(args.get('min-threshold')?.at(-1) ?? 0),
+    expectedDelegate,
+    expectedCloseAuthority,
+    programUpgradeAuthority: null,
+    controller: null,
+    controllerMinThreshold: 0,
     extraAuthorities,
-    // Commits to the declaration as written. The program cannot decode a
-    // Squads config or an allowed-signer list, so the richer statement lives
-    // off chain and this hash is what makes it permanently falsifiable.
-    manifestHash: Array.from(
-      createHash('sha256')
-        .update(
-          JSON.stringify({
-            tokenOwner: tokenOwner.toBase58(),
-            operators: extraAuthorities.map((k) => k.toBase58()).sort(),
-            controller: optionalKey(args, 'controller')?.toBase58() ?? null,
-          }),
-        )
-        .digest(),
-    ),
+    manifestHash: Array.from(manifestHash),
   };
 
   const signature = await (
@@ -142,8 +187,12 @@ async function main(): Promise<void> {
   ).declareGovernanceBaseline!(manifest)
     .accounts({
       holder: holder.publicKey,
+      config,
       policy,
+      coveredTokenAccount,
+      usdcMint: onChainConfig.usdcMint,
       baseline,
+      tokenProgram: TOKEN_PROGRAM_ID,
       systemProgram: SystemProgram.programId,
     })
     .rpc();
@@ -152,22 +201,19 @@ async function main(): Promise<void> {
   // `declare-agent-mandate.ts`. A `devnet-fast-lock` build compresses the
   // on-chain delay, and a locally-derived figure would tell a policyholder to
   // wait for something that has already happened.
-  const onChain = (await (
-    program.account as unknown as Record<
-      string,
-      // Structural, not `BN`: Anchor 1.x is CJS and does not export the name
-      // as a type, so this file referred to one that was never in scope. Only
-      // `toNumber` is read here, so that is what is required.
-      { fetch: (a: PublicKey) => Promise<{ effectiveAt: { toNumber(): number } }> }
-    >
-  ).policyGovernanceBaseline!.fetch(baseline)) as { effectiveAt: { toNumber(): number } };
+  const onChain = (await accounts.governanceBaseline!.fetch(baseline)) as {
+    effectiveAt: { toNumber(): number };
+  };
   const effectiveAt = new Date(onChain.effectiveAt.toNumber() * 1000);
   process.stdout.write(
     [
       `Declared governance baseline for policy ${policyId}`,
       `  baseline PDA : ${baseline.toBase58()}`,
       `  token owner  : ${tokenOwner.toBase58()}`,
+      `  delegate     : ${expectedDelegate?.toBase58() ?? '(none)'}`,
+      `  close auth.  : ${expectedCloseAuthority?.toBase58() ?? '(none)'}`,
       `  operators    : ${extraAuthorities.map((k) => k.toBase58()).join(', ') || '(none)'}`,
+      `  manifest hash: ${Buffer.from(manifestHash).toString('hex')}`,
       `  signature    : ${signature}`,
       '',
       `Usable as proof from ${effectiveAt.toISOString()} — a claim filed before then`,

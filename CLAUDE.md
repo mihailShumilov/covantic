@@ -81,7 +81,10 @@ Filter to single package: `pnpm --filter api dev`, `pnpm --filter web dev`
 - Trigger types: Exploit(1), OracleManipulation(2), AgentError(3), GovernanceAttack(4)
 - Claim statuses: pending, verifying, approved, paying, paid, rejected, failed,
   indeterminate, review — the last two are OPEN states (see `OPEN_CLAIM_STATUSES`)
-- Lock periods: exploit=0s, oracle_manipulation=1h, agent_error=6h, governance_attack=2h
+- Lock periods: exploit=1h, oracle_manipulation=1h, agent_error=6h, governance_attack=2h
+  (`LOCK_PERIODS` in shared; `LOCK_*` in the program — the README table is derived from these)
+- Claim resolution grace: 7 days past the lock (`CLAIM_RESOLUTION_GRACE`), after which the
+  expiry crank may close a `ClaimPending` policy and release its coverage
 - Governance baseline delay: 1 h (`GOVERNANCE_BASELINE_DELAY`); drain window: 30 min
 - Agent mandate delay: 1 h (`MANDATE_DECLARATION_DELAY`); min provable breach: 1 USDC
 - Unstake cooldown: 48 hours
@@ -182,6 +185,52 @@ Filter to single package: `pnpm --filter api dev`, `pnpm --filter web dev`
   it, so an exploit claim without a chain record is `indeterminate`, never
   rejected. Do not reintroduce "unknown program ⇒ exploit" or "DEX present ⇒
   not an exploit"; both were false-positive/false-negative engines.
+- **There is no unverified settlement instruction.** `verify_and_payout` was
+  removed from the program: a stolen oracle key could file a claim and pay
+  itself the coverage of every policy after a lock, with nothing on chain to
+  contradict it. Every payout now goes through the trigger's proof
+  instruction, which re-derives the bound from state the program reads. A
+  claim whose proof cannot be built — flag off, input missing, simulated —
+  plans `unprovable` and goes to review; `planProvenSettlement` has no
+  `legacy` kind and the keeper has no fallback branch. Do not add one.
+- **Every policy consumer calls `InsurancePolicy::assert_readable` first.**
+  The version byte is enforced (`CURRENT_VERSION`), and so are the state and
+  trigger ranges. Growing `InsurancePolicy` therefore means a version bump
+  plus a `migrate_policy` instruction, never an appended field. Per-policy
+  data that arrives later goes in its own PDA (`PolicyPriceTerms`,
+  `PolicyAgentMandate`, the checkpoints), which is why the purchase now
+  initialises four of them.
+- **A trigger transaction signature is validated on chain.** Both
+  `submit_claim` and `oracle_submit_claim` decode the bytes as Base58 and
+  require exactly 64 bytes, so a policy can never be parked in `ClaimPending`
+  behind an identity no verifier can look up. Tests build one with
+  `utils.bytes.bs58.encode(Buffer.alloc(64, seed))`.
+- **A governance payout proves a transition, not a state.** `create_policy`
+  writes the first authority reading (owner is the agent, by Anchor's
+  constraint); the crank advances `prev_*` only when control changes, so
+  repeated readings of a seized or frozen account cannot erase the reading
+  before it; and settlement requires a checkpointed reading *inside* the
+  declared set, at or before the claim, no older than
+  `GOVERNANCE_DRAIN_WINDOW`, taken after the declaration matured — and control
+  outside the set now. `declare_governance_baseline` reads the covered
+  account and refuses a declaration it does not satisfy, refuses
+  `program_upgrade_authority` / `controller` (the program cannot observe
+  them), and retains the whole replaced declaration so a refresh cannot
+  erase the one in force at claim time (`GovernanceBaseline::view_at`).
+  `GovernanceBaseline` and `PolicyAuthorityCheckpoint` grew; `pnpm gov:migrate`
+  grows accounts written before, and the crank self-heals an undersized
+  checkpoint.
+- **An oracle-manipulation claim is priced against terms fixed at purchase.**
+  The attestation carries `insured_feed_id`, `subject_mint`,
+  `subject_decimals` and `max_subject_quantity`, derived from the agent's
+  own outflow history (`services/price-terms.ts`), and `create_policy`
+  copies them into `PolicyPriceTerms`. `verify_and_payout_v2` requires the
+  evidence to name that feed and those decimals, a quantity within the
+  bound, and a `PriceUpdateV2` at `VerificationLevel::Full`. A policy with
+  empty terms cannot settle on that path and goes to review.
+- **Proof kind comes from the evidence PDA, never from logs.** The indexer
+  labels `claims.proof_kind` by probing the four evidence accounts at their
+  seeds; a `ClaimPaid` policy with none is `unproven`.
 - **Confidence is enforced, not decorative** (`services/confidence-lanes.ts`).
   All four adjudicators cap at 0.92 — one `CONFIDENCE_CEILING`, defined beside
   `AUTO_PAY_CONFIDENCE` and re-exported, so the two numbers cannot drift
