@@ -570,12 +570,14 @@ export function getSolanaReader(config: {
   SOLANA_RPC_URL: string;
   SOLANA_RPC_FALLBACK_URLS?: string;
   SOLANA_RPC_FRESHNESS_AWARE?: boolean;
+  RPC_RATE_LIMIT_EJECTION_MS?: number;
 }): SolanaReader {
   if (sharedReader) return sharedReader;
   sharedPool = new CovanticRpcPool({
     primaryUrl: config.SOLANA_RPC_URL,
     fallbackUrls: config.SOLANA_RPC_FALLBACK_URLS,
     freshnessAware: config.SOLANA_RPC_FRESHNESS_AWARE,
+    rateLimitEjectionMs: config.RPC_RATE_LIMIT_EJECTION_MS,
     // The one long-lived pool per process is where measuring freshness pays.
     probeSlots: true,
   });

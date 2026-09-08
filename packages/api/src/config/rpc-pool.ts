@@ -191,6 +191,17 @@ export interface RpcPoolConfig {
    * a process actually runs.
    */
   probeSlots?: boolean;
+  /**
+   * How long a 429 takes an endpoint out of rotation, in milliseconds.
+   *
+   * Five minutes by default, which is right for a keyed provider: its 429 is
+   * a spent monthly quota, and probing it every few seconds achieves nothing.
+   * It is wrong for the public cluster endpoint, whose 429 is a per-second
+   * throttle that clears almost at once — and when that endpoint is the only
+   * live one, a single throttled burst used to take every read down for five
+   * minutes. Operators running on the public endpoint set this short.
+   */
+  rateLimitEjectionMs?: number;
 }
 
 export interface RpcPoolStatus {
@@ -291,16 +302,17 @@ export class CovanticRpcPool {
     });
 
     // Ejection lives here now, not in a local wrapper: three consecutive
-    // failures take an endpoint out of rotation for 30 s, or 5 minutes after a
-    // 429 — a spent quota needs longer than a blip. The pool skips an ejected
-    // endpoint without a network call and, correctly, does not count the skip
-    // as a failed request.
+    // failures take an endpoint out of rotation for 30 s, or — by default —
+    // 5 minutes after a 429, since a spent quota needs longer than a blip.
+    // See `RpcPoolConfig.rateLimitEjectionMs` for when that default is wrong.
+    // The pool skips an ejected endpoint without a network call and,
+    // correctly, does not count the skip as a failed request.
     this.healthMonitor = new HealthMonitor({
       endpointNames: this.endpoints.map((e) => e.name),
       maxSlotLag: MAX_SLOT_LAG,
       failureThreshold: 3,
       ejectionMs: 30_000,
-      rateLimitEjectionMs: 5 * 60_000,
+      rateLimitEjectionMs: config.rateLimitEjectionMs ?? 5 * 60_000,
     });
     this.pool = new ResilientRpcPool({
       endpoints: poolEndpoints,

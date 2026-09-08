@@ -256,6 +256,15 @@ export const envSchema = z.object({
    * endpoint; the sweep interval bounds how far it can go.
    */
   EXPLOIT_SWEEP_AGENT_PAUSE_MS: optionalEnv(z.coerce.number().int().nonnegative().default(250)),
+  /**
+   * How long a 429 takes an endpoint out of the read pool, in milliseconds.
+   *
+   * Five minutes by default — a keyed provider's 429 means a spent monthly
+   * quota. Set it to seconds when the pool is running on the public cluster
+   * endpoint, whose 429 is a per-second throttle: with the five-minute
+   * default, one throttled burst took every read down for five minutes.
+   */
+  RPC_RATE_LIMIT_EJECTION_MS: optionalEnv(z.coerce.number().int().positive().default(5 * 60_000)),
   PROGRAM_ID: z.string().min(32),
   ORACLE_KEYPAIR_PATH: z.string(),
 
