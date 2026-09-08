@@ -133,8 +133,13 @@ async function bootstrap() {
     });
   });
 
-  // 10. Start background workers
-  registerWorkers(db, redis, config);
+  // 10. Start background workers — unless this process is the HTTP half of a
+  // deployment whose `monitor` container runs them.
+  if (config.WORKERS_ENABLED) {
+    registerWorkers(db, redis, config);
+  } else {
+    logger.info('Background workers disabled for this process (WORKERS_ENABLED=false)');
+  }
 
   // 11. Start server
   await app.listen({ port: config.PORT, host: '0.0.0.0' });

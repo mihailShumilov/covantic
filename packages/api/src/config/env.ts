@@ -219,6 +219,20 @@ export const envSchema = z.object({
     .preprocess((v) => (typeof v === 'string' ? v.toLowerCase() === 'true' : v), z.boolean())
     .default(false),
   /**
+   * Whether this process runs the background workers (crank, indexer,
+   * keeper, watchers) alongside the HTTP server.
+   *
+   * Defaults to on, which is what local development expects from one
+   * `pnpm dev`. Production runs a dedicated `monitor` container for the
+   * workers and sets this to false on `api`: with both processes registering
+   * every worker, each sweep and each crank tick ran twice, doubling the load
+   * on an endpoint pool that runs close to its quota and racing the crank
+   * against itself.
+   */
+  WORKERS_ENABLED: z
+    .preprocess((v) => (typeof v === 'string' ? v.toLowerCase() === 'true' : v), z.boolean())
+    .default(true),
+  /**
    * Cap on automatic payouts in a rolling hour, in USDC lamports. Zero
    * disables the breaker.
    *

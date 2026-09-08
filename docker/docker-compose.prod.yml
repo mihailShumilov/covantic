@@ -87,6 +87,9 @@ services:
       EXPLOIT_PROOF_ENABLED: ${EXPLOIT_PROOF_ENABLED:-false}
       GOVERNANCE_PROOF_ENABLED: ${GOVERNANCE_PROOF_ENABLED:-false}
       AGENT_ERROR_PROOF_ENABLED: ${AGENT_ERROR_PROOF_ENABLED:-false}
+      # The monitor container runs every background worker; this process only
+      # serves HTTP. Both registering the workers ran every sweep twice.
+      WORKERS_ENABLED: ${API_WORKERS_ENABLED:-false}
       # The public Hermes host answers 401 without a credential; unset, Pyth
       # simply drops out of the price consensus and says so in the bundle.
       PYTH_HERMES_URL: ${PYTH_HERMES_URL:-}
@@ -159,6 +162,7 @@ services:
       EXPLOIT_PROOF_ENABLED: ${EXPLOIT_PROOF_ENABLED:-false}
       GOVERNANCE_PROOF_ENABLED: ${GOVERNANCE_PROOF_ENABLED:-false}
       AGENT_ERROR_PROOF_ENABLED: ${AGENT_ERROR_PROOF_ENABLED:-false}
+      WORKERS_ENABLED: 'true'
       # The public Hermes host answers 401 without a credential; unset, Pyth
       # simply drops out of the price consensus and says so in the bundle.
       PYTH_HERMES_URL: ${PYTH_HERMES_URL:-}
