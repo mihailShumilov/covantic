@@ -8,7 +8,7 @@ import type { AppConfig } from '../config/env.js';
 import { claims, policies } from '../db/schema.js';
 import { logger } from '../utils/logger.js';
 import { createCovanticProgram, type CovanticProgram } from '../utils/program.js';
-import { fetchAllAnchorAccounts, fetchAnchorAccount } from '../utils/anchor-reader.js';
+import { fetchAllAnchorAccounts } from '../utils/anchor-reader.js';
 import { getSolanaReader, type SolanaReader } from '../utils/solana-reader.js';
 
 const QUEUE_NAME = 'policy-indexer';
@@ -246,23 +246,15 @@ async function reconcilePolicies(
   logger.debug({ count: accounts.length }, 'Policy indexer reconcile complete');
 }
 
-/** How many paid claims to label per tick — each costs up to four reads. */
+/** How many paid claims to label per tick. All of them share one read. */
 const PROOF_LABEL_BATCH = 25;
 
 /** Evidence account, per proof kind, that the settlement instruction creates. */
-const EVIDENCE_ACCOUNTS: ReadonlyArray<{ kind: ProofKind; seed: string; account: string }> = [
-  { kind: ProofKind.Price, seed: PDA_SEEDS.CLAIM_EVIDENCE, account: 'claimEvidenceRecord' },
-  { kind: ProofKind.Balance, seed: PDA_SEEDS.EXPLOIT_EVIDENCE, account: 'exploitEvidenceRecord' },
-  {
-    kind: ProofKind.Authority,
-    seed: PDA_SEEDS.GOVERNANCE_EVIDENCE,
-    account: 'governanceEvidenceRecord',
-  },
-  {
-    kind: ProofKind.Mandate,
-    seed: PDA_SEEDS.AGENT_ERROR_EVIDENCE,
-    account: 'agentErrorEvidenceRecord',
-  },
+const EVIDENCE_SEEDS: ReadonlyArray<{ kind: ProofKind; seed: string }> = [
+  { kind: ProofKind.Price, seed: PDA_SEEDS.CLAIM_EVIDENCE },
+  { kind: ProofKind.Balance, seed: PDA_SEEDS.EXPLOIT_EVIDENCE },
+  { kind: ProofKind.Authority, seed: PDA_SEEDS.GOVERNANCE_EVIDENCE },
+  { kind: ProofKind.Mandate, seed: PDA_SEEDS.AGENT_ERROR_EVIDENCE },
 ];
 
 /**
@@ -276,6 +268,11 @@ const EVIDENCE_ACCOUNTS: ReadonlyArray<{ kind: ProofKind; seed: string; account:
  * it does not. A `ClaimPaid` policy with no evidence account at all was paid
  * by the unverified instruction before it was removed, and is labelled
  * `unproven` so nothing downstream presents it as chain-checked.
+ *
+ * One `getMultipleAccounts` per tick for every candidate address — four per
+ * claim — rather than one read per address. The endpoint pool runs close to
+ * its quota, and a hundred single reads a minute from this one job was
+ * enough to eject every endpoint at boot.
  */
 async function labelProofKinds(
   db: Database,
@@ -302,38 +299,47 @@ async function labelProofKinds(
       ),
     )
     .limit(PROOF_LABEL_BATCH);
+  if (unlabelled.length === 0) return;
+
+  const programId = ctx.programId.toBase58();
+  const candidates = unlabelled.flatMap((row) => {
+    const policyPda = paidPolicies.get(row.policyId);
+    if (!policyPda) return [];
+    const policyKey = new PublicKey(policyPda);
+    return EVIDENCE_SEEDS.map(({ kind, seed }) => ({
+      claimId: row.id,
+      policyId: row.policyId,
+      kind,
+      address: PublicKey.findProgramAddressSync(
+        [Buffer.from(seed), policyKey.toBuffer()],
+        ctx.programId,
+      )[0].toBase58(),
+    }));
+  });
+
+  let infos: Array<{ owner: string } | null>;
+  try {
+    infos = await reader.getMultipleAccountsInfo(candidates.map((c) => c.address));
+  } catch (err) {
+    // An outage is not evidence of anything; try again next tick.
+    logger.warn({ err, claims: unlabelled.length }, 'policy-indexer: proof kinds unreadable');
+    return;
+  }
+
+  const found = new Map<string, ProofKind>();
+  candidates.forEach((candidate, i) => {
+    const info = infos[i];
+    if (info && info.owner === programId && !found.has(candidate.claimId)) {
+      found.set(candidate.claimId, candidate.kind);
+    }
+  });
 
   for (const row of unlabelled) {
-    const policyPda = paidPolicies.get(row.policyId);
-    if (!policyPda) continue;
-    let kind: ProofKind | null = null;
-    try {
-      kind = await resolveProofKind(ctx, reader, new PublicKey(policyPda));
-    } catch (err) {
-      // An outage is not evidence of anything; try again next tick.
-      logger.warn({ err, policyId: row.policyId }, 'policy-indexer: proof kind unreadable');
-      continue;
-    }
+    const kind = found.get(row.id) ?? ProofKind.Unproven;
     await db
       .update(claims)
       .set({ proofKind: kind, updatedAt: new Date() })
       .where(eq(claims.id, row.id));
     logger.info({ policyId: row.policyId, proofKind: kind }, 'policy-indexer: labelled proof kind');
   }
-}
-
-async function resolveProofKind(
-  ctx: CovanticProgram,
-  reader: SolanaReader,
-  policyPda: PublicKey,
-): Promise<ProofKind> {
-  for (const candidate of EVIDENCE_ACCOUNTS) {
-    const [address] = PublicKey.findProgramAddressSync(
-      [Buffer.from(candidate.seed), policyPda.toBuffer()],
-      ctx.programId,
-    );
-    const record = await fetchAnchorAccount(ctx, reader, candidate.account, address.toBase58());
-    if (record) return candidate.kind;
-  }
-  return ProofKind.Unproven;
 }

@@ -350,6 +350,17 @@ async function buyPolicy(
         [Buffer.from(PDA_SEEDS.CHECKPOINT), policyPda.toBuffer()],
         program.programId,
       )[0],
+      // Also written by the purchase: the first authority reading a governance
+      // payout proves a departure from, and the price terms an
+      // oracle-manipulation claim is bounded by.
+      authorityCheckpoint: PublicKey.findProgramAddressSync(
+        [Buffer.from(PDA_SEEDS.AUTHORITY_CHECKPOINT), policyPda.toBuffer()],
+        program.programId,
+      )[0],
+      priceTerms: PublicKey.findProgramAddressSync(
+        [Buffer.from(PDA_SEEDS.POLICY_PRICE_TERMS), policyPda.toBuffer()],
+        program.programId,
+      )[0],
       coveredTokenAccount: getAssociatedTokenAddressSync(usdcMint, agentPubkey),
       usdcMint,
       holderTokenAccount: holderAta,
