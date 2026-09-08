@@ -244,6 +244,18 @@ export const envSchema = z.object({
   AUTO_PAYOUT_HOURLY_LIMIT_RAW: optionalEnv(
     z.coerce.number().int().nonnegative().default(100_000_000_000),
   ),
+  /**
+   * Pause between agents inside one exploit sweep, in milliseconds.
+   *
+   * A sweep reads signatures, balances and a checkpoint write for every
+   * insured agent, three or four calls each, and it used to fire them
+   * back to back: twenty agents made seventy calls in a couple of seconds,
+   * which the public devnet endpoint answers with 429 and the pool then
+   * ejects. Spreading the agents over the tick keeps the same work under the
+   * endpoint's per-second limit. Raise it when the pool is down to the public
+   * endpoint; the sweep interval bounds how far it can go.
+   */
+  EXPLOIT_SWEEP_AGENT_PAUSE_MS: optionalEnv(z.coerce.number().int().nonnegative().default(250)),
   PROGRAM_ID: z.string().min(32),
   ORACLE_KEYPAIR_PATH: z.string(),
 
