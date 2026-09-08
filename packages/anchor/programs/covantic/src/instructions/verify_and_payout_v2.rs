@@ -1,11 +1,13 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Token, TokenAccount, Transfer};
-use pyth_solana_receiver_sdk::price_update::PriceUpdateV2;
+use pyth_solana_receiver_sdk::price_update::{PriceUpdateV2, VerificationLevel};
 
 use crate::constants::*;
 use crate::errors::CovanticError;
 use crate::events::{ClaimPaid, ClaimProofVerified};
-use crate::state::{ClaimEvidenceRecord, InsurancePolicy, InsuranceVault, ProtocolConfig};
+use crate::state::{
+    ClaimEvidenceRecord, InsurancePolicy, InsuranceVault, PolicyPriceTerms, ProtocolConfig,
+};
 
 /// What the oracle commits to when claiming an oracle-manipulation loss.
 ///
@@ -45,11 +47,14 @@ pub struct PayoutEvidence {
 ///
 /// What remains trusted, stated plainly: the chain cannot read the historical
 /// swap, so `executed_price`, `subject_quantity` and `trigger_block_time` are
-/// asserted by the oracle rather than proven. Three things constrain them —
-/// they are committed on chain, `bundle_hash` binds them to a published
-/// evidence bundle anyone can recompute, and the lock period leaves a window
-/// in which a contradicting bundle can be produced. A false commitment is
-/// therefore permanent and publicly falsifiable, rather than invisible.
+/// asserted by the oracle rather than proven. Four things constrain them —
+/// the feed, the decimals and the largest quantity are fixed per policy in
+/// `PolicyPriceTerms` at purchase, so the oracle cannot reach for an
+/// unrelated market or an invented position; they are committed on chain;
+/// `bundle_hash` binds them to a published evidence bundle anyone can
+/// recompute; and the lock period leaves a window in which a contradicting
+/// bundle can be produced. A false commitment is therefore bounded,
+/// permanent and publicly falsifiable, rather than invisible.
 pub fn verify_and_payout_v2_handler(
     ctx: Context<VerifyAndPayoutV2>,
     payout_amount: u64,
@@ -67,6 +72,7 @@ pub fn verify_and_payout_v2_handler(
         ctx.accounts.oracle.key() == config.oracle_authority,
         CovanticError::UnauthorizedOracle
     );
+    policy.assert_readable()?;
     require!(
         policy.state == InsurancePolicy::STATE_CLAIM_PENDING,
         CovanticError::PolicyNotClaimPending
@@ -77,6 +83,34 @@ pub fn verify_and_payout_v2_handler(
     require!(
         policy.trigger_type == TRIGGER_ORACLE_MANIPULATION,
         CovanticError::InvalidTriggerType
+    );
+
+    // The record this instruction leaves behind is only worth something if
+    // the hash in it commits to a bundle somebody can go and check. A zero is
+    // not a commitment; it is the field left blank.
+    require!(
+        evidence.bundle_hash != [0u8; 32],
+        CovanticError::EvidenceBundleHashMissing
+    );
+
+    // ---- the policy's own terms ------------------------------------------
+    // Which price, for what, and how much of it: all three were fixed by the
+    // oracle-signed attestation the policy was bought against, and none may
+    // be chosen again now. Without this the oracle picked the feed at
+    // settlement, and any genuine feed that had moved would do.
+    let terms = &ctx.accounts.price_terms;
+    require!(terms.is_priced(), CovanticError::PolicyPriceTermsMissing);
+    require!(
+        evidence.feed_id == terms.feed_id,
+        CovanticError::PriceEvidenceFeedMismatch
+    );
+    require!(
+        evidence.subject_decimals == terms.subject_decimals,
+        CovanticError::PriceEvidenceFeedMismatch
+    );
+    require!(
+        evidence.subject_quantity <= terms.max_subject_quantity,
+        CovanticError::SubjectQuantityExceedsPolicy
     );
 
     require!(
@@ -96,6 +130,18 @@ pub fn verify_and_payout_v2_handler(
     require!(now >= lock_expires_at, CovanticError::LockPeriodNotElapsed);
 
     // ---- price evidence ------------------------------------------------
+    // Only an update the receiver verified against two thirds of the guardian
+    // set counts as guardian-signed. `PriceUpdateV2` also admits `Partial`
+    // updates, checked against however many signatures the poster chose to
+    // supply — as few as one — and the receiver stores which it was. Reading
+    // a partial update as proof would let a small colluding subset of
+    // guardians, together with the oracle, put a false reference price behind
+    // a payout and record it as though the quorum had signed it.
+    require!(
+        ctx.accounts.price_update.verification_level == VerificationLevel::Full,
+        CovanticError::PriceEvidenceNotFullyVerified
+    );
+
     // `get_price_unchecked`, not `get_price_no_older_than`: the recency check
     // that helper performs is against the *current* clock, and every claim
     // here is retrospective by construction — the transaction under review
@@ -141,12 +187,18 @@ pub fn verify_and_payout_v2_handler(
     );
 
     // ---- recompute the deviation ----------------------------------------
-    require!(evidence.executed_price > 0, CovanticError::InvalidPriceEvidence);
+    require!(
+        evidence.executed_price > 0,
+        CovanticError::InvalidPriceEvidence
+    );
     require!(
         evidence.subject_decimals <= MAX_SUBJECT_DECIMALS,
         CovanticError::InvalidPriceEvidence
     );
-    require!(evidence.subject_quantity > 0, CovanticError::InvalidPriceEvidence);
+    require!(
+        evidence.subject_quantity > 0,
+        CovanticError::InvalidPriceEvidence
+    );
 
     let reference = price.price;
     let delta = (evidence.executed_price - reference).unsigned_abs() as u128;
@@ -324,6 +376,17 @@ pub struct VerifyAndPayoutV2<'info> {
     /// guardians' signatures. A fabricated account fails deserialization
     /// before any of the logic above runs.
     pub price_update: Box<Account<'info, PriceUpdateV2>>,
+
+    /// The feed, decimals and quantity bound fixed for this policy at
+    /// purchase. A policy bought before terms existed has no such account,
+    /// and the instruction fails to load rather than settle a price for an
+    /// asset nobody attested.
+    #[account(
+        seeds = [POLICY_PRICE_TERMS_SEED, policy.key().as_ref()],
+        bump = price_terms.bump,
+        constraint = price_terms.policy_id == policy.policy_id @ CovanticError::PolicyPriceTermsMissing,
+    )]
+    pub price_terms: Box<Account<'info, PolicyPriceTerms>>,
 
     /// Immutable record of what was proven. `init` rather than
     /// `init_if_needed`: one policy, one proven payout, and a second attempt

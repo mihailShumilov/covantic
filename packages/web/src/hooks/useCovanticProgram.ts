@@ -107,6 +107,30 @@ export function deriveBalanceCheckpointPda(policy: PublicKey): PublicKey {
   )[0];
 }
 
+/**
+ * The first authority reading, written by the purchase itself.
+ *
+ * A governance payout needs a checkpointed reading with control *inside* the
+ * declared set to prove a departure from; the purchase provides the strongest
+ * one there is, since the program verified the covered account's owner is the
+ * agent while loading it.
+ */
+export function deriveAuthorityCheckpointPda(policy: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('covantic_authority_checkpoint'), policy.toBuffer()],
+    getProgramId(),
+  )[0];
+}
+
+/** The feed, decimals and quantity bound an oracle-manipulation claim on this
+ *  policy may be settled against, copied from the attestation at purchase. */
+export function derivePolicyPriceTermsPda(policy: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('covantic_price_terms'), policy.toBuffer()],
+    getProgramId(),
+  )[0];
+}
+
 export function deriveAttestationPda(agent: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync(
     [ATTESTATION_SEED, agent.toBuffer()],

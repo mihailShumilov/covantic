@@ -44,6 +44,10 @@ export const PDA_SEEDS = {
   /** One agent-error evidence record per policy, written by
    *  verify_and_payout_agent_error. */
   AGENT_ERROR_EVIDENCE: 'covantic_agent_error_evidence',
+  /** One price-terms record per policy, written by `create_policy` from the
+   *  oracle-signed attestation: the feed, decimals and quantity bound an
+   *  oracle-manipulation claim may be settled against. */
+  POLICY_PRICE_TERMS: 'covantic_price_terms',
 } as const;
 
 /**
@@ -200,8 +204,21 @@ export const GOVERNANCE_BASELINE_DELAY_SECONDS = 3600;
 /**
  * How long after a takeover a loss still counts as part of it (seconds).
  * Keep in sync with `GOVERNANCE_DRAIN_WINDOW` in the Anchor program.
+ *
+ * Enforced on chain: `verify_and_payout_governance` refuses a pre-incident
+ * authority checkpoint older than this at the moment the claim was filed, so
+ * the authority crank has to tick well inside it for a governance claim to be
+ * provable.
  */
 export const GOVERNANCE_DRAIN_WINDOW_SECONDS = 30 * 60;
+
+/**
+ * How long a pending claim may stay unresolved past its lock before the
+ * permissionless expiry crank may close the policy and release its coverage
+ * (seconds). Keep in sync with `CLAIM_RESOLUTION_GRACE` in the Anchor
+ * program.
+ */
+export const CLAIM_RESOLUTION_GRACE_SECONDS = 7 * 24 * 3600;
 
 /**
  * Oldest an authority checkpoint may be and still bound a governance payout

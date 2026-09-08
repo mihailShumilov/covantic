@@ -23,7 +23,7 @@ pub const REWARD_PER_STAKE_SCALE: u128 = 1_000_000_000_000; // 1e12
 pub const LOSS_INDEX_SCALE: u128 = 1_000_000_000_000; // 1e12
 
 /// Insurance pool vault.
-/// PDA: seeds = [b"vault"]
+/// PDA: seeds = [VAULT_SEED], where `VAULT_SEED` is `b"covantic_vault"` (see `constants.rs`).
 /// ONE per protocol.
 #[account]
 #[derive(InitSpace)]
@@ -198,7 +198,6 @@ impl InsuranceVault {
         Ok(())
     }
 }
-
 
 #[cfg(test)]
 mod tests {

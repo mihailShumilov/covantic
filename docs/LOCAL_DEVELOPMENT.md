@@ -73,7 +73,7 @@ to supply third-party keys.
 | `SOLANA_RPC_URL`, `SOLANA_NETWORK` | Devnet RPC and network label |
 | `PROGRAM_ID` | Written by `init:devnet` |
 | `USDC_MINT` | Written by `init:devnet` on first run |
-| `ORACLE_KEYPAIR_PATH` | Default `./keys/oracle-keypair.json` — signs `upsert_attestation`, `oracle_submit_claim`, `verify_and_payout`, and the on-chain `expire_policy` crank |
+| `ORACLE_KEYPAIR_PATH` | Default `./keys/oracle-keypair.json` — signs `upsert_attestation`, `oracle_submit_claim`, the proof-verifying payout instructions, and the on-chain `expire_policy` crank |
 | `HELIUS_API_KEY` | https://dev.helius.xyz/ |
 | `HELIUS_WEBHOOK_SECRET` | 64+ chars. The `/api/monitoring/webhook` endpoint accepts either HMAC-of-body or `Authorization: Bearer <secret>` — real Helius deliveries use the bearer path |
 | `WEBHOOK_PUBLIC_URL` | Only required when running `pnpm webhook:sync` (e.g. an ngrok / Cloudflare Tunnel URL) |

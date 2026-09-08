@@ -1129,6 +1129,96 @@
           }
         },
         {
+          "name": "authority_checkpoint",
+          "docs": [
+            "The first authority reading, taken by the purchase. See the handler.",
+            "`init_if_needed` for the same reason as `checkpoint`."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121,
+                  95,
+                  99,
+                  104,
+                  101,
+                  99,
+                  107,
+                  112,
+                  111,
+                  105,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "price_terms",
+          "docs": [
+            "The price terms fixed for this policy, copied from the attestation."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  112,
+                  114,
+                  105,
+                  99,
+                  101,
+                  95,
+                  116,
+                  101,
+                  114,
+                  109,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy"
+              }
+            ]
+          }
+        },
+        {
           "name": "covered_token_account",
           "docs": [
             "The agent's covered account, read only to bound the retention floor.",
@@ -1232,7 +1322,12 @@
         {
           "name": "holder_token_account",
           "docs": [
-            "Holder's USDC token account"
+            "Holder's USDC token account.",
+            "",
+            "Boxed, like everything else here: the purchase now initialises four",
+            "PDAs, and with these two token accounts on the stack `try_accounts`",
+            "overran the BPF frame by a few dozen bytes — which `anchor build`",
+            "reports and `cargo check` cannot."
           ],
           "writable": true
         },
@@ -1559,6 +1654,33 @@
           "signer": true
         },
         {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "policy",
           "pda": {
             "seeds": [
@@ -1594,6 +1716,18 @@
               }
             ]
           }
+        },
+        {
+          "name": "covered_token_account",
+          "docs": [
+            "The covered account the declaration is checked against, derived by",
+            "address for the reason `checkpoint_authority` gives: a declaration may",
+            "legitimately name an operator as the owner, and an ownership",
+            "constraint would refuse to load the account in exactly that case."
+          ]
+        },
+        {
+          "name": "usdc_mint"
         },
         {
           "name": "baseline",
@@ -1762,7 +1896,10 @@
     {
       "name": "expire_policy",
       "docs": [
-        "Mark expired policies (permissionless crank)."
+        "Mark expired policies (permissionless crank). Also closes a policy",
+        "whose claim was filed and never settled, once its lock and the",
+        "resolution grace have both elapsed, so a pending claim cannot reserve",
+        "coverage forever."
       ],
       "discriminator": [
         149,
@@ -2131,6 +2268,162 @@
         },
         {
           "name": "agent"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "migrate_authority_checkpoint",
+      "docs": [
+        "Grow an authority checkpoint to the current layout. Permissionless and",
+        "idempotent; required once per checkpoint written before this change."
+      ],
+      "discriminator": [
+        129,
+        151,
+        59,
+        22,
+        36,
+        57,
+        41,
+        178
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "checkpoint",
+          "docs": [
+            "Pinned by PDA seeds, and its discriminator is verified before it is",
+            "resized."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121,
+                  95,
+                  99,
+                  104,
+                  101,
+                  99,
+                  107,
+                  112,
+                  111,
+                  105,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "policy"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "migrate_governance_baseline",
+      "docs": [
+        "Grow a governance baseline to the current layout, so the whole",
+        "predecessor declaration can be retained. Permissionless and idempotent;",
+        "required once per baseline declared before this change."
+      ],
+      "discriminator": [
+        126,
+        64,
+        34,
+        199,
+        242,
+        198,
+        147,
+        82
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "baseline",
+          "docs": [
+            "by PDA seeds, and its discriminator is verified before it is resized."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  103,
+                  111,
+                  118,
+                  95,
+                  98,
+                  97,
+                  115,
+                  101,
+                  108,
+                  105,
+                  110,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "policy"
         },
         {
           "name": "system_program",
@@ -2961,157 +3254,14 @@
         {
           "name": "envelope_flat_premium",
           "type": "u64"
-        }
-      ]
-    },
-    {
-      "name": "verify_and_payout",
-      "docs": [
-        "Verify a claim and execute payout (oracle only)."
-      ],
-      "discriminator": [
-        31,
-        127,
-        176,
-        128,
-        240,
-        238,
-        14,
-        91
-      ],
-      "accounts": [
-        {
-          "name": "oracle",
-          "docs": [
-            "Oracle authority (signer)"
-          ],
-          "writable": true,
-          "signer": true
         },
         {
-          "name": "config",
-          "docs": [
-            "Protocol config (to verify oracle authority)"
-          ],
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  118,
-                  97,
-                  110,
-                  116,
-                  105,
-                  99,
-                  95,
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
+          "name": "price_terms",
+          "type": {
+            "defined": {
+              "name": "AttestedPriceTerms"
+            }
           }
-        },
-        {
-          "name": "policy",
-          "docs": [
-            "The policy with a pending claim (validated via PDA seeds)"
-          ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  118,
-                  97,
-                  110,
-                  116,
-                  105,
-                  99,
-                  95,
-                  112,
-                  111,
-                  108,
-                  105,
-                  99,
-                  121
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "policy.holder",
-                "account": "InsurancePolicy"
-              },
-              {
-                "kind": "account",
-                "path": "policy.policy_id",
-                "account": "InsurancePolicy"
-              }
-            ]
-          }
-        },
-        {
-          "name": "vault",
-          "docs": [
-            "Insurance vault"
-          ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  118,
-                  97,
-                  110,
-                  116,
-                  105,
-                  99,
-                  95,
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "vault_token_account",
-          "docs": [
-            "Vault USDC token account (must belong to vault and be USDC mint)"
-          ],
-          "writable": true
-        },
-        {
-          "name": "holder_token_account",
-          "docs": [
-            "Holder USDC token account (must belong to policy holder and be USDC mint)"
-          ],
-          "writable": true
-        },
-        {
-          "name": "token_program",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-        }
-      ],
-      "args": [
-        {
-          "name": "payout_amount",
-          "type": "u64"
         }
       ]
     },
@@ -3121,7 +3271,7 @@
         "Verify an agent-error claim against the holder's declared mandate and",
         "a balance drop the program measures, and execute payout.",
         "",
-        "Prefer this over `verify_and_payout` for TRIGGER_AGENT_ERROR. The",
+        "The only settlement path for TRIGGER_AGENT_ERROR. The",
         "program re-reads the covered token account, compares the drop against",
         "an envelope the holder signed for before the claim was filed, and",
         "refuses to pay more than the overshoot. It settles only breaches it",
@@ -3511,7 +3661,7 @@
         "Verify an exploit claim against a balance drop the program measures",
         "for itself, and execute payout.",
         "",
-        "Prefer this over `verify_and_payout` for TRIGGER_EXPLOIT. The program",
+        "The only settlement path for TRIGGER_EXPLOIT. The program",
         "re-reads the covered token account and refuses to pay more than the",
         "difference from its own earlier checkpoint, so the oracle cannot",
         "assert a loss that did not happen. What it still asserts — that the",
@@ -4141,9 +4291,10 @@
         "Verify an oracle-manipulation claim against a guardian-signed Pyth",
         "price and execute payout.",
         "",
-        "Prefer this over `verify_and_payout` for TRIGGER_ORACLE_MANIPULATION.",
-        "The program checks the reference price itself instead of trusting the",
-        "oracle's word for it, and records what it verified in a",
+        "The only settlement path for TRIGGER_ORACLE_MANIPULATION. The program",
+        "checks the reference price itself instead of trusting the oracle's",
+        "word for it, requires the feed and asset to be the ones fixed for the",
+        "policy at purchase, and records what it verified in a",
         "`ClaimEvidenceRecord` PDA so the payout stays auditable afterwards."
       ],
       "discriminator": [
@@ -4273,6 +4424,48 @@
             "guardians' signatures. A fabricated account fails deserialization",
             "before any of the logic above runs."
           ]
+        },
+        {
+          "name": "price_terms",
+          "docs": [
+            "The feed, decimals and quantity bound fixed for this policy at",
+            "purchase. A policy bought before terms existed has no such account,",
+            "and the instruction fails to load rather than settle a price for an",
+            "asset nobody attested."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  118,
+                  97,
+                  110,
+                  116,
+                  105,
+                  99,
+                  95,
+                  112,
+                  114,
+                  105,
+                  99,
+                  101,
+                  95,
+                  116,
+                  101,
+                  114,
+                  109,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy"
+              }
+            ]
+          }
         },
         {
           "name": "evidence_record",
@@ -4486,6 +4679,19 @@
         25,
         174,
         76
+      ]
+    },
+    {
+      "name": "PolicyPriceTerms",
+      "discriminator": [
+        134,
+        34,
+        227,
+        21,
+        129,
+        221,
+        8,
+        156
       ]
     },
     {
@@ -4872,7 +5078,7 @@
     {
       "code": 6013,
       "name": "InvalidTriggerTxSignature",
-      "msg": "Trigger transaction signature length exceeds the on-chain buffer"
+      "msg": "Trigger transaction signature must be the Base58 encoding of one 64-byte signature"
     },
     {
       "code": 6014,
@@ -5123,6 +5329,66 @@
       "code": 6063,
       "name": "ZeroPayout",
       "msg": "Payout amount must be greater than zero"
+    },
+    {
+      "code": 6064,
+      "name": "PriceEvidenceNotFullyVerified",
+      "msg": "Price update was not verified by the full guardian quorum"
+    },
+    {
+      "code": 6065,
+      "name": "EvidenceBundleHashMissing",
+      "msg": "Evidence bundle hash must be a real commitment, not zero"
+    },
+    {
+      "code": 6066,
+      "name": "UnsupportedPolicyVersion",
+      "msg": "Policy account schema version is not supported by this program"
+    },
+    {
+      "code": 6067,
+      "name": "InvalidPolicyState",
+      "msg": "Policy account carries an out-of-range state or trigger byte"
+    },
+    {
+      "code": 6068,
+      "name": "UnsupportedGovernanceRole",
+      "msg": "Governance baseline declares a role this program cannot observe or settle"
+    },
+    {
+      "code": 6069,
+      "name": "GovernanceBaselineNotBoundToAccount",
+      "msg": "Covered account is not inside the declared set at declaration time"
+    },
+    {
+      "code": 6070,
+      "name": "AuthorityTransitionUnproven",
+      "msg": "No checkpointed reading shows control inside the declared set before the claim"
+    },
+    {
+      "code": 6071,
+      "name": "AuthorityCheckpointOutsideDrainWindow",
+      "msg": "Pre-incident authority checkpoint is older than the governance drain window"
+    },
+    {
+      "code": 6072,
+      "name": "PolicyPriceTermsMissing",
+      "msg": "No price terms were fixed for this policy at purchase"
+    },
+    {
+      "code": 6073,
+      "name": "PriceEvidenceFeedMismatch",
+      "msg": "Price evidence names a feed or asset the policy does not insure"
+    },
+    {
+      "code": 6074,
+      "name": "SubjectQuantityExceedsPolicy",
+      "msg": "Subject quantity exceeds what the policy's price terms allow"
+    },
+    {
+      "code": 6075,
+      "name": "InvalidPriceTerms",
+      "msg": "Attested price terms are malformed"
     }
   ],
   "types": [
@@ -5274,7 +5540,7 @@
             "name": "breach_kind",
             "docs": [
               "Which declared bound was crossed. See `BREACH_OUTFLOW_CAP` /",
-              "`BREACH_RETAINED_FLOOR` in the instruction module."
+              "`BREACH_RETAINED_FLOOR` in `constants.rs`."
             ],
             "type": "u8"
           },
@@ -5570,6 +5836,42 @@
           {
             "name": "expires_at",
             "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AttestedPriceTerms",
+      "docs": [
+        "The price terms as the oracle attests them.",
+        "",
+        "Either wholly absent — every field zero, meaning the oracle priced no",
+        "oracle-manipulation cover for this agent — or wholly present. A partial",
+        "declaration is refused rather than interpreted."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "feed_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "subject_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "subject_decimals",
+            "type": "u8"
+          },
+          {
+            "name": "max_subject_quantity",
+            "type": "u64"
           }
         ]
       }
@@ -6095,7 +6397,7 @@
         "to control the agent. \"Was this authorised?\" stops being an inference and",
         "becomes a set membership test the program performs for itself.",
         "",
-        "Two properties carry the weight:",
+        "Three properties carry the weight:",
         "",
         "**Maturity.** `effective_at` sits `GOVERNANCE_BASELINE_DELAY` in the",
         "future. A declaration that could be created and claimed against in the",
@@ -6103,9 +6405,18 @@
         "declare a fresh one. With the delay, a fraudulent claim requires",
         "pre-committing on chain, an hour early, to a lie anyone can later read.",
         "",
-        "**Retention.** `prev_*` keeps the declaration this one replaced, for the",
-        "same reason `PolicyBalanceCheckpoint` does: a rotation landing between the",
-        "takeover and the claim must not erase the only usable \"before\"."
+        "**Binding.** A declaration is only accepted while the covered account is",
+        "inside the set it declares. A holder cannot hand the account to an outside",
+        "key first and describe the agent as its rightful owner afterwards.",
+        "",
+        "**Retention.** `prev_*` keeps the *whole* declaration this one replaced,",
+        "for the same reason `PolicyBalanceCheckpoint` does: a rotation landing",
+        "between the takeover and the claim must not erase the only usable",
+        "\"before\". Keeping only the previous owner, as this account once did, left",
+        "settlement unable to reconstruct the declaration that was actually in",
+        "force when the claim was filed — so a refresh before filing made a mature",
+        "baseline unusable, and the Active-only declaration rule made it",
+        "unrepairable."
       ],
       "type": {
         "kind": "struct",
@@ -6143,7 +6454,11 @@
           {
             "name": "program_upgrade_authority",
             "docs": [
-              "Upgrade authority of the agent's own program, when it runs one."
+              "Upgrade authority of the agent's own program. **Refused when set**:",
+              "the checkpoint reads a token account and cannot observe a program's",
+              "authority, so a declaration naming one would present coverage the",
+              "settlement path cannot adjudicate. Kept in the layout for the accounts",
+              "already written."
             ],
             "type": {
               "option": "pubkey"
@@ -6152,7 +6467,8 @@
           {
             "name": "controller",
             "docs": [
-              "Multisig / Squads config account governing the agent."
+              "Multisig / Squads config account governing the agent. Refused when",
+              "set, for the same reason."
             ],
             "type": {
               "option": "pubkey"
@@ -6161,10 +6477,7 @@
           {
             "name": "controller_min_threshold",
             "docs": [
-              "Threshold that config must not fall below. Recorded rather than",
-              "enforced: the program cannot decode a Squads config, and pretending",
-              "otherwise would be worse than committing to the number and leaving the",
-              "check to a reader who can."
+              "Refused when non-zero, for the same reason."
             ],
             "type": "u16"
           },
@@ -6226,6 +6539,48 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "prev_expected_delegate",
+            "docs": [
+              "The rest of the replaced declaration, so it can be reconstructed",
+              "whole at settlement."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "prev_expected_close_authority",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "prev_extra_authorities",
+            "type": {
+              "array": [
+                "pubkey",
+                4
+              ]
+            }
+          },
+          {
+            "name": "prev_extra_authority_count",
+            "type": "u8"
+          },
+          {
+            "name": "prev_manifest_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "prev_declared_at",
+            "type": "i64"
           }
         ]
       }
@@ -6325,7 +6680,7 @@
             "name": "departure_kind",
             "docs": [
               "Which departure the payout rests on, for a reader who does not want to",
-              "re-derive it. See `GovernanceDeparture` in the instruction."
+              "re-derive it. See `DEPARTURE_*` in `constants.rs`."
             ],
             "type": "u8"
           },
@@ -6437,18 +6792,27 @@
           },
           {
             "name": "program_upgrade_authority",
+            "docs": [
+              "Must be `None`. See `GovernanceBaseline::program_upgrade_authority`."
+            ],
             "type": {
               "option": "pubkey"
             }
           },
           {
             "name": "controller",
+            "docs": [
+              "Must be `None`. See `GovernanceBaseline::controller`."
+            ],
             "type": {
               "option": "pubkey"
             }
           },
           {
             "name": "controller_min_threshold",
+            "docs": [
+              "Must be zero."
+            ],
             "type": "u16"
           },
           {
@@ -6577,7 +6941,8 @@
       "name": "InsurancePolicy",
       "docs": [
         "AI agent insurance policy.",
-        "PDA: seeds = [b\"policy\", holder.key().as_ref(), &policy_id.to_le_bytes()]"
+        "PDA: seeds = [POLICY_SEED, holder.key().as_ref(), &policy_id.to_le_bytes()],",
+        "where `POLICY_SEED` is `b\"covantic_policy\"` (see `constants.rs`)."
       ],
       "type": {
         "kind": "struct",
@@ -6585,7 +6950,14 @@
           {
             "name": "version",
             "docs": [
-              "Schema version for forward-compatible deserialization"
+              "Schema version for forward-compatible deserialization.",
+              "",
+              "Enforced, not merely recorded: every instruction that reads a policy",
+              "calls [`InsurancePolicy::assert_readable`] first, so a byte layout this",
+              "program was not written for is refused before any state transition",
+              "runs. Growing this account is therefore a two-step change — bump",
+              "`CURRENT_VERSION` and add a `migrate_policy` instruction — rather than",
+              "a field appended and hoped for."
             ],
             "type": "u8"
           },
@@ -6673,7 +7045,12 @@
             "name": "trigger_tx_signature",
             "docs": [
               "Trigger transaction signature stored as Base58 UTF-8 bytes.",
-              "A Solana signature is 88 Base58 chars at most."
+              "",
+              "Validated on write by [`InsurancePolicy::validate_trigger_signature`]:",
+              "the bytes must be the Base58 encoding of exactly one 64-byte Solana",
+              "signature, so every consumer can decode this field as a transaction",
+              "identity rather than as an opaque blob. 88 Base58 characters is the",
+              "most a 64-byte value can take."
             ],
             "type": "bytes"
           },
@@ -6698,7 +7075,7 @@
       "name": "InsuranceVault",
       "docs": [
         "Insurance pool vault.",
-        "PDA: seeds = [b\"vault\"]",
+        "PDA: seeds = [VAULT_SEED], where `VAULT_SEED` is `b\"covantic_vault\"` (see `constants.rs`).",
         "ONE per protocol."
       ],
       "type": {
@@ -7127,9 +7504,20 @@
         "agent's control without moving a single token. The balance is",
         "unchanged, so a subtraction reads zero.",
         "- **Freeze.** The account is still the agent's and still full, and the",
-        "agent can no longer touch it.",
+        "agent can no longer act.",
         "",
-        "Both are visible here, because both are fields on the token account."
+        "Both are visible here, because both are fields on the token account.",
+        "",
+        "**What `prev_*` means, precisely.** It is the reading taken immediately",
+        "before the most recent *change in who controls the account* — owner,",
+        "delegate, close authority or frozen flag — not merely the previous tick.",
+        "A rolling \"last reading\" was the wrong shape twice over: the crank ticks",
+        "every couple of minutes, so two ticks after a takeover the pre-takeover",
+        "reading was gone entirely, and any caller could erase the evidence of a",
+        "freeze on purpose by checkpointing a frozen account twice.",
+        "`checkpoint_authority` therefore advances `prev_*` only when the authority",
+        "tuple it observes differs from the one it stored, and holds it otherwise.",
+        "A first reading has no predecessor and says so with `prev_slot == 0`."
       ],
       "type": {
         "kind": "struct",
@@ -7189,9 +7577,7 @@
           {
             "name": "prev_owner",
             "docs": [
-              "The reading this one replaced. Without it, a crank tick landing after",
-              "a takeover would overwrite the only pre-incident record of who was in",
-              "charge — exactly the hole `prev_*` closes on the balance path."
+              "The reading before the last change of control. See the account docs."
             ],
             "type": "pubkey"
           },
@@ -7220,6 +7606,16 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "prev_close_authority",
+            "docs": [
+              "Close authority at the predecessor reading. Without it a pre-existing",
+              "foreign close authority could be presented as one that arrived later."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
           }
         ]
       }
@@ -7380,6 +7776,88 @@
       }
     },
     {
+      "name": "PolicyPriceTerms",
+      "docs": [
+        "The asset an oracle-manipulation claim on a policy may be priced against,",
+        "fixed at purchase and never changed.",
+        "",
+        "`verify_and_payout_v2` proves a *price*: it reads a guardian-signed Pyth",
+        "update and refuses to pay more than the deviation from it can account for.",
+        "What it could not do before this account existed was say which price. The",
+        "feed, the quantity and the decimals all arrived in the oracle's evidence",
+        "and were checked only against each other, so a compromised oracle key could",
+        "pick any genuine feed that happened to have moved, assert a position in it,",
+        "and produce a loss bound that reached the coverage — for an asset the agent",
+        "never held.",
+        "",
+        "The terms are attested by the oracle *before* the purchase, in the same",
+        "`RiskAttestation` that fixes the tier and prices the envelope, and copied",
+        "here by `create_policy`. A holder cannot choose them and the oracle cannot",
+        "change them afterwards. At settlement the evidence must name this feed,",
+        "this many decimals, and a quantity no larger than the bound recorded here.",
+        "",
+        "A policy whose attestation carried no terms (`feed_id` all zero) is not",
+        "covered for oracle manipulation on the proof path: the instruction refuses",
+        "it, and the claim goes to a reviewer.",
+        "",
+        "Kept in its own PDA rather than as new fields on `InsurancePolicy`, for the",
+        "reason `ClaimEvidenceRecord` gives: growing a live account type forces a",
+        "migration of every policy already on chain."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "policy_id",
+            "type": "u64"
+          },
+          {
+            "name": "holder",
+            "type": "pubkey"
+          },
+          {
+            "name": "feed_id",
+            "docs": [
+              "Pyth feed the reference price must come from. All zero when the policy",
+              "carries no oracle-manipulation terms."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "subject_mint",
+            "docs": [
+              "The asset that feed prices, so a reader can tie the feed to a mint."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "subject_decimals",
+            "docs": [
+              "Decimals the evidence must scale the subject quantity with."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "max_subject_quantity",
+            "docs": [
+              "Largest subject quantity a claim may assert, in the subject's base",
+              "units. Bounds what the oracle can multiply a deviation by."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
       "name": "PriceFeedMessage",
       "repr": {
         "kind": "c"
@@ -7491,7 +7969,7 @@
       "name": "ProtocolConfig",
       "docs": [
         "Global protocol configuration.",
-        "PDA: seeds = [b\"config\"]",
+        "PDA: seeds = [CONFIG_SEED], where `CONFIG_SEED` is `b\"covantic_config\"` (see `constants.rs`).",
         "Created ONCE during initialization."
       ],
       "type": {
@@ -7507,7 +7985,8 @@
           {
             "name": "oracle_authority",
             "docs": [
-              "Oracle authority — only account allowed to call verify_and_payout"
+              "Oracle authority — the only signer allowed to file claims on behalf of",
+              "holders and to call the proof-verifying payout instructions"
             ],
             "type": "pubkey"
           },
@@ -7669,6 +8148,34 @@
               "PDA bump"
             ],
             "type": "u8"
+          },
+          {
+            "name": "insured_feed_id",
+            "docs": [
+              "The asset an oracle-manipulation claim on a policy bought against this",
+              "attestation may be priced with. All zero when the oracle priced no",
+              "such cover. Copied into `PolicyPriceTerms` at purchase; see that",
+              "account for why the terms are fixed here rather than chosen by the",
+              "oracle at settlement."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "subject_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "subject_decimals",
+            "type": "u8"
+          },
+          {
+            "name": "max_subject_quantity",
+            "type": "u64"
           }
         ]
       }
@@ -7700,7 +8207,7 @@
       "name": "StakerPosition",
       "docs": [
         "Staker position in the insurance pool.",
-        "PDA: seeds = [b\"staker\", staker.key().as_ref()]",
+        "PDA: seeds = [STAKER_SEED, staker.key().as_ref()], where `STAKER_SEED` is `b\"covantic_staker\"` (see `constants.rs`).",
         "One account per staker."
       ],
       "type": {

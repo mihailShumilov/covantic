@@ -40,7 +40,10 @@ pub fn update_config_handler(
     }
     if let Some(multiplier) = new_premium_multiplier_bps {
         // Bound the multiplier so a misfire can't 100x premiums.
-        require!(multiplier >= 5000 && multiplier <= 30000, CovanticError::InvalidRiskTier);
+        require!(
+            multiplier >= 5000 && multiplier <= 30000,
+            CovanticError::InvalidRiskTier
+        );
         config.premium_multiplier_bps = multiplier;
     }
 

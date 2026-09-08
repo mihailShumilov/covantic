@@ -22,8 +22,8 @@ src/
     cancel_policy.rs      — 80% pro-rata refund via vault PDA signer
     submit_claim.rs       — Holder-filed claim path (sets ClaimPending)
     oracle_submit_claim.rs — Oracle-driven claim path (auto-claim pipeline entry)
-    verify_and_payout.rs  — Oracle-only, lock period check, CPI payout to holder ATA
-    expire_policy.rs      — Permissionless crank, time check (called by workers/expiry-crank.ts)
+    expire_policy.rs      — Permissionless crank, time check (called by workers/expiry-crank.ts);
+                            also closes a ClaimPending policy once lock + CLAIM_RESOLUTION_GRACE elapsed
     stake.rs              — USDC deposit, crystallize pending rewards first
     unstake.rs            — Two-phase: request (timestamp) + execute (48h cooldown)
     claim_rewards.rs      — Pull rewards via the per-stake accumulator
@@ -35,6 +35,9 @@ src/
     verify_and_payout_governance.rs — Bounds payout by a departure the program observes
     declare_agent_mandate.rs        — Holder-signed operating envelope, matures on a delay
     verify_and_payout_agent_error.rs — Bounds payout by the overshoot past that envelope
+    migrate.rs            — grow_to() migrations: vault, staker, attestation, governance baseline,
+                            authority checkpoint
+  state/price_terms.rs    — PolicyPriceTerms PDA (feed, mint, decimals, quantity bound fixed at purchase)
 ```
 
 ## Governance Proof Path

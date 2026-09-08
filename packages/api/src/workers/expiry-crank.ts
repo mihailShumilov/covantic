@@ -2,7 +2,13 @@ import { Queue, Worker } from 'bullmq';
 import type Redis from 'ioredis';
 import { and, asc, eq, lt } from 'drizzle-orm';
 import { PublicKey } from '@solana/web3.js';
-import { PDA_SEEDS, PolicyState } from '@covantic/shared';
+import {
+  CLAIM_RESOLUTION_GRACE_SECONDS,
+  LOCK_PERIODS,
+  PDA_SEEDS,
+  PolicyState,
+  TriggerType,
+} from '@covantic/shared';
 import type { Database } from '../config/database.js';
 import type { AppConfig } from '../config/env.js';
 import { policies } from '../db/schema.js';
@@ -83,9 +89,43 @@ export function startExpiryCrank(db: Database, redis: Redis, config: AppConfig) 
   return worker;
 }
 
+/**
+ * The lock the program applies to a filed trigger. Mirrors
+ * `InsurancePolicy::lock_period`; an unknown trigger is treated as the longest
+ * lock, so the crank can only ever be late, never early.
+ */
+function lockSecondsFor(triggerType: number): number {
+  switch (triggerType) {
+    case TriggerType.Exploit:
+      return LOCK_PERIODS.EXPLOIT;
+    case TriggerType.OracleManipulation:
+      return LOCK_PERIODS.ORACLE_MANIPULATION;
+    case TriggerType.AgentError:
+      return LOCK_PERIODS.AGENT_ERROR;
+    case TriggerType.GovernanceAttack:
+      return LOCK_PERIODS.GOVERNANCE_ATTACK;
+    default:
+      return Math.max(...Object.values(LOCK_PERIODS));
+  }
+}
+
+/**
+ * A `ClaimPending` policy the program will now let the crank close: past its
+ * expiry, past its trigger's lock, and past `CLAIM_RESOLUTION_GRACE` on top.
+ * Such a claim used to reserve its coverage forever — nothing could advance a
+ * pending policy but a payout — and the on-chain rule is what changed;
+ * this only selects the rows the program will accept.
+ */
+function abandonedClaimCutoff(now: Date, claimSubmittedAt: Date, triggerType: number): boolean {
+  const settleBy =
+    claimSubmittedAt.getTime() +
+    (lockSecondsFor(triggerType) + CLAIM_RESOLUTION_GRACE_SECONDS) * 1000;
+  return now.getTime() >= settleBy;
+}
+
 async function runOnce(db: Database, ctx: CovanticProgram): Promise<void> {
   const now = new Date();
-  const stuck = await db
+  const active = await db
     .select({
       policyId: policies.policyId,
       holderAddress: policies.holderAddress,
@@ -95,6 +135,35 @@ async function runOnce(db: Database, ctx: CovanticProgram): Promise<void> {
     .where(and(eq(policies.state, PolicyState.Active), lt(policies.expiryTime, now)))
     .orderBy(asc(policies.expiryTime))
     .limit(BATCH_LIMIT);
+
+  // Pending claims the chain will let go of. The lock and grace are checked
+  // here per trigger, since a query cannot express "expiry plus a
+  // trigger-dependent lock" cheaply; the program re-checks both anyway.
+  const pendingCandidates = await db
+    .select({
+      policyId: policies.policyId,
+      holderAddress: policies.holderAddress,
+      expiryTime: policies.expiryTime,
+      claimSubmittedAt: policies.claimSubmittedAt,
+      triggerType: policies.triggerType,
+    })
+    .from(policies)
+    .where(and(eq(policies.state, PolicyState.ClaimPending), lt(policies.expiryTime, now)))
+    .orderBy(asc(policies.expiryTime))
+    .limit(BATCH_LIMIT);
+  const abandoned = pendingCandidates.filter(
+    (row) =>
+      row.claimSubmittedAt !== null &&
+      abandonedClaimCutoff(now, row.claimSubmittedAt, row.triggerType ?? 0),
+  );
+
+  const stuck = [...active, ...abandoned].slice(0, BATCH_LIMIT);
+  if (abandoned.length > 0) {
+    logger.warn(
+      { count: abandoned.length, policyIds: abandoned.map((r) => r.policyId) },
+      'Expiry crank: closing pending claims that outlived their lock and grace',
+    );
+  }
 
   if (stuck.length === 0) return;
   if (stuck.length >= STUCK_WARN_THRESHOLD) {

@@ -1,9 +1,7 @@
 import { Queue, Worker } from 'bullmq';
 import type Redis from 'ioredis';
 import { and, desc, eq, inArray } from 'drizzle-orm';
-import anchorPkg from '@coral-xyz/anchor';
 import { PublicKey } from '@solana/web3.js';
-import { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from '@solana/spl-token';
 import {
   DEMO_TX_SIGNATURE_PREFIX,
   LOCK_PERIODS,
@@ -19,16 +17,14 @@ import {
   type VerificationData,
   isPermanentlyParked,
   isTransientlyParked,
+  ProofKind,
 } from '@covantic/shared';
 
-// Anchor's ESM export of BN tripping up on named imports; pull from default.
-const { BN } = anchorPkg;
 import type { Connection } from '@solana/web3.js';
 import type { Database } from '../config/database.js';
 import type { AppConfig } from '../config/env.js';
 import { createSolanaConnection } from '../config/solana.js';
 import { getSolanaReader, type SolanaReader } from '../utils/solana-reader.js';
-import { fetchAnchorAccount } from '../utils/anchor-reader.js';
 import { claimEvidence, claims, policies } from '../db/schema.js';
 import { ADJUDICATOR_VERSION } from '../services/oracle/adjudicate.js';
 import { EXPLOIT_ADJUDICATOR_VERSION } from '../services/exploit/adjudicate.js';
@@ -909,7 +905,6 @@ async function executePayout(
   governanceProofPoster: GovernanceProofPoster,
   agentErrorProofPoster: AgentErrorProofPoster,
 ): Promise<void> {
-  const reader = getSolanaReader(config);
   const claim = await loadClaim(claimId, db);
   if (!claim) return;
   if (claim.status !== 'approved' && claim.status !== 'paying') {
@@ -1030,14 +1025,14 @@ async function executePayout(
           bundleHash: proofPlan.bundleHash,
         });
         break;
-      default:
-        payoutSig = await verifyAndPayoutOnChain(
-          programCtx,
-          reader,
-          policy.holderAddress,
-          BigInt(claim.policyId),
-          BigInt(payoutAmount),
-        );
+      default: {
+        // Every plan that reaches this switch is one of the four proven
+        // kinds; `unprovable` returned above. There is no unverified
+        // instruction to fall through to — `verify_and_payout` was removed
+        // from the program — so an unexpected kind is a bug, not a lane.
+        const unexpected: never = proofPlan;
+        throw new Error(`claim-keeper: unknown settlement plan ${JSON.stringify(unexpected)}`);
+      }
     }
 
     await db
@@ -1046,6 +1041,11 @@ async function executePayout(
         status: 'paid',
         payoutTxSignature: payoutSig,
         payoutAmount,
+        // Which proof settled it. Written here from the plan that was just
+        // executed; the indexer reconciles it from the evidence account the
+        // instruction created, so a claim paid outside this process still
+        // ends up labelled.
+        proofKind: proofKindOfPlan(proofPlan.kind),
         paidAt: new Date(),
         updatedAt: new Date(),
       })
@@ -1427,42 +1427,20 @@ async function submitClaimOnChain(
  */
 const SUBMIT_SIGNATURE_UNKNOWN = 'unknown:reconciled-from-chain';
 
-async function verifyAndPayoutOnChain(
-  ctx: CovanticProgram,
-  reader: SolanaReader,
-  holderAddress: string,
-  policyId: bigint,
-  payoutAmount: bigint,
-): Promise<string> {
-  const holder = new PublicKey(holderAddress);
-  const { config, vault, policy } = derivePdas(ctx.programId, holder, policyId);
-
-  // Config names the covered mint and never changes, so unlike the two
-  // write-reconciliation reads above it is safe on the pool.
-  const cfgAcc = await fetchAnchorAccount<{ usdcMint: PublicKey }>(
-    ctx,
-    reader,
-    'protocolConfig',
-    config.toBase58(),
-  );
-  if (!cfgAcc) throw new Error('verifyAndPayout: protocol config account not found');
-  const usdcMint = cfgAcc.usdcMint;
-  const vaultAta = getAssociatedTokenAddressSync(usdcMint, vault, true);
-  const holderAta = getAssociatedTokenAddressSync(usdcMint, holder);
-
-  return await (ctx.program.methods as any)
-    .verifyAndPayout(new BN(payoutAmount.toString()))
-    .accounts({
-      oracle: ctx.oracleKeypair!.publicKey,
-      config,
-      policy,
-      vault,
-      vaultTokenAccount: vaultAta,
-      holderTokenAccount: holderAta,
-      tokenProgram: TOKEN_PROGRAM_ID,
-    })
-    .rpc();
+/** The proof kind a settlement plan produces once it has paid. */
+function proofKindOfPlan(kind: 'proven_price' | 'proven_balance' | 'proven_authority' | 'proven_mandate'): ProofKind {
+  switch (kind) {
+    case 'proven_price':
+      return ProofKind.Price;
+    case 'proven_balance':
+      return ProofKind.Balance;
+    case 'proven_authority':
+      return ProofKind.Authority;
+    case 'proven_mandate':
+      return ProofKind.Mandate;
+  }
 }
+
 
 // ---------------------------------------------------------------------------
 // Claim helpers

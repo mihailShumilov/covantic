@@ -147,6 +147,12 @@ export const claims = pgTable(
     paidAt: timestamp('paid_at', { withTimezone: true }),
     submitTxSignature: varchar('submit_tx_signature', { length: 128 }),
     payoutTxSignature: varchar('payout_tx_signature', { length: 128 }),
+    /** Which on-chain proof settled the claim — `price`, `balance`,
+     *  `authority`, `mandate` — read from the evidence account the proof
+     *  instruction created, never from transaction logs. `unproven` marks a
+     *  claim paid before the unverified instruction was removed. Null while
+     *  unpaid. */
+    proofKind: varchar('proof_kind', { length: 16 }),
 
     lockExpiresAt: timestamp('lock_expires_at', { withTimezone: true }),
 

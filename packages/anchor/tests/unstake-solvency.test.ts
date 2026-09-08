@@ -265,7 +265,12 @@ describe.skipIf(!hasIdl)('unstake — solvency floor', () => {
       .rpc();
 
     await program.methods
-      .upsertAttestation(agent.publicKey, 0, new BN(3600), wideMandateHash(), new BN(0))
+      .upsertAttestation(agent.publicKey, 0, new BN(3600), wideMandateHash(), new BN(0), {
+        feedId: Array.from(new Uint8Array(32)),
+        subjectMint: PublicKey.default,
+        subjectDecimals: 0,
+        maxSubjectQuantity: new BN(0),
+      })
       .accountsPartial({
         oracle: oracle.publicKey,
         config,

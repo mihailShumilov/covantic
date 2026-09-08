@@ -44,7 +44,9 @@ import {
   derivePolicyPda,
   deriveAttestationPda,
   deriveAgentMandatePda,
+  deriveAuthorityCheckpointPda,
   deriveBalanceCheckpointPda,
+  derivePolicyPriceTermsPda,
 } from '@/hooks/useCovanticProgram';
 
 const SOLANA_ADDRESS_RE = SOLANA_ADDRESS_REGEX;
@@ -999,6 +1001,11 @@ function BuyPolicyForm({
           policy: policyPda,
           mandate: deriveAgentMandatePda(policyPda),
           checkpoint: deriveBalanceCheckpointPda(policyPda),
+          // Written by the purchase too: the first authority reading, which a
+          // governance payout later proves a departure from, and the price
+          // terms an oracle-manipulation claim is bounded by.
+          authorityCheckpoint: deriveAuthorityCheckpointPda(policyPda),
+          priceTerms: derivePolicyPriceTermsPda(policyPda),
           // The agent's covered account. `create_policy` reads it to check the
           // retention floor is one the holder currently satisfies, so an agent
           // with no USDC account cannot be insured — and the purchase fails

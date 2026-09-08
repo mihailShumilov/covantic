@@ -56,8 +56,11 @@ impl AgentMandate {
         // Sorted, so the same declared set hashes the same however a client
         // ordered it. An unsorted list would make the commitment depend on
         // form-field order.
-        let mut counterparties: Vec<[u8; 32]> =
-            self.allowed_counterparties.iter().map(|k| k.to_bytes()).collect();
+        let mut counterparties: Vec<[u8; 32]> = self
+            .allowed_counterparties
+            .iter()
+            .map(|k| k.to_bytes())
+            .collect();
         counterparties.sort_unstable();
         bytes.push(counterparties.len() as u8);
         for k in &counterparties {
@@ -216,7 +219,11 @@ pub(crate) fn write_mandate(
 ) -> Result<()> {
     let is_new = record.policy_id == 0 && record.effective_at == 0;
     let prev_max_single_outflow = if is_new { 0 } else { record.max_single_outflow };
-    let prev_min_retained_balance = if is_new { 0 } else { record.min_retained_balance };
+    let prev_min_retained_balance = if is_new {
+        0
+    } else {
+        record.min_retained_balance
+    };
     let prev_effective_at = if is_new { 0 } else { record.effective_at };
 
     record.policy_id = policy_id;
@@ -276,6 +283,7 @@ pub fn declare_agent_mandate_handler(
     let now = clock.unix_timestamp;
     let policy = &ctx.accounts.policy;
 
+    policy.assert_readable()?;
     require!(
         policy.state == InsurancePolicy::STATE_ACTIVE,
         CovanticError::PolicyNotActive

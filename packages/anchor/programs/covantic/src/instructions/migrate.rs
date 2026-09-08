@@ -3,7 +3,10 @@ use anchor_lang::system_program;
 
 use crate::constants::*;
 use crate::errors::CovanticError;
-use crate::state::{InsuranceVault, RiskAttestation, StakerPosition, LOSS_INDEX_SCALE};
+use crate::state::{
+    GovernanceBaseline, InsuranceVault, PolicyAuthorityCheckpoint, RiskAttestation, StakerPosition,
+    LOSS_INDEX_SCALE,
+};
 
 /// Grow an account written by the previous layout, and return whether it was
 /// already large enough.
@@ -122,7 +125,6 @@ pub fn migrate_staker_position_handler(ctx: Context<MigrateStakerPosition>) -> R
     Ok(())
 }
 
-
 /// One-time migration for an attestation written before the envelope was
 /// priced.
 ///
@@ -147,6 +149,77 @@ pub fn migrate_attestation_handler(ctx: Context<MigrateAttestation>) -> Result<(
         RiskAttestation::DISCRIMINATOR,
     )?;
     Ok(())
+}
+
+/// One-time migration for a governance baseline written before the whole
+/// predecessor declaration was retained.
+///
+/// `GovernanceBaseline` grew by the `prev_*` fields that let settlement
+/// reconstruct the declaration in force at claim time, and both
+/// `declare_governance_baseline` (`init_if_needed`) and
+/// `verify_and_payout_governance` deserialise the account before any
+/// constraint could resize it. Permissionless and value-free: the appended
+/// fields read as zero, which the predecessor view treats as "nothing
+/// declared" for that role — a degraded but honest predecessor for a baseline
+/// that had already been refreshed, and no predecessor at all otherwise.
+pub fn migrate_governance_baseline_handler(ctx: Context<MigrateGovernanceBaseline>) -> Result<()> {
+    grow_to(
+        &ctx.accounts.baseline,
+        &ctx.accounts.payer.to_account_info(),
+        ctx.accounts.system_program.key(),
+        GovernanceBaseline::LEN,
+        GovernanceBaseline::DISCRIMINATOR,
+    )?;
+    Ok(())
+}
+
+/// One-time migration for an authority checkpoint written before the
+/// predecessor's close authority was retained. Same reasoning as the baseline
+/// migration; the appended field reads as `None`.
+pub fn migrate_authority_checkpoint_handler(
+    ctx: Context<MigrateAuthorityCheckpoint>,
+) -> Result<()> {
+    grow_to(
+        &ctx.accounts.checkpoint,
+        &ctx.accounts.payer.to_account_info(),
+        ctx.accounts.system_program.key(),
+        PolicyAuthorityCheckpoint::LEN,
+        PolicyAuthorityCheckpoint::DISCRIMINATOR,
+    )?;
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct MigrateGovernanceBaseline<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+
+    /// CHECK: cannot be `Account<GovernanceBaseline>` — see `grow_to`. Pinned
+    /// by PDA seeds, and its discriminator is verified before it is resized.
+    #[account(mut, seeds = [GOVERNANCE_BASELINE_SEED, policy.key().as_ref()], bump)]
+    pub baseline: UncheckedAccount<'info>,
+
+    /// CHECK: only used to derive the baseline PDA above.
+    pub policy: UncheckedAccount<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct MigrateAuthorityCheckpoint<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+
+    /// CHECK: cannot be `Account<PolicyAuthorityCheckpoint>` — see `grow_to`.
+    /// Pinned by PDA seeds, and its discriminator is verified before it is
+    /// resized.
+    #[account(mut, seeds = [AUTHORITY_CHECKPOINT_SEED, policy.key().as_ref()], bump)]
+    pub checkpoint: UncheckedAccount<'info>,
+
+    /// CHECK: only used to derive the checkpoint PDA above.
+    pub policy: UncheckedAccount<'info>,
+
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]

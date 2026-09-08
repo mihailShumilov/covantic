@@ -30,6 +30,8 @@ pub fn checkpoint_balance_handler(ctx: Context<CheckpointBalance>) -> Result<()>
     let policy = &ctx.accounts.policy;
     let covered = &ctx.accounts.covered_token_account;
 
+    policy.assert_readable()?;
+
     // Expired and settled policies have nothing left to protect, and writing
     // checkpoints for them is rent spent on noise.
     require!(

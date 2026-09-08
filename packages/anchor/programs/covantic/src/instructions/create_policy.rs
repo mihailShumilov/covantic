@@ -4,12 +4,13 @@ use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
 use crate::constants::*;
 use crate::errors::CovanticError;
 use crate::events::PolicyCreated;
+use crate::instructions::checkpoint_authority::observe;
 use crate::instructions::declare_agent_mandate::{
     validate_mandate, write_mandate, AgentMandate, MandateMaturity,
 };
 use crate::state::{
-    InsurancePolicy, InsuranceVault, PolicyAgentMandate, PolicyBalanceCheckpoint, ProtocolConfig,
-    RiskAttestation,
+    InsurancePolicy, InsuranceVault, PolicyAgentMandate, PolicyAuthorityCheckpoint,
+    PolicyBalanceCheckpoint, PolicyPriceTerms, ProtocolConfig, RiskAttestation,
 };
 
 /// Create a new insurance policy.
@@ -81,10 +82,7 @@ pub fn create_policy_handler(
 
     // Tier comes from the oracle. No caller input, no self-selection.
     let risk_tier = attestation.tier;
-    require!(
-        risk_tier <= RISK_TIER_HIGH,
-        CovanticError::InvalidRiskTier
-    );
+    require!(risk_tier <= RISK_TIER_HIGH, CovanticError::InvalidRiskTier);
 
     // Check solvency allows this risk tier
     if risk_tier == RISK_TIER_HIGH && vault.solvency_ratio < SOLVENCY_CAUTION {
@@ -275,6 +273,38 @@ pub fn create_policy_handler(
     checkpoint.unix_timestamp = now;
     checkpoint.bump = ctx.bumps.checkpoint;
 
+    // The first authority reading, taken by the purchase itself, and it is
+    // the strongest reading the policy will ever hold: Anchor derived the
+    // covered account from `agent_address` with an ownership constraint, so
+    // the owner recorded here is the agent by construction. Every later
+    // reading that shows control somewhere else is then a transition this
+    // program witnessed from a state it verified — which is what a governance
+    // payout requires, and what a first reading taken *after* a takeover
+    // could never provide. No predecessor: there is nothing before the
+    // purchase for this policy to have insured.
+    let authority = &mut ctx.accounts.authority_checkpoint;
+    let reading = observe(&ctx.accounts.covered_token_account, &clock);
+    authority.policy_id = policy_id;
+    authority.covered_account = ctx.accounts.covered_token_account.key();
+    authority.record(
+        &reading,
+        ctx.accounts.covered_token_account.delegated_amount,
+        true,
+    );
+    authority.bump = ctx.bumps.authority_checkpoint;
+
+    // The asset an oracle-manipulation claim may be priced against, copied
+    // from the attestation the oracle signed and fixed for the life of the
+    // policy. See `PolicyPriceTerms` for why the oracle does not get to pick
+    // this at settlement.
+    let terms = &mut ctx.accounts.price_terms;
+    terms.policy_id = policy_id;
+    terms.holder = ctx.accounts.holder.key();
+    terms.feed_id = attestation.insured_feed_id;
+    terms.subject_mint = attestation.subject_mint;
+    terms.subject_decimals = attestation.subject_decimals;
+    terms.max_subject_quantity = attestation.max_subject_quantity;
+    terms.bump = ctx.bumps.price_terms;
 
     emit!(PolicyCreated {
         policy_id,
@@ -369,6 +399,27 @@ pub struct CreatePolicy<'info> {
     )]
     pub checkpoint: Box<Account<'info, PolicyBalanceCheckpoint>>,
 
+    /// The first authority reading, taken by the purchase. See the handler.
+    /// `init_if_needed` for the same reason as `checkpoint`.
+    #[account(
+        init_if_needed,
+        payer = holder,
+        space = PolicyAuthorityCheckpoint::LEN,
+        seeds = [AUTHORITY_CHECKPOINT_SEED, policy.key().as_ref()],
+        bump,
+    )]
+    pub authority_checkpoint: Box<Account<'info, PolicyAuthorityCheckpoint>>,
+
+    /// The price terms fixed for this policy, copied from the attestation.
+    #[account(
+        init_if_needed,
+        payer = holder,
+        space = PolicyPriceTerms::LEN,
+        seeds = [POLICY_PRICE_TERMS_SEED, policy.key().as_ref()],
+        bump,
+    )]
+    pub price_terms: Box<Account<'info, PolicyPriceTerms>>,
+
     /// The agent's covered account, read only to bound the retention floor.
     ///
     /// Derived by Anchor from `agent_address`, so a holder cannot point the
@@ -385,13 +436,18 @@ pub struct CreatePolicy<'info> {
     #[account(constraint = usdc_mint.key() == config.usdc_mint @ CovanticError::InvalidTokenAccount)]
     pub usdc_mint: Box<Account<'info, Mint>>,
 
-    /// Holder's USDC token account
+    /// Holder's USDC token account.
+    ///
+    /// Boxed, like everything else here: the purchase now initialises four
+    /// PDAs, and with these two token accounts on the stack `try_accounts`
+    /// overran the BPF frame by a few dozen bytes — which `anchor build`
+    /// reports and `cargo check` cannot.
     #[account(
         mut,
         constraint = holder_token_account.owner == holder.key(),
         constraint = holder_token_account.mint == config.usdc_mint,
     )]
-    pub holder_token_account: Account<'info, TokenAccount>,
+    pub holder_token_account: Box<Account<'info, TokenAccount>>,
 
     /// Vault's USDC token account
     #[account(
@@ -399,7 +455,7 @@ pub struct CreatePolicy<'info> {
         constraint = vault_token_account.owner == vault.key(),
         constraint = vault_token_account.mint == config.usdc_mint,
     )]
-    pub vault_token_account: Account<'info, TokenAccount>,
+    pub vault_token_account: Box<Account<'info, TokenAccount>>,
 
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,

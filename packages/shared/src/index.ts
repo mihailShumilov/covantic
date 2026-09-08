@@ -1,6 +1,12 @@
 // Types
-export type { Policy, CreatePolicyParams, PremiumQuote, QuoteErrorCode } from './types/policy.js';
-export { PolicyState, RiskTier, TriggerType } from './types/policy.js';
+export type {
+  Policy,
+  CreatePolicyParams,
+  PremiumQuote,
+  QuoteErrorCode,
+  InsurableTier,
+} from './types/policy.js';
+export { PolicyState, RiskTier, TriggerType, isInsurableTierValue } from './types/policy.js';
 
 export type { VaultStats, VaultSnapshot } from './types/vault.js';
 export { SolvencyStatus } from './types/vault.js';
@@ -33,6 +39,9 @@ export {
 export { agentMandateCommitment } from './mandate-commitment.js';
 export type { MandateEnvelope } from './mandate-commitment.js';
 
+export { governanceManifestCommitment } from './governance-manifest-commitment.js';
+export type { GovernanceManifestInput } from './governance-manifest-commitment.js';
+
 export type { StakerPositionResponse } from './types/staking.js';
 
 export type {
@@ -49,6 +58,9 @@ export {
   VaultEvent,
   MonitoringEventType,
   MonitoringSeverity,
+  AgentErrorBreachKind,
+  breachKindFromChain,
+  ProofKind,
   agentChannel,
 } from './types/events.js';
 
@@ -78,6 +90,7 @@ export {
   policyIdToBytes,
   GOVERNANCE_BASELINE_DELAY_SECONDS,
   GOVERNANCE_DRAIN_WINDOW_SECONDS,
+  CLAIM_RESOLUTION_GRACE_SECONDS,
   MAX_AUTHORITY_CHECKPOINT_AGE_SECONDS,
   MAX_CHECKPOINT_AGE_SECONDS,
   MANDATE_DECLARATION_DELAY_SECONDS,

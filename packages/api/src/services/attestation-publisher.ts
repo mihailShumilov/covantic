@@ -3,6 +3,11 @@ import { PublicKey, SystemProgram } from '@solana/web3.js';
 
 const { BN } = anchorPkg;
 import { ATTESTATION_MAX_VALIDITY_SECONDS, PDA_SEEDS, RiskTier } from '@covantic/shared';
+import {
+  emptyPriceTerms,
+  priceTermsToInstructionArg,
+  type AttestedPriceTermsInput,
+} from './price-terms.js';
 import { createCovanticProgram, type CovanticProgram } from '../utils/program.js';
 import type { AppConfig } from '../config/env.js';
 import { logger } from '../utils/logger.js';
@@ -53,6 +58,12 @@ interface OnChainAttestation {
   /** The envelope this attestation's premium was quoted for, hex. */
   mandateHash: string;
   envelopeFlatPremium: number;
+  /** The asset an oracle-manipulation claim may be priced against, hex feed
+   *  id plus its bound. All-zero feed means none was attested. */
+  insuredFeedIdHex: string;
+  subjectMint: string;
+  subjectDecimals: number;
+  maxSubjectQuantity: bigint;
 }
 
 /**
@@ -99,12 +110,18 @@ export class AttestationPublisher {
    * the arguments it is handed and refuses a mismatch, so an attestation
    * published for a generous envelope cannot be spent on a narrow one.
    * @param envelopeFlatPremium what that envelope costs, flat, in base units.
+   * @param priceTerms the feed, decimals and quantity bound an
+   * oracle-manipulation claim on a policy bought against this attestation may
+   * be settled with. `create_policy` copies them into `PolicyPriceTerms` and
+   * `verify_and_payout_v2` refuses evidence naming anything else. Empty when
+   * the agent has no priced habit to derive them from.
    */
   async ensureFresh(
     agentAddress: string,
     tier: RiskTier,
     mandateHash: Uint8Array,
     envelopeFlatPremium: number,
+    priceTerms: AttestedPriceTermsInput = emptyPriceTerms(),
   ): Promise<AttestationInfo> {
     if (tier === RiskTier.EXTREME) {
       throw new Error('Refusing to publish attestation for EXTREME tier');
@@ -142,11 +159,16 @@ export class AttestationPublisher {
     // stale attestation returned here would be one the purchase then rejects,
     // with nothing on the screen explaining why.
     const wantedHash = Buffer.from(mandateHash).toString('hex');
+    const wantedFeed = Buffer.from(priceTerms.feedId).toString('hex');
     if (
       existing &&
       existing.tier === tier &&
       existing.mandateHash === wantedHash &&
       existing.envelopeFlatPremium === envelopeFlatPremium &&
+      existing.insuredFeedIdHex === wantedFeed &&
+      existing.subjectMint === priceTerms.subjectMint.toBase58() &&
+      existing.subjectDecimals === priceTerms.subjectDecimals &&
+      existing.maxSubjectQuantity === priceTerms.maxSubjectQuantity &&
       Number(existing.expiresAt) > nowSec + REFRESH_THRESHOLD_SECONDS
     ) {
       return {
@@ -165,6 +187,10 @@ export class AttestationPublisher {
           new BN(validFor),
           Array.from(mandateHash),
           new BN(envelopeFlatPremium),
+          (() => {
+            const arg = priceTermsToInstructionArg(priceTerms);
+            return { ...arg, maxSubjectQuantity: new BN(arg.maxSubjectQuantity.toString()) };
+          })(),
         )
         .accounts({
           oracle: ctx.oracleKeypair!.publicKey,
@@ -237,6 +263,11 @@ export class AttestationPublisher {
         expiresAt: BigInt(raw.expiresAt.toString()),
         mandateHash: Buffer.from(raw.mandateHash ?? []).toString('hex'),
         envelopeFlatPremium: Number(raw.envelopeFlatPremium ?? 0),
+        insuredFeedIdHex: Buffer.from(raw.insuredFeedId ?? new Array(32).fill(0)).toString('hex'),
+        subjectMint:
+          (raw.subjectMint as PublicKey | undefined)?.toBase58() ?? PublicKey.default.toBase58(),
+        subjectDecimals: Number(raw.subjectDecimals ?? 0),
+        maxSubjectQuantity: BigInt(raw.maxSubjectQuantity?.toString() ?? '0'),
       };
     } catch (err) {
       if (err instanceof Error && /Account does not exist/i.test(err.message)) {

@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 
 /// Staker position in the insurance pool.
-/// PDA: seeds = [b"staker", staker.key().as_ref()]
+/// PDA: seeds = [STAKER_SEED, staker.key().as_ref()], where `STAKER_SEED` is `b"covantic_staker"` (see `constants.rs`).
 /// One account per staker.
 #[account]
 #[derive(InitSpace)]

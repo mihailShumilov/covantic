@@ -49,7 +49,7 @@ src/
     solvency-checker.ts   — Every 5min: on-chain vault read → solvency status
     analytics-aggregator.ts — Hourly: vault snapshot
     policy-indexer.ts     — Every 60s + on-boot: mirrors on-chain InsurancePolicy accounts into Postgres
-    claim-keeper.ts       — Subscribes to monitoring:alerts, drives oracle_submit_claim + verify_and_payout
+    claim-keeper.ts       — Subscribes to monitoring:alerts, drives oracle_submit_claim + the trigger's proof-verifying payout
     monitor-entry.ts      — Standalone entrypoint for the monitor container (prod)
   utils/
     helius.ts             — Helius enhanced-tx client (cluster-aware — pass SOLANA_NETWORK)

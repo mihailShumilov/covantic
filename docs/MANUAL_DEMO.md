@@ -48,7 +48,7 @@ deployed and the config PDA already exists.
 - `USDC_MINT` (written by `init:devnet` on first run)
 - `ORACLE_KEYPAIR_PATH=./keys/oracle-keypair.json` — the oracle signs
   `upsert_attestation` (before policy purchase) plus `oracle_submit_claim`
-  and `verify_and_payout` (claim pipeline).
+  and the trigger's proof-verifying payout instruction (claim pipeline).
 - `HELIUS_API_KEY`, `HELIUS_WEBHOOK_SECRET` (64+ chars). The webhook
   endpoint accepts either an HMAC-of-body signature **or** a static
   `Authorization: Bearer <secret>` — real Helius deliveries use the
@@ -249,9 +249,11 @@ policy against that address in §4, the flow is:
    - Runs the synthetic verifier (simulated events bypass the Helius path).
    - Calls **`oracle_submit_claim`** signed by the oracle keypair →
      on-chain submit tx.
-   - After the trigger's lock period (`exploit=0s`, `oracle=1h`, `error=6h`,
-     `gov=2h`), calls **`verify_and_payout`** → on-chain USDC transfer
-     to the holder ATA.
+   - After the trigger's lock period (`exploit=1h`, `oracle=1h`, `error=6h`,
+     `gov=2h`; 30 s on a `devnet-fast-lock` build), calls the trigger's
+     **proof instruction** — `verify_and_payout_exploit` for a drain,
+     `verify_and_payout_agent_error` for a mandate breach — which re-derives
+     the bound on chain → on-chain USDC transfer to the holder ATA.
 5. `/claims` shows the row moving `pending → verifying → approved → paid`
    in real time (WebSocket `claims:feed`). Each step broadcasts immediately;
    no refresh required.
@@ -382,8 +384,9 @@ After a claim pays out, the originating policy on `/dashboard` shows:
 - Your Phantom USDC balance reflects the new coverage transfer.
 
 Confirm the on-chain side: open the policy's PDA in the explorer; the tail
-of its tx list includes `oracle_submit_claim` and `verify_and_payout` (from
-the oracle authority), and an SPL token transfer of the payout amount.
+of its tx list includes `oracle_submit_claim` and a `verify_and_payout_*`
+proof instruction (from the oracle authority), and an SPL token transfer of
+the payout amount.
 
 ### /fleet
 
@@ -497,7 +500,7 @@ rm -f keys/fleet.json keys/agents/fleet-*.json keys/fleet-holder.json
 | Claim-keeper (auto-claim pipeline) | `packages/api/src/workers/claim-keeper.ts` |
 | `upsert_attestation` instruction (oracle-only) | `packages/anchor/programs/covantic/src/instructions/upsert_attestation.rs` |
 | `create_policy` (reads attestation, no client-supplied tier) | `packages/anchor/programs/covantic/src/instructions/create_policy.rs` |
-| `oracle_submit_claim` / `verify_and_payout` | `packages/anchor/programs/covantic/src/instructions/{oracle_submit_claim,verify_and_payout}.rs` |
+| `oracle_submit_claim` / proof-verifying payouts | `packages/anchor/programs/covantic/src/instructions/{oracle_submit_claim,verify_and_payout_v2,verify_and_payout_exploit,verify_and_payout_governance,verify_and_payout_agent_error}.rs` |
 | WebSocket `/ws` (`claims:feed`, `vault:stats`, `monitoring:alerts`) | `packages/api/src/index.ts`, `services/notification-service.ts` |
 | Agent wallet CLI | `packages/api/scripts/agent-wallet.ts` (`pnpm agent:{create,fund,trigger}`) |
 | Fleet CLI | `packages/api/scripts/fleet-{bootstrap,start,status}.ts` |

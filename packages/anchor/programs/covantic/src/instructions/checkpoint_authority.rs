@@ -5,7 +5,7 @@ use anchor_spl::token::{Mint, Token, TokenAccount};
 use crate::constants::*;
 use crate::errors::CovanticError;
 use crate::events::AuthorityCheckpointed;
-use crate::state::{InsurancePolicy, PolicyAuthorityCheckpoint, ProtocolConfig};
+use crate::state::{AuthorityReading, InsurancePolicy, PolicyAuthorityCheckpoint, ProtocolConfig};
 
 /// Record who controls the covered account, right now, as read by this
 /// program.
@@ -13,7 +13,10 @@ use crate::state::{InsurancePolicy, PolicyAuthorityCheckpoint, ProtocolConfig};
 /// Permissionless, on the same reasoning as `checkpoint_balance`: a record
 /// only the oracle could write would put the oracle back in charge of the
 /// facts that are supposed to constrain it. Anyone may call this; nobody can
-/// influence what it records.
+/// influence what it records — and, since the predecessor only moves when
+/// control actually changes, nobody can erase what it recorded either.
+/// Checkpointing a seized or frozen account a hundred times leaves the
+/// reading from before the seizure or freeze exactly where it was.
 ///
 /// **Why this cannot reuse `associated_token::authority`, which is the
 /// obvious thing to write and is wrong.** `checkpoint_balance` derives the
@@ -43,6 +46,7 @@ pub fn checkpoint_authority_handler(ctx: Context<CheckpointAuthority>) -> Result
     let policy = &ctx.accounts.policy;
     let covered = &ctx.accounts.covered_token_account;
 
+    policy.assert_readable()?;
     require!(
         policy.state == InsurancePolicy::STATE_ACTIVE
             || policy.state == InsurancePolicy::STATE_CLAIM_PENDING,
@@ -52,39 +56,11 @@ pub fn checkpoint_authority_handler(ctx: Context<CheckpointAuthority>) -> Result
     let checkpoint = &mut ctx.accounts.checkpoint;
     let is_new = checkpoint.policy_id == 0 && checkpoint.slot == 0;
 
-    let observed_owner = covered.owner;
-    let observed_delegate: Option<Pubkey> = covered.delegate.into();
-    let observed_close_authority: Option<Pubkey> = covered.close_authority.into();
-    let observed_frozen = covered.is_frozen();
-
-    let prev_owner = if is_new { observed_owner } else { checkpoint.owner };
-    let prev_delegate = if is_new { observed_delegate } else { checkpoint.delegate };
-    let prev_frozen = if is_new { observed_frozen } else { checkpoint.frozen };
-    let prev_amount = if is_new { covered.amount } else { checkpoint.amount };
-    let prev_slot = if is_new { clock.slot } else { checkpoint.slot };
-    let prev_unix_timestamp = if is_new {
-        clock.unix_timestamp
-    } else {
-        checkpoint.unix_timestamp
-    };
+    let observed = observe(covered, &clock);
 
     checkpoint.policy_id = policy.policy_id;
     checkpoint.covered_account = covered.key();
-    checkpoint.owner = observed_owner;
-    checkpoint.delegate = observed_delegate;
-    checkpoint.delegated_amount = covered.delegated_amount;
-    checkpoint.close_authority = observed_close_authority;
-    checkpoint.frozen = observed_frozen;
-    checkpoint.amount = covered.amount;
-    checkpoint.slot = clock.slot;
-    checkpoint.unix_timestamp = clock.unix_timestamp;
-
-    checkpoint.prev_owner = prev_owner;
-    checkpoint.prev_delegate = prev_delegate;
-    checkpoint.prev_frozen = prev_frozen;
-    checkpoint.prev_amount = prev_amount;
-    checkpoint.prev_slot = prev_slot;
-    checkpoint.prev_unix_timestamp = prev_unix_timestamp;
+    checkpoint.record(&observed, covered.delegated_amount, is_new);
     checkpoint.bump = ctx.bumps.checkpoint;
 
     emit!(AuthorityCheckpointed {
@@ -99,6 +75,20 @@ pub fn checkpoint_authority_handler(ctx: Context<CheckpointAuthority>) -> Result
     });
 
     Ok(())
+}
+
+/// Read the control fields off a token account. Shared with `create_policy`,
+/// which writes the first reading at purchase, so both write the same shape.
+pub(crate) fn observe(covered: &TokenAccount, clock: &Clock) -> AuthorityReading {
+    AuthorityReading {
+        owner: covered.owner,
+        delegate: covered.delegate.into(),
+        close_authority: covered.close_authority.into(),
+        frozen: covered.is_frozen(),
+        amount: covered.amount,
+        slot: clock.slot,
+        unix_timestamp: clock.unix_timestamp,
+    }
 }
 
 #[derive(Accounts)]

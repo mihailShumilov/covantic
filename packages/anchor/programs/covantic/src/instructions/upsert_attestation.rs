@@ -3,7 +3,7 @@ use anchor_lang::prelude::*;
 use crate::constants::*;
 use crate::errors::CovanticError;
 use crate::events::AttestationUpserted;
-use crate::state::{ProtocolConfig, RiskAttestation};
+use crate::state::{AttestedPriceTerms, ProtocolConfig, RiskAttestation};
 
 /// Publish or refresh a risk attestation for an agent. Only the oracle
 /// authority configured in ProtocolConfig may sign this instruction, so the
@@ -19,6 +19,7 @@ pub fn upsert_attestation_handler(
     valid_for_seconds: i64,
     mandate_hash: [u8; 32],
     envelope_flat_premium: u64,
+    price_terms: AttestedPriceTerms,
 ) -> Result<()> {
     // An attestation that commits to no envelope prices no deductible.
     // `create_policy` refuses one, and refusing it here too means the failure
@@ -27,6 +28,10 @@ pub fn upsert_attestation_handler(
         mandate_hash != [0u8; 32],
         CovanticError::InvalidAttestationValidity
     );
+    // Either no oracle-manipulation terms at all, or a complete set. A feed
+    // with no quantity bound, or a bound with no feed, is refused here rather
+    // than interpreted at settlement.
+    price_terms.validate()?;
     // No bound here on purpose: the flat premium is bounded by the coverage,
     // and the coverage belongs to a policy that does not exist yet. The check
     // lives in `create_policy`, where both numbers are in hand.
@@ -56,6 +61,10 @@ pub fn upsert_attestation_handler(
     att.mandate_hash = mandate_hash;
     att.envelope_flat_premium = envelope_flat_premium;
     att.bump = ctx.bumps.attestation;
+    att.insured_feed_id = price_terms.feed_id;
+    att.subject_mint = price_terms.subject_mint;
+    att.subject_decimals = price_terms.subject_decimals;
+    att.max_subject_quantity = price_terms.max_subject_quantity;
 
     emit!(AttestationUpserted {
         agent,
