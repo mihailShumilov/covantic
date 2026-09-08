@@ -38,7 +38,7 @@ fi
 FEATURES=""
 for arg in "$@"; do
   case "$arg" in
-    --fast-lock) FEATURES="--features devnet-fast-lock" ;;
+    --fast-lock) FEATURES="-- --features devnet-fast-lock" ;;
   esac
 done
 CLUSTER_URL=$(solana config get json_rpc_url 2>/dev/null | awk '{print $NF}')
