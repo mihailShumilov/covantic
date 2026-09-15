@@ -18,6 +18,12 @@ src/
                             via `describeOnChainErr` (muted, expected outcome for `fail` rows).
     hire/page.tsx         — Commercial co-founder role. Server component; contact handles
                             live in the single `CONTACT` const at the top of the file.
+    security/page.tsx     — V12 audit result. Server component, linked from the footer only.
+                            Renders `data/security-audit.ts`; after a re-scan edit that file,
+                            never the page.
+  data/
+    security-audit.ts     — Findings, counts, open item and test run, copied from
+                            docs/audit/VERIFICATION-*.md. Counts derive from the rows.
   public/
     pitch.html            — Pitch deck. A self-contained export (own stage runtime, inlined
                             fonts/assets) served outside the app shell: next.config.ts

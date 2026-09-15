@@ -23,6 +23,9 @@ export function Footer() {
       <Link className="cov-mono" href="/hire" style={LINK_STYLE}>
         Hiring
       </Link>
+      <Link className="cov-mono" href="/security" style={LINK_STYLE}>
+        Security
+      </Link>
       {/* Served as a standalone export from public/ — not an app route, so <a>. */}
       <a className="cov-mono" href="/pitch" style={LINK_STYLE}>
         Pitch deck
