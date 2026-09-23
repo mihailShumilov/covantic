@@ -17,11 +17,14 @@ export function Footer() {
       }}
     >
       <span className="cov-mono" style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>
-        Covantic Protocol · Colosseum Frontier 2026
+        Covantic Protocol
       </span>
       <span style={{ flex: 1 }} />
       <Link className="cov-mono" href="/hire" style={LINK_STYLE}>
         Hiring
+      </Link>
+      <Link className="cov-mono" href="/tech" style={LINK_STYLE}>
+        Tech details
       </Link>
       <Link className="cov-mono" href="/security" style={LINK_STYLE}>
         Security

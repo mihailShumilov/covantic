@@ -18,6 +18,10 @@ src/
                             via `describeOnChainErr` (muted, expected outcome for `fail` rows).
     hire/page.tsx         — Commercial co-founder role. Server component; contact handles
                             live in the single `CONTACT` const at the top of the file.
+    tech/page.tsx         — Plain-language tech details: risk scorer, payout detection, payout,
+                            staking. Server component, linked from the footer only. Its numbers
+                            are copied from the code (sources listed at the top of the file);
+                            update them when a constant changes.
     security/page.tsx     — V12 audit result. Server component, linked from the footer only.
                             Renders `data/security-audit.ts`; after a re-scan edit that file,
                             never the page.
