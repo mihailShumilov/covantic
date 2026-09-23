@@ -2,16 +2,16 @@
 
 **The coverage primitive for autonomous agents.**
 
-Covantic is the first parametric insurance protocol for AI agents on Solana. Agents purchase coverage before DeFi operations. When a covered event occurs — exploit, oracle manipulation, critical error — the protocol verifies the claim on-chain and pays out instantly. No human review. No paperwork.
+Covantic is the first parametric insurance protocol for AI agents on Solana. Agents purchase coverage before DeFi operations. When a covered event occurs — exploit, oracle manipulation, critical error — the protocol proves the loss on-chain and pays out in USDC after a short lock period. No paperwork. A claim the program cannot prove goes to a reviewer, never to an automatic rejection.
 
 > Built for [Colosseum Frontier Hackathon](https://colosseum.org) — April–May 2026
 
 ## How It Works
 
-1. **Assess** — AI Risk Scorer analyzes 7 on-chain factors to assign a tier (LOW / MEDIUM / HIGH / EXTREME-uninsurable)
+1. **Assess** — AI Risk Scorer weighs 15 on-chain signals from the agent's last 100 transactions to assign a tier (LOW / MEDIUM / HIGH / EXTREME-uninsurable)
 2. **Attest** — The oracle signs an on-chain `RiskAttestation` PDA for the agent; `create_policy` reads the tier from it so buyers cannot self-select a cheaper tier
 3. **Insure** — Holder buys a policy on-chain; premium auto-calculated from the attested tier
-4. **Monitor** — Helius webhooks detect anomalies on insured agent addresses; the claim-keeper drives submit + payout
+4. **Monitor** — a sweep over every insured agent (every 2 minutes, over the RPC pool) plus Helius webhooks detect anomalies; the claim-keeper drives submit + payout
 5. **Payout** — Trigger fires → `oracle_submit_claim` → lock period → the trigger's proof instruction (`verify_and_payout_v2`, `_exploit`, `_governance` or `_agent_error`) re-derives the bound on chain → USDC transferred to holder's ATA
 
 ## Quick Start
@@ -37,7 +37,7 @@ agent fleet, see [`docs/MANUAL_DEMO.md`](docs/MANUAL_DEMO.md).
 
 ```
 packages/
-  anchor/   — Solana program (Rust, Anchor 1.1.2)
+  anchor/   — Solana program (Rust, Anchor 1.0.2)
   api/      — Backend (Fastify 5, Drizzle ORM, BullMQ)
   web/      — Frontend (Next.js 16, React 19)
   shared/   — Cross-package types, constants, utilities
@@ -45,27 +45,30 @@ packages/
 
 ## Tech Stack
 
-Solana (Anchor 1.1.2) · Next.js 16 · Fastify 5 · PostgreSQL 18 · Helius · Pyth · Solana Agent Kit
+Solana (Anchor 1.0.2) · Next.js 16 · Fastify 5 · PostgreSQL 18 · Helius · Pyth · Solana Agent Kit
 
 ## Coverage Triggers
 
 | Trigger                | Condition                                                       | Lock Period |
 | ---------------------- | --------------------------------------------------------------- | ----------- |
-| Smart Contract Exploit | Balance drop >50% in single slot                                | 1 hour      |
-| Oracle Manipulation    | Price deviation >5% from TWAP                                   | 1 hour      |
+| Smart Contract Exploit | Unauthorized movement; balance drop ≥50% against the checkpoint | 1 hour      |
+| Oracle Manipulation    | Fill priced ≥0.5% (50 bps) away from the Pyth price             | 1 hour      |
 | Critical Agent Error   | Movement outside the holder's declared mandate                  | 6 hours     |
 | Governance Attack      | Control of the agent leaves the holder's declared authority set | 2 hours     |
 
 The agent-error trigger covers a loss the agent caused with its _own_
 authority — which is exactly the case no forensic evidence can separate from a
 deliberate decision, because the difference lives in the holder's intent. So
-the holder declares it in advance: `pnpm mandate:declare` records the envelope
-the agent may operate in — how much it may move at once, over a window, and
-what balance it must never fall below — and the declaration matures an hour
-later. A claim is then proven by comparing the movement against the holder's
-own statement, and the vault pays the amount by which the movement _exceeded_
-it, so the declared cap acts as a deductible the holder authored. A loss inside
-the declared envelope is not covered.
+the envelope is fixed in advance. At purchase it is derived from the agent's
+own outflow history rather than chosen by the buyer: the single-transfer cap is
+5 × the 95th-percentile outflow (at least 5 observations are needed) and the
+window cap is 3 × that over an hour. The oracle commits to its hash in the
+attestation, `create_policy` writes it, and it is usable immediately. The
+holder can later widen it with `pnpm mandate:declare`; a re-declaration matures
+an hour later. A claim is proven by comparing the movement against the
+envelope, and the vault pays the whole amount by which the movement _exceeded_
+it (capped at coverage), so the cap acts as a deductible. A loss inside the
+envelope is not covered.
 
 The governance trigger covers three shapes: an account seized via
 `SetAuthority`, an account frozen (the balance never moves and the agent can
@@ -79,10 +82,14 @@ the takeover falls outside 30 minutes is not denied, it goes to a reviewer.
 
 | Tier    | Annual Premium | Score Range |
 | ------- | -------------- | ----------- |
-| LOW     | 1.0%           | 0 — 0.25    |
-| MEDIUM  | 2.5%           | 0.25 — 0.50 |
-| HIGH    | 5.0%           | 0.50 — 0.75 |
-| EXTREME | Declined       | 0.75+       |
+| LOW     | 1.0%           | 0 — 0.30    |
+| MEDIUM  | 2.5%           | 0.30 — 0.60 |
+| HIGH    | 5.0%           | 0.60 — 0.85 |
+| EXTREME | Declined       | above 0.85  |
+
+Premium = coverage × annual rate × duration ÷ 365 days (minimum 0.001 USDC).
+A plain-language walkthrough of scoring, detection, payout and staking is at
+[covantic.org/tech](https://covantic.org/tech).
 
 ## Development
 

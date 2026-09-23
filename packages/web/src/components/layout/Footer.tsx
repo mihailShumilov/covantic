@@ -23,6 +23,9 @@ export function Footer() {
       <Link className="cov-mono" href="/hire" style={LINK_STYLE}>
         Hiring
       </Link>
+      <Link className="cov-mono" href="/tech" style={LINK_STYLE}>
+        Tech details
+      </Link>
       <Link className="cov-mono" href="/security" style={LINK_STYLE}>
         Security
       </Link>
