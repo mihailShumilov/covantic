@@ -41,7 +41,7 @@ src/
     claims.ts       — /api/claims[/:id]
     vault.ts        — /api/vault/stats, /api/vault/history, /api/protocol/overview
     staking.ts      — /api/staking/:address
-    monitoring.ts   — /api/monitoring/{events,webhook,metrics}, /api/demo/simulate-exploit
+    monitoring.ts   — /api/monitoring/{events,webhook,metrics,sweep}, /api/demo/simulate-exploit
     fleet.ts        — /api/fleet
   workers/
     oracle-watcher.ts     — Every 2min: re-screens insured agents' recent txs (webhooks drop)

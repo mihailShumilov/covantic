@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
+import { Queue } from 'bullmq';
 import { and, desc, eq, lt, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
@@ -19,6 +20,11 @@ import { getSolanaReader } from '../utils/solana-reader.js';
 import { logger } from '../utils/logger.js';
 import { syntheticAllowed } from '../services/synthetic-gate.js';
 import { demoSimulationRateLimit } from '../middleware/rate-limit.js';
+import { EXPLOIT_WATCHER_QUEUE } from '../workers/exploit-watcher.js';
+
+/** The floor `EXPLOIT_SWEEP_INTERVAL_MS` already enforces. An on-demand sweep
+ *  must not buy a cadence the configuration itself refuses. */
+const ON_DEMAND_SWEEP_MIN_GAP_MS = 5_000;
 
 /** Stripped-down shape we require from the Helius enhanced-transaction
  *  payload. Everything else is ignored, including fields we'd otherwise
@@ -233,6 +239,47 @@ export async function monitoringRoutes(app: FastifyInstance) {
       },
       now: now.toISOString(),
     });
+  });
+
+  /**
+   * POST /api/monitoring/sweep — queue one sweep now instead of at the next tick.
+   *
+   * Detection is a pull, and on the public endpoint it runs every two minutes
+   * because a shorter cadence spends the rate limit. That is the right trade
+   * for a detector and the wrong one for an audience watching a dashboard, so
+   * this queues the same job the scheduler does, once. Nothing about a verdict
+   * or a payout changes — only when the sweep looks.
+   *
+   * Unauthenticated, which is why it can do so little: it carries no body,
+   * names no agent, and is throttled for everyone at once rather than per
+   * caller, so the worst a flood buys is the fastest cadence the configuration
+   * would have accepted anyway. Not served on mainnet, where the interval is
+   * an operator's decision and nobody else's.
+   *
+   * The queue lives in Redis, so this works from a process that runs no
+   * workers: the monitor picks the job up.
+   */
+  const sweepQueue = new Queue(EXPLOIT_WATCHER_QUEUE, { connection: app.redis });
+  app.post('/api/monitoring/sweep', async (_request, reply) => {
+    if (app.config.SOLANA_NETWORK === 'mainnet-beta') {
+      return reply.status(404).send({ error: 'Not found' });
+    }
+    const acquired = await app.redis.set(
+      'monitoring:sweep:on-demand',
+      '1',
+      'PX',
+      ON_DEMAND_SWEEP_MIN_GAP_MS,
+      'NX',
+    );
+    if (acquired !== 'OK') {
+      return reply.status(429).send({ error: 'A sweep was queued moments ago.' });
+    }
+    await sweepQueue.add(
+      'sweep',
+      {},
+      { removeOnComplete: { count: 100 }, removeOnFail: { count: 100 } },
+    );
+    return reply.status(202).send({ queued: true });
   });
 
   /** POST /api/demo/simulate-exploit — Simulate an exploit for demo (development only).
