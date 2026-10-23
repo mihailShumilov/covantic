@@ -16,6 +16,7 @@
     "@types/node": "^22.0.0",
     "anchor-bankrun": "^0.4.0",
     "bn.js": "^5.2.1",
+    "fast-check": "^4.9.0",
     "solana-bankrun": "^0.4.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
