@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Parametric insurance protocol for AI agents on Solana. Colosseum Frontier Hackathon project.
+Parametric insurance protocol for AI agents on Solana.
 Agents buy insurance before DeFi operations; claims are auto-verified and paid out on-chain via oracle.
 
 ## Monorepo Structure
