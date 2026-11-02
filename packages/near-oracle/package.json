@@ -8,7 +8,14 @@
     "node": ">=22"
   },
   "scripts": {
-    "spike": "tsx --env-file=.env spike/run.ts"
+    "spike": "tsx --env-file=.env spike/run.ts",
+    "typecheck": "tsc --noEmit",
+    "near:deploy": "tsx --env-file=.env scripts/near-deploy.ts",
+    "agent": "tsx --env-file=.env agent/src/index.ts",
+    "contract:build": "bash scripts/build-contract.sh",
+    "near:top-up": "tsx --env-file=.env scripts/near-top-up.ts",
+    "demo:guardrail": "tsx --env-file=.env scripts/demo-guardrail.ts",
+    "demo:attack": "pnpm demo:guardrail"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
