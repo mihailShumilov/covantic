@@ -33,3 +33,11 @@ redisdata/
 
 # Audit scan artefacts — regenerate with audit-scan.sh
 docs/audit/scan/
+
+# NEAR integration: credentials and local demo state.
+packages/near-oracle/.env
+packages/near-oracle/.env.*
+!packages/near-oracle/.env.example
+packages/near-oracle/.near-credentials/
+packages/near-oracle/.state/
+.near-credentials/
