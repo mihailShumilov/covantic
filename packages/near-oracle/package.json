@@ -11,12 +11,18 @@
     "spike": "tsx --env-file=.env spike/run.ts"
   },
   "dependencies": {
+    "@coral-xyz/anchor": "^0.32.1",
+    "@covantic/shared": "workspace:^",
+    "@neardefi/shade-agent-js": "2.2.0",
+    "@pythnetwork/pyth-solana-receiver": "^0.16.0",
+    "@solana/spl-token": "^0.4.0",
     "@solana/web3.js": "^1.98.0",
     "near-api-js": "7.4.0"
   },
   "devDependencies": {
     "@types/node": "^22",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
   }
 }
