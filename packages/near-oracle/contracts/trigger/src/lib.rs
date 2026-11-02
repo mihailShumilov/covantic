@@ -189,8 +189,9 @@ fn base58(key: &Pubkey) -> String {
 
 #[near]
 impl Contract {
+    /// Deployment and this call share one atomic transaction from the owner,
+    /// so there is no window in which someone else could initialise the contract.
     #[init]
-    #[private]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         requires_tee: bool,
