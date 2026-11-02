@@ -1,0 +1,42 @@
+[package]
+name = "covantic-trigger"
+version = "0.1.0"
+edition = "2024"
+description = "NEAR agent contract that decides when the Covantic oracle key may sign"
+license = "MIT"
+repository = "https://github.com/mihailShumilov/covantic"
+
+[package.metadata.near.reproducible_build]
+image = "sourcescan/cargo-near:0.19.0-rust-1.86.0"
+image_digest = "sha256:772638e343baeeea24e49062c7d424274f3441452cc06ce97fc4e5695b19fecc"
+container_build_command = [
+    "cargo",
+    "near",
+    "build",
+    "non-reproducible-wasm",
+    "--locked",
+    "--no-abi",
+]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+bs58 = { version = "=0.5.1", default-features = false, features = ["alloc"] }
+hex = { version = "=0.4.3", default-features = false, features = ["alloc"] }
+near-sdk = "=5.26.1"
+serde = { version = "=1.0.228", features = ["derive"] }
+shade-attestation = "=0.2.0"
+
+[dev-dependencies]
+near-sdk = { version = "=5.26.1", features = ["unit-testing"] }
+
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto = true
+debug = false
+panic = "abort"
+overflow-checks = true
+
+[workspace]
