@@ -8,6 +8,7 @@ use super::*;
 const CAP: u64 = 1_000;
 const OPERATIONS: u32 = 2;
 const HASH: [u8; 32] = [5; 32];
+const COVANTIC_PROGRAM_BASE58: &str = "HrLqdNdxUJq4pgsL4NsUqzfYrGxR7Hy9PHGEeHnj3skL";
 const NOW_NS: u64 = 1_700_000_000_000_000_000;
 const HOUR_NS: u64 = 3_600 * 1_000_000_000;
 
@@ -328,4 +329,31 @@ fn init_refuses_a_bad_oracle_address() {
         U64(CAP),
         OPERATIONS,
     );
+}
+
+#[test]
+fn typescript_messages_pass_the_guardrails() {
+    let messages: std::collections::HashMap<String, String> =
+        near_sdk::serde_json::from_str(include_str!("testdata/ts_messages.json")).unwrap();
+    let config = crate::guardrails::GuardrailConfig {
+        oracle_address: [1; 32],
+        covantic_program: decode_pubkey(COVANTIC_PROGRAM_BASE58, "program"),
+    };
+    let inspect = |name: &str| {
+        crate::guardrails::inspect(&hex::decode(&messages[name]).unwrap(), &config).unwrap()
+    };
+
+    assert!(matches!(
+        inspect("submit_claim"),
+        crate::guardrails::Action::SubmitClaim { policy, trigger_type: 2 } if policy == [2; 32]
+    ));
+    assert!(matches!(
+        inspect("payout"),
+        crate::guardrails::Action::Payout { policy, payout_amount: 50_000_000, bundle_hash }
+            if policy == [2; 32] && bundle_hash == [0xab; 32]
+    ));
+    assert!(matches!(
+        inspect("attestation"),
+        crate::guardrails::Action::Attestation { agent } if agent == [3; 32]
+    ));
 }

@@ -15,7 +15,11 @@
     "contract:build": "bash scripts/build-contract.sh",
     "near:top-up": "tsx --env-file=.env scripts/near-top-up.ts",
     "demo:guardrail": "tsx --env-file=.env scripts/demo-guardrail.ts",
-    "demo:attack": "pnpm demo:guardrail"
+    "demo:attack": "pnpm demo:guardrail",
+    "pretest": "pnpm --filter @covantic/shared build",
+    "test": "pnpm test:contract && pnpm test:agent",
+    "test:contract": "cd contracts/trigger && cargo test",
+    "test:agent": "vitest run"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
