@@ -8,12 +8,11 @@ Last updated 2026-11-02.
 - [x] Create a testnet account, key in gitignored `.env`
 - [x] Derive the Ed25519 Solana address: `BuCiH1QgdMdmr4PAgWSQwwtfZhXSYnyRStNGZAzxixuN`
 - [x] MPC-sign memo messages, signature verified locally, latency measured
-- [ ] Land a memo transaction on devnet. **Blocked: the address needs devnet SOL**
-- [ ] Report explorer links
+- [x] Land memo transactions on devnet, confirmed with `getTransaction`
+- [x] Report explorer links
 
 ## Waiting on the owner
 
-- [ ] Fund the spike address
 - [ ] Decide: this branch or a separate repo
 - [ ] Decide: Pyth Hermes key or another trigger
 - [ ] Decide: `upsert_attestation` in the allowlist

@@ -32,6 +32,19 @@ Dry runs against `v1.signer-prod.testnet` on 2026-11-02, called directly from a 
 | 163 bytes | 3 | 4.8 to 5.6 s | 22 to 24 |
 | 1064 bytes | 2 | 5.4 to 5.6 s | 23 to 24 |
 
+Landed on devnet on 2026-11-02, fee payer and only signer `BuCiH1QgdMdmr4PAgWSQwwtfZhXSYnyRStNGZAzxixuN`:
+
+| Run | Sign | Landing | Blocks consumed | Transaction |
+| --- | --- | --- | --- | --- |
+| 1 | 4.9 s | 0.5 s | 22 of 150 | [4tALZvGM](https://explorer.solana.com/tx/4tALZvGMVHkv5MozKE8tVBwki4RFpxEZv9sUeaohoub2ovtMzYP1KbjLwfzCcy7k1SRSxiUfHXpkYLgwQgwFoyhE?cluster=devnet) |
+| 2 | 5.7 s | 0.7 s | 23 of 150 | [3Njj4raH](https://explorer.solana.com/tx/3Njj4raHziGzQ8NG8KPMGoa8panpbVgbRkysqWVxLR1yEtqojhkzFw2GuKj6iyMGmfy4mKcA5a5QXT2VJtdjexhH?cluster=devnet) |
+| 3 | 4.8 s | 0.7 s | 21 of 150 | [2HnEnz1S](https://explorer.solana.com/tx/2HnEnz1ScMtnVapHRNzX3UoAZMgQhQ6L4yyAkAbWTxqHzWAYbpx1NvdaVuPJ9AzpfNEqFHQRuvAwSh1VauCkPfrM?cluster=devnet) |
+
+All three were read back with `getTransaction`: `err` is null. A padded memo of about 560 bytes failed
+in simulation because the Memo program exhausted 200,000 compute units. Its log still shows the
+signature accepted (`Signed by BuCiH1Qg...`), so that failure is about the memo, not the signature.
+No large message has landed yet.
+
 Size has no visible effect. Signing uses about 16% of blockhash validity, so a durable nonce is not
 needed on this evidence. The path through the agent contract adds a hop and has not been measured.
 
