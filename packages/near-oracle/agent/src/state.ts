@@ -47,8 +47,8 @@ function reviveInputs(inputs: PredicateInputs): PredicateInputs {
 
 /**
  * Returns an earlier PAY decision for this trigger. Evidence is collected once
- * per decision, because a second collection has a different hash and the
- * contract treats a changed hash as a new payout.
+ * per decision, because a second collection can see different prices, and the
+ * contract treats a changed hash as a different payout.
  */
 export function loadPayDecision(stateDir: string, triggerTx: string) {
   const path = evidencePath(stateDir, triggerTx);

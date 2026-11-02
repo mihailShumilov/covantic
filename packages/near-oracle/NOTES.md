@@ -123,3 +123,17 @@ The testnet MPC has a `ForeignTx` domain, id `3`, and the contract README docume
 - Guardrail 6 uses declared coverage. The contract cannot read Solana, so the value is worker-supplied.
   `payout_amount` is in the instruction data and can be parsed instead.
 - The contract cannot judge blockhash age, so a signed message stays valid for its blockhash lifetime.
+
+## Build and deployment facts (verified 2026-11-02)
+
+- `near-sdk` 5.26.1 and `shade-attestation` 0.2.0 need Rust 1.86 and the shade template's `Cargo.lock`.
+  `rust-toolchain.toml` and the lockfile pin both.
+- Build with `pnpm contract:build`. A host build on macOS exits 0 and produces a contract that fails on
+  first call with `Link Error: unknown or invalid import`: Apple clang has no wasm backend, so `ring`'s C
+  code is missing and its symbols become imports. The build now runs in
+  `sourcescan/cargo-near:0.19.0-rust-1.86.0` and `scripts/check-wasm.ts` fails on any such import.
+- Contract storage is about 7.7 NEAR for 770 KB. One faucet account (10 NEAR) covers one deployment.
+- A deployment is one atomic transaction from the owner, so a failure refunds the funding. The contract
+  account receives no key.
+- The subject of a proof is the largest leg by USD value. A staged loss must sell the volatile asset:
+  when an agent overpays in USDC, USDC is the subject and there is no Pyth proof for it.

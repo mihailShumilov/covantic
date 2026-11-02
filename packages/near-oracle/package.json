@@ -19,7 +19,12 @@
     "pretest": "pnpm --filter @covantic/shared build",
     "test": "pnpm test:contract && pnpm test:agent",
     "test:contract": "cd contracts/trigger && cargo test",
-    "test:agent": "vitest run"
+    "test:agent": "vitest run",
+    "derive-address": "tsx --env-file=.env scripts/derive-address.ts",
+    "admin:set-oracle": "tsx --env-file-if-exists=.env scripts/admin-set-oracle.ts",
+    "demo:false-positive": "tsx --env-file-if-exists=.env scripts/demo-false-positive.ts",
+    "demo:payout": "tsx --env-file=.env scripts/demo-payout.ts",
+    "funder": "tsx --env-file-if-exists=.env scripts/show-funder.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",

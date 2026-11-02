@@ -47,6 +47,23 @@ export interface PayoutArgs {
   bundleHashHex: string;
 }
 
+export interface Mandate {
+  maxSingleOutflowRaw: bigint;
+  maxWindowOutflowRaw: bigint;
+  windowSeconds: bigint;
+  minRetainedBalanceRaw: bigint;
+}
+
+export interface CreatePolicyArgs {
+  holder: PublicKey;
+  agent: PublicKey;
+  usdcMint: PublicKey;
+  policyId: bigint;
+  coverageRaw: bigint;
+  durationSeconds: number;
+  mandate: Mandate;
+}
+
 export interface AttestationArgs {
   oracle: PublicKey;
   agent: PublicKey;
@@ -204,6 +221,48 @@ export class CovanticProgram {
         tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
       })
+      .instruction();
+  }
+
+  /** Buys cover. Signed by the holder, never by the oracle. */
+  createPolicy(args: CreatePolicyArgs) {
+    const vault = this.vaultAddress;
+    const policy = this.policyAddress(args.holder, args.policyId);
+    const child = (prefix: string) => this.policyChildAddress(prefix, policy);
+    return this.methods
+      .createPolicy!(bn(args.coverageRaw), bn(args.durationSeconds), args.agent, {
+        maxSingleOutflow: bn(args.mandate.maxSingleOutflowRaw),
+        maxWindowOutflow: bn(args.mandate.maxWindowOutflowRaw),
+        windowSeconds: bn(args.mandate.windowSeconds),
+        minRetainedBalance: bn(args.mandate.minRetainedBalanceRaw),
+        allowedCounterparties: [],
+        allowedPrograms: [],
+      })
+      .accountsStrict({
+        holder: args.holder,
+        config: this.configAddress,
+        vault,
+        attestation: this.attestationAddress(args.agent),
+        policy,
+        mandate: child(PDA_SEEDS.AGENT_MANDATE),
+        checkpoint: child(PDA_SEEDS.CHECKPOINT),
+        authorityCheckpoint: child(PDA_SEEDS.AUTHORITY_CHECKPOINT),
+        priceTerms: child(PDA_SEEDS.POLICY_PRICE_TERMS),
+        coveredTokenAccount: getAssociatedTokenAddressSync(args.usdcMint, args.agent),
+        usdcMint: args.usdcMint,
+        holderTokenAccount: getAssociatedTokenAddressSync(args.usdcMint, args.holder),
+        vaultTokenAccount: getAssociatedTokenAddressSync(args.usdcMint, vault, true),
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .instruction();
+  }
+
+  /** Admin only. Built here so the script that sends it stays a few lines. */
+  updateOracle(admin: PublicKey, oracle: PublicKey) {
+    return this.methods
+      .updateConfig!(oracle, null, null)
+      .accountsStrict({ admin, config: this.configAddress })
       .instruction();
   }
 
