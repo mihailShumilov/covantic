@@ -8,6 +8,7 @@
     "node": ">=22"
   },
   "scripts": {
+    "near:account": "tsx spike/create-account.ts",
     "spike": "tsx --env-file=.env spike/run.ts",
     "typecheck": "tsc --noEmit",
     "near:deploy": "tsx --env-file=.env scripts/near-deploy.ts",

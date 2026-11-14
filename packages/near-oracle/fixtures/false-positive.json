@@ -1,0 +1,406 @@
+{
+  "bundle": {
+    "version": "1.4.0+near.1",
+    "stage": "verify",
+    "triggerType": 2,
+    "txSignature": "4UxYmd66M7Wa4YgqThaNQX4vEaXaekpPBdHdAjBMUxou8mfNpywudD9Q9WVhA1TfrJP6JkEAnwiYhHTwXyAtNsby",
+    "agentAddress": "H3GD9F2LzMkLu6qcKUBRRUxc2yw9BgD3YYTgEAJnwqHz",
+    "coverageRaw": 50000000,
+    "slot": 522148897,
+    "blockTime": 1794650607,
+    "prices": [
+      {
+        "value": 75.925,
+        "conf": 0.015000000000000568,
+        "publishTime": 1794650610,
+        "slot": null,
+        "source": "binance",
+        "feedId": "SOLUSDT",
+        "raw": null
+      },
+      {
+        "value": 75.85,
+        "conf": 0.020000000000003126,
+        "publishTime": 1794650610,
+        "slot": null,
+        "source": "coinbase",
+        "feedId": "SOL-USD",
+        "raw": null
+      },
+      {
+        "value": 75.84,
+        "conf": 0.00999999999999801,
+        "publishTime": 1794650610,
+        "slot": null,
+        "source": "kraken",
+        "feedId": "SOLUSD",
+        "raw": null
+      },
+      {
+        "value": 75.93,
+        "conf": 0.020000000000003126,
+        "publishTime": 1794650610,
+        "slot": null,
+        "source": "okx",
+        "feedId": "SOL-USDT",
+        "raw": null
+      },
+      {
+        "value": 75.92,
+        "conf": 0.010000000000005116,
+        "publishTime": 1794650610,
+        "slot": null,
+        "source": "bybit",
+        "feedId": "SOLUSDT",
+        "raw": null
+      },
+      {
+        "value": 1.000765,
+        "conf": 0.000004999999999921734,
+        "publishTime": 1794650610,
+        "slot": null,
+        "source": "binance",
+        "feedId": "USDCUSDT",
+        "raw": null
+      },
+      {
+        "value": 0.99975,
+        "conf": 0.00004999999999999449,
+        "publishTime": 1794650610,
+        "slot": null,
+        "source": "kraken",
+        "feedId": "USDCUSD",
+        "raw": null
+      },
+      {
+        "value": 1.000765,
+        "conf": 0.000004999999999921734,
+        "publishTime": 1794650610,
+        "slot": null,
+        "source": "okx",
+        "feedId": "USDC-USDT",
+        "raw": null
+      },
+      {
+        "value": 1.00075,
+        "conf": 0.00004999999999999449,
+        "publishTime": 1794650610,
+        "slot": null,
+        "source": "bybit",
+        "feedId": "USDCUSDT",
+        "raw": null
+      }
+    ],
+    "windows": {
+      "consensus:SOL/USD": {
+        "feedId": "SOL/USD",
+        "source": "consensus",
+        "targetTime": 1794650607,
+        "before": null,
+        "after": null,
+        "anchor": {
+          "value": 75.92,
+          "conf": 0.04504746835443209,
+          "publishTime": 1794650610,
+          "slot": null,
+          "source": "consensus",
+          "feedId": "SOL/USD",
+          "raw": null
+        },
+        "skewSec": 3,
+        "contributors": [
+          {
+            "value": 75.925,
+            "conf": 0.015000000000000568,
+            "publishTime": 1794650610,
+            "slot": null,
+            "source": "binance",
+            "feedId": "SOLUSDT",
+            "raw": null
+          },
+          {
+            "value": 75.85,
+            "conf": 0.020000000000003126,
+            "publishTime": 1794650610,
+            "slot": null,
+            "source": "coinbase",
+            "feedId": "SOL-USD",
+            "raw": null
+          },
+          {
+            "value": 75.84,
+            "conf": 0.00999999999999801,
+            "publishTime": 1794650610,
+            "slot": null,
+            "source": "kraken",
+            "feedId": "SOLUSD",
+            "raw": null
+          },
+          {
+            "value": 75.93,
+            "conf": 0.020000000000003126,
+            "publishTime": 1794650610,
+            "slot": null,
+            "source": "okx",
+            "feedId": "SOL-USDT",
+            "raw": null
+          },
+          {
+            "value": 75.92,
+            "conf": 0.010000000000005116,
+            "publishTime": 1794650610,
+            "slot": null,
+            "source": "bybit",
+            "feedId": "SOLUSDT",
+            "raw": null
+          }
+        ],
+        "dispersion": 0.0011867088607595386,
+        "sourceCount": 5,
+        "missing": []
+      },
+      "consensus:USDC/USD": {
+        "feedId": "USDC/USD",
+        "source": "consensus",
+        "targetTime": 1794650607,
+        "before": null,
+        "after": null,
+        "anchor": {
+          "value": 1.0007575,
+          "conf": 0.0005080114341084656,
+          "publishTime": 1794650610,
+          "slot": null,
+          "source": "consensus",
+          "feedId": "USDC/USD",
+          "raw": null
+        },
+        "skewSec": 3,
+        "contributors": [
+          {
+            "value": 1.000765,
+            "conf": 0.000004999999999921734,
+            "publishTime": 1794650610,
+            "slot": null,
+            "source": "binance",
+            "feedId": "USDCUSDT",
+            "raw": null
+          },
+          {
+            "value": 0.99975,
+            "conf": 0.00004999999999999449,
+            "publishTime": 1794650610,
+            "slot": null,
+            "source": "kraken",
+            "feedId": "USDCUSD",
+            "raw": null
+          },
+          {
+            "value": 1.000765,
+            "conf": 0.000004999999999921734,
+            "publishTime": 1794650610,
+            "slot": null,
+            "source": "okx",
+            "feedId": "USDC-USDT",
+            "raw": null
+          },
+          {
+            "value": 1.00075,
+            "conf": 0.00004999999999999449,
+            "publishTime": 1794650610,
+            "slot": null,
+            "source": "bybit",
+            "feedId": "USDCUSDT",
+            "raw": null
+          }
+        ],
+        "dispersion": 0.0010152538134532403,
+        "sourceCount": 4,
+        "missing": [
+          {
+            "source": "coinbase",
+            "reason": "no_data"
+          }
+        ]
+      }
+    },
+    "execution": {
+      "shape": "swap",
+      "sold": [
+        {
+          "mint": "SOL",
+          "amountUi": 0.2,
+          "decimals": 9
+        }
+      ],
+      "bought": [
+        {
+          "mint": "79yZ9PuqbzzdCp2TriBwL9oxPtdfkhuFAjkSR95oJt1B",
+          "amountUi": 13.6683,
+          "decimals": 6
+        }
+      ],
+      "feeLamports": 10000,
+      "droppedSolDustLamports": 0
+    },
+    "stagedVenue": true,
+    "collectedAt": 1794650608429,
+    "valuation": {
+      "sold": [
+        {
+          "mint": "SOL",
+          "symbol": "SOL",
+          "amountUi": 0.2,
+          "priceUsd": 75.92,
+          "confPerUnitUsd": 0.04504746835443209,
+          "valueUsd": 15.184000000000001,
+          "confUsd": 0.009009493670886418,
+          "feedKey": "SOL/USD",
+          "source": "consensus",
+          "parFallback": false,
+          "sourceCount": 5,
+          "dispersion": 0.0011867088607595386,
+          "contributors": [
+            "binance",
+            "coinbase",
+            "kraken",
+            "okx",
+            "bybit"
+          ]
+        }
+      ],
+      "bought": [
+        {
+          "mint": "79yZ9PuqbzzdCp2TriBwL9oxPtdfkhuFAjkSR95oJt1B",
+          "symbol": "USDC-mock",
+          "amountUi": 13.6683,
+          "priceUsd": 1.0007575,
+          "confPerUnitUsd": 0.0005080114341084656,
+          "valueUsd": 13.67865373725,
+          "confUsd": 0.00694365268482474,
+          "feedKey": "USDC/USD",
+          "source": "consensus",
+          "parFallback": false,
+          "sourceCount": 4,
+          "dispersion": 0.0010152538134532403,
+          "contributors": [
+            "binance",
+            "kraken",
+            "okx",
+            "bybit"
+          ]
+        }
+      ]
+    },
+    "signatures": {
+      "findings": [
+        {
+          "id": "flash_loan_present",
+          "present": false,
+          "weight": 0.3,
+          "detail": {
+            "note": "Borrow-and-repay inside one transaction is the usual funding for a squeeze."
+          }
+        },
+        {
+          "id": "reference_held_while_fill_diverged",
+          "present": true,
+          "weight": 0.4,
+          "detail": {
+            "fillDivergence": 0.09914029654570608,
+            "referenceTravel": 0.0004610115911485325,
+            "referenceDriftRatio": 0.004650092920954649,
+            "threshold": 0.5,
+            "note": "A real move shows up in every reference. A reference that never budged while the fill sat far away means the dislocation was local to the venue."
+          }
+        },
+        {
+          "id": "dispersion_spike",
+          "present": false,
+          "weight": 0.2,
+          "detail": {
+            "atBlockTime": 0.0011867088607595386,
+            "baseline": 0.001087381994493407,
+            "multiple": 3,
+            "note": "Sources agreeing before and after but not during is what one corrupted feed looks like."
+          }
+        },
+        {
+          "id": "oracle_conf_blowout",
+          "present": false,
+          "weight": 0.15,
+          "detail": {
+            "atBlockTime": 0.0005933544303797693,
+            "baseline": 0.0005598715836695723,
+            "note": "Publishers disagreeing among themselves at exactly this moment."
+          }
+        },
+        {
+          "id": "sandwich_adjacent",
+          "present": false,
+          "weight": 0.35,
+          "detail": {
+            "indexInBlock": 0,
+            "blockTxCount": 10,
+            "sharedWithPrevious": 0,
+            "sharedWithNext": 0,
+            "sharedBothSides": 0
+          }
+        },
+        {
+          "id": "orderbook_settlement",
+          "present": false,
+          "weight": 0,
+          "detail": {
+            "note": "A central-limit order book was invoked. Posting an order and settling an earlier one happen in the same transaction, so the net balance change is not necessarily a single fill and the implied price derived from it is not necessarily a price."
+          }
+        },
+        {
+          "id": "venue_depth_self_inflicted",
+          "present": true,
+          "weight": 0,
+          "detail": {
+            "depthShare": 0.666667,
+            "account": "768TBNkS8RZUEaVxDggZeXcjBb5jrN9B2dXb3Hbi3VvH",
+            "mint": "79yZ9PuqbzzdCp2TriBwL9oxPtdfkhuFAjkSR95oJt1B",
+            "reserveBeforeRaw": 20502450,
+            "takenRaw": 13668300,
+            "floor": 0.1,
+            "note": "Share of a single venue reserve consumed by this order. A large share means the fill price is the pool's curve answering the order's own size."
+          }
+        }
+      ],
+      "present": [
+        "reference_held_while_fill_diverged"
+      ],
+      "unevaluated": [
+        {
+          "id": "pool_displacement",
+          "reason": "needs_archival_pool_state"
+        },
+        {
+          "id": "liquidity_drain",
+          "reason": "needs_archival_pool_state"
+        }
+      ],
+      "score": 0.4,
+      "referenceVolatility": 0.00013169157832354001,
+      "referenceDriftRatio": 0.004650092920954649,
+      "sampledAt": [
+        1794650307,
+        1794650547
+      ]
+    }
+  },
+  "policy": {
+    "address": "none, the policy gate is not what refuses this",
+    "policyId": "0",
+    "holder": "De2dHwWaGfX5fR3tn7rF7oY1Aq319VhaAkhuW8kjUmot",
+    "agent": "H3GD9F2LzMkLu6qcKUBRRUxc2yw9BgD3YYTgEAJnwqHz",
+    "coverageRaw": 50000000,
+    "state": 0,
+    "startTime": 1794647008,
+    "expiryTime": 1794654208,
+    "terms": null
+  },
+  "sha256": "60242f2c71b81a9571c907c0dc146c7e489d41a7952e8f6dba6dc49c386f09a3"
+}
