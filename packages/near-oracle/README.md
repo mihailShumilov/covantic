@@ -95,7 +95,11 @@ Replays a swap recorded on devnet on 2026-11-14
 ([transaction](https://explorer.solana.com/tx/4UxYmd66M7Wa4YgqThaNQX4vEaXaekpPBdHdAjBMUxou8mfNpywudD9Q9WVhA1TfrJP6JkEAnwiYhHTwXyAtNsby?cluster=devnet)).
 The agent's order took two thirds of the venue's reserve, so it lost money without any manipulation.
 You see `verdict NO_PAY: slippage_explained_by_order_size` and `The contract was not called, so
-nothing was signed.` The recording is checked against its sha256 first. `--live` stages a fresh swap
+nothing was signed.`
+
+![demo:false-positive replay](docs/false-positive.png)
+
+The recording is checked against its sha256 first. `--live` stages a fresh swap
 and needs a funded devnet funder (`pnpm funder` prints its address).
 
 ### 3. Guardrails against a live contract on NEAR testnet
@@ -120,6 +124,8 @@ refused  second payout for the same policy: G5_POLICY_ALREADY_PAID: ...
 refused  caller is not a registered worker: G1_WORKER_NOT_REGISTERED
 refused  signing while paused: G7_CONTRACT_PAUSED
 ```
+
+![demo:guardrail against the testnet contract](docs/guardrail.png)
 
 The one valid request really is signed by the MPC network; it uses a made-up blockhash and policy, so
 it can never land on Solana.
